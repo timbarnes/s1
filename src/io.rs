@@ -1,5 +1,5 @@
 use crate::gc::{GcHeap, GcRef, SchemeValue, PortKind, new_port};
-use std::cell::RefCell;
+// use std::cell::RefCell;
 use std::io::{self, Write, Read, BufRead, BufReader, BufWriter};
 use std::collections::HashMap;
 use std::fs::File;
@@ -130,35 +130,36 @@ pub fn write_line(heap: &mut GcHeap, port_stack: &mut PortStack, file_table: &mu
 /// Read a single character from the current input port.
 pub fn read_char(heap: &mut GcHeap, port_stack: &mut PortStack, file_table: &mut FileTable) -> Option<char> {
     let port = port_stack.current();
-    match &port.borrow().value {
-        SchemeValue::Port(p) => match &p.kind {
+    match &mut port.borrow_mut().value {
+        SchemeValue::Port(p) => match &mut p.kind {
             PortKind::Stdin => {
                 let mut buf = [0u8; 1];
-                match io::stdin().read_exact(&mut buf) {
+                match std::io::stdin().read_exact(&mut buf) {
                     Ok(_) => Some(buf[0] as char),
-                    Err(_) => {
-                        if port_stack.pop() {
-                            return read_char(heap, port_stack, file_table);
-                        } else {
-                            return None;
-                        }
-                    }
+                    Err(_) => None,
                 }
             }
+            PortKind::Stdout => None,
             PortKind::File { .. } => {
                 if let Some(file_id) = p.file_id {
                     if let Some(file) = file_table.get(file_id) {
                         let mut buf = [0u8; 1];
                         match file.read_exact(&mut buf) {
                             Ok(_) => Some(buf[0] as char),
-                            Err(_) => {
-                                port_stack.pop();
-                                read_char(heap, port_stack, file_table)
-                            }
+                            Err(_) => None,
                         }
                     } else {
                         None
                     }
+                } else {
+                    None
+                }
+            }
+            PortKind::StringPort(s, pos) => {
+                if *pos < s.len() {
+                    let ch = s.chars().nth(*pos).unwrap();
+                    *pos += 1;
+                    Some(ch)
                 } else {
                     None
                 }
@@ -195,6 +196,10 @@ pub fn write_char(heap: &mut GcHeap, port_stack: &mut PortStack, file_table: &mu
         },
         _ => false,
     }
+}
+
+pub fn new_string_port(heap: &mut GcHeap, s: &str) -> GcRef {
+    new_port(heap, PortKind::StringPort(s.to_string(), 0), None)
 }
 
 #[cfg(test)]

@@ -18,6 +18,7 @@ pub enum PortKind {
     Stdin,
     Stdout,
     File { name: String, write: bool },
+    StringPort(String, usize),
 }
 
 #[derive(Clone, Debug)]
