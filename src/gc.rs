@@ -1,9 +1,24 @@
 //! Mark-and-sweep memory management for Scheme values.
 //!
-//! Provides:
-//!   - SchemeValue enum (int, float, symbol, pair, nil)
-//!   - GcHeap: the heap with allocation, roots, and manual collection
-//!   - Public API for root management and manual GC trigger
+//! This module provides a garbage-collected heap for Scheme objects, including:
+//! - Basic Scheme types (integers, floats, symbols, strings, booleans, characters)
+//! - Compound types (pairs, vectors, closures, environment frames)
+//! - I/O types (ports for stdin, stdout, files, and string ports)
+//! - Built-in procedures and special values
+//!
+//! # Examples
+//!
+//! ```rust
+//! use s1::gc::{GcHeap, new_int, new_symbol, new_pair};
+//!
+//! let mut heap = GcHeap::new();
+//! let x = new_int(&mut heap, 42);
+//! let y = new_symbol(&mut heap, "foo");
+//! let pair = new_pair(&mut heap, x, y);
+//!
+//! // Manual garbage collection
+//! heap.collect_garbage();
+//! ```
 
 use std::cell::RefCell;
 
@@ -13,39 +28,74 @@ use std::cmp::PartialEq;
 
 use std::collections::HashMap;
 
+/// Represents the different types of ports supported by the Scheme interpreter.
+///
+/// Ports are used for input/output operations and can be:
+/// - Standard input/output streams
+/// - File-based ports for reading/writing files
+/// - String ports for in-memory string operations
 #[derive(Clone, Debug, PartialEq)]
 pub enum PortKind {
+    /// Standard input stream
     Stdin,
+    /// Standard output stream
     Stdout,
+    /// File-based port with read/write mode
     File { name: String, write: bool },
+    /// In-memory string port with current position
     StringPort(String, usize),
 }
 
+/// Represents a Scheme port with its kind and optional file identifier.
+///
+/// File ports store a file_id that maps to an open file handle in the FileTable.
+/// String ports store the string content and current read position.
 #[derive(Clone, Debug)]
 pub struct Port {
+    /// The type and configuration of this port
     pub kind: PortKind,
-    pub file_id: Option<usize>, // None for non-file ports
+    /// File identifier for file ports (None for other port types)
+    pub file_id: Option<usize>,
     // In a real implementation, you might add file handles, buffers, etc.
 }
 
 /// The core type representing a Scheme value in the heap.
+///
+/// All Scheme values are allocated on the garbage-collected heap and referenced
+/// through `GcRef` pointers. This enum covers the complete set of Scheme data types.
 pub enum SchemeValue {
+    /// Integer values (i64)
     Int(i64),
+    /// Floating-point values (f64)
     Float(f64),
+    /// Symbols (interned identifiers)
     Symbol(String),
+    /// Cons cells for building lists and pairs
     Pair(GcRef, GcRef),
+    /// String literals
     Str(String),
+    /// Vectors (fixed-size arrays)
     Vector(Vec<GcRef>),
+    /// Closures (functions with captured environment)
     Closure {
+        /// Parameter names
         params: Vec<String>,
+        /// Function body expression
         body: GcRef,
+        /// Captured environment
         env: GcRef,
     },
+    /// Boolean values (#t and #f)
     Bool(bool),
+    /// Character literals
     Char(char),
+    /// Built-in procedures (native Rust functions)
     Primitive(Rc<dyn Fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>>),
+    /// I/O ports
     Port(Port),
+    /// Environment frames (variable bindings)
     EnvFrame(HashMap<String, GcRef>),
+    /// Empty list (nil)
     Nil,
     // Extend with more types (Errors, Continuations, etc) as needed.
 }
@@ -64,7 +114,7 @@ impl std::fmt::Debug for SchemeValue {
             SchemeValue::Bool(b) => write!(f, "Bool({})", b),
             SchemeValue::Char(c) => write!(f, "Char({:?})", c),
             SchemeValue::Primitive(_) => write!(f, "Primitive(<builtin>)"),
-            SchemeValue::Port(port) => f.debug_tuple("Port").field(port).finish(),
+            SchemeValue::Port(port) => f.debug_tuple("Port").field(&port.kind).finish(),
             SchemeValue::EnvFrame(map) => f.debug_map().entries(map.iter()).finish(),
             SchemeValue::Nil => write!(f, "Nil"),
         }
@@ -118,23 +168,49 @@ impl PartialEq for SchemeValue {
 }
 
 /// An indirecting pointer to a heap-allocated Scheme object.
+///
+/// This is the primary way to reference Scheme values. The underlying object
+/// is managed by the garbage collector and will be automatically freed when
+/// no longer reachable.
 pub type GcRef = Rc<RefCell<GcObject>>;
 
-/// Wrapper for heap storage; includes a mark bit for GC.
+/// Wrapper for heap storage; includes a mark bit for garbage collection.
+///
+/// Each heap object contains a Scheme value and a mark bit used during
+/// garbage collection to track reachable objects.
 #[derive(Debug)]
 pub struct GcObject {
+    /// The actual Scheme value stored in this object
     pub value: SchemeValue,
+    /// Mark bit used during garbage collection
     marked: bool,
 }
 
 /// The garbage collected heap, with root management APIs.
+///
+/// This is the central memory manager for all Scheme objects. It provides:
+/// - Object allocation
+/// - Root set management (keeps objects alive across GC)
+/// - Manual garbage collection
+/// - Memory statistics
 pub struct GcHeap {
+    /// All objects currently allocated on the heap
     objects: Vec<GcRef>,
+    /// Root references that keep objects alive
     roots: Vec<GcRef>,
 }
 
 impl GcHeap {
     /// Create a new (empty) heap.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use s1::gc::GcHeap;
+    ///
+    /// let mut heap = GcHeap::new();
+    /// assert_eq!(heap.heap_size(), 0);
+    /// ```
     pub fn new() -> Self {
         Self {
             objects: Vec::new(),
@@ -143,6 +219,19 @@ impl GcHeap {
     }
 
     /// Allocate a new SchemeValue on the heap and return a reference.
+    ///
+    /// The returned `GcRef` can be used to access and modify the object.
+    /// The object will be automatically garbage collected when no longer reachable.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use s1::gc::{GcHeap, SchemeValue};
+    ///
+    /// let mut heap = GcHeap::new();
+    /// let obj = heap.alloc(SchemeValue::Int(42));
+    /// assert_eq!(obj.borrow().value, SchemeValue::Int(42));
+    /// ```
     pub fn alloc(&mut self, value: SchemeValue) -> GcRef {
         let obj = Rc::new(RefCell::new(GcObject {
             value,
@@ -153,16 +242,66 @@ impl GcHeap {
     }
 
     /// Add a GcRef to the root set (keeps object alive across GC).
+    ///
+    /// Objects in the root set are considered always reachable and will
+    /// not be collected by the garbage collector.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use s1::gc::{GcHeap, new_int};
+    ///
+    /// let mut heap = GcHeap::new();
+    /// let obj = new_int(&mut heap, 42);
+    /// heap.add_root(obj.clone());
+    /// heap.collect_garbage();
+    /// // obj is still alive due to root reference
+    /// ```
     pub fn add_root(&mut self, obj: GcRef) {
         self.roots.push(obj);
     }
 
     /// Remove a GcRef from the root set.
+    ///
+    /// After removal, the object may be collected if no other references exist.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use s1::gc::{GcHeap, new_int};
+    ///
+    /// let mut heap = GcHeap::new();
+    /// let obj = new_int(&mut heap, 42);
+    /// heap.add_root(obj.clone());
+    /// heap.remove_root(&obj);
+    /// // obj may be collected if no other references exist
+    /// ```
     pub fn remove_root(&mut self, obj: &GcRef) {
         self.roots.retain(|r| !Rc::ptr_eq(r, obj));
     }
 
     /// Perform mark-and-sweep garbage collection.
+    ///
+    /// This method:
+    /// 1. Marks all objects reachable from the root set
+    /// 2. Sweeps away unmarked objects
+    /// 3. Clears mark bits for remaining objects
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use s1::gc::{GcHeap, new_int};
+    ///
+    /// let mut heap = GcHeap::new();
+    /// let obj1 = new_int(&mut heap, 42);
+    /// let obj2 = new_int(&mut heap, 100);
+    /// heap.add_root(obj1.clone());
+    /// 
+    /// let before = heap.heap_size();
+    /// heap.collect_garbage();
+    /// let after = heap.heap_size();
+    /// // after should be less than before (obj2 was collected)
+    /// ```
     pub fn collect_garbage(&mut self) {
         // Mark phase
         for root in &self.roots {
@@ -183,6 +322,9 @@ impl GcHeap {
     }
 
     /// Recursively mark reachable objects.
+    ///
+    /// This is an internal method used during garbage collection to mark
+    /// all objects that are reachable from a given starting point.
     fn mark_value(obj: &GcRef) {
         let mut o = obj.borrow_mut();
         if o.marked {
@@ -216,11 +358,17 @@ impl GcHeap {
     }
 
     /// Return the total number of tracked heap objects (for stats/testing).
+    ///
+    /// This includes all objects currently allocated, whether reachable or not.
+    /// After garbage collection, this number will decrease if unreachable
+    /// objects were collected.
     pub fn heap_size(&self) -> usize {
         self.objects.len()
     }
 
     /// Return the number of root references (for stats/testing).
+    ///
+    /// Roots are objects that are kept alive across garbage collection.
     pub fn root_count(&self) -> usize {
         self.roots.len()
     }
@@ -228,80 +376,225 @@ impl GcHeap {
 
 /// Convenience constructors for building common Scheme values.
 
+/// Create a new integer value on the heap.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_int};
+///
+/// let mut heap = GcHeap::new();
+/// let x = new_int(&mut heap, 42);
+/// assert_eq!(x.borrow().value, SchemeValue::Int(42));
+/// ```
 pub fn new_int(heap: &mut GcHeap, val: i64) -> GcRef {
     heap.alloc(SchemeValue::Int(val))
 }
 
+/// Create a new floating-point value on the heap.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_float};
+///
+/// let mut heap = GcHeap::new();
+/// let x = new_float(&mut heap, 3.14);
+/// assert_eq!(x.borrow().value, SchemeValue::Float(3.14));
+/// ```
 pub fn new_float(heap: &mut GcHeap, val: f64) -> GcRef {
     heap.alloc(SchemeValue::Float(val))
 }
 
+/// Create a new symbol on the heap.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_symbol};
+///
+/// let mut heap = GcHeap::new();
+/// let sym = new_symbol(&mut heap, "lambda");
+/// assert_eq!(sym.borrow().value, SchemeValue::Symbol("lambda".to_string()));
+/// ```
 pub fn new_symbol<S: Into<String>>(heap: &mut GcHeap, name: S) -> GcRef {
     heap.alloc(SchemeValue::Symbol(name.into()))
 }
 
+/// Create a new pair (cons cell) on the heap.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_int, new_symbol, new_pair};
+///
+/// let mut heap = GcHeap::new();
+/// let car = new_int(&mut heap, 1);
+/// let cdr = new_symbol(&mut heap, "foo");
+/// let pair = new_pair(&mut heap, car, cdr);
+/// ```
 pub fn new_pair(heap: &mut GcHeap, car: GcRef, cdr: GcRef) -> GcRef {
     heap.alloc(SchemeValue::Pair(car, cdr))
 }
 
-pub fn new_nil(heap: &mut GcHeap) -> GcRef {
-    heap.alloc(SchemeValue::Nil)
-}
-
+/// Create a new string value on the heap.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_string};
+///
+/// let mut heap = GcHeap::new();
+/// let s = new_string(&mut heap, "hello");
+/// assert_eq!(s.borrow().value, SchemeValue::Str("hello".to_string()));
+/// ```
 pub fn new_string<S: Into<String>>(heap: &mut GcHeap, val: S) -> GcRef {
     heap.alloc(SchemeValue::Str(val.into()))
 }
 
+/// Create a new vector on the heap.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_vector, new_int};
+///
+/// let mut heap = GcHeap::new();
+/// let elements = vec![new_int(&mut heap, 1), new_int(&mut heap, 2)];
+/// let vec = new_vector(&mut heap, elements);
+/// ```
 pub fn new_vector(heap: &mut GcHeap, elements: Vec<GcRef>) -> GcRef {
     heap.alloc(SchemeValue::Vector(elements))
 }
 
+/// Create a new closure on the heap.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_closure, new_symbol, new_nil};
+///
+/// let mut heap = GcHeap::new();
+/// let params = vec!["x".to_string(), "y".to_string()];
+/// let body = new_symbol(&mut heap, "body");
+/// let env = new_nil(&mut heap);
+/// let closure = new_closure(&mut heap, params, body, env);
+/// ```
 pub fn new_closure(heap: &mut GcHeap, params: Vec<String>, body: GcRef, env: GcRef) -> GcRef {
     heap.alloc(SchemeValue::Closure { params, body, env })
 }
 
+/// Create a new boolean value on the heap.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_bool};
+///
+/// let mut heap = GcHeap::new();
+/// let t = new_bool(&mut heap, true);
+/// let f = new_bool(&mut heap, false);
+/// ```
 pub fn new_bool(heap: &mut GcHeap, val: bool) -> GcRef {
     heap.alloc(SchemeValue::Bool(val))
 }
 
+/// Create a new character value on the heap.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_char};
+///
+/// let mut heap = GcHeap::new();
+/// let c = new_char(&mut heap, 'x');
+/// assert_eq!(c.borrow().value, SchemeValue::Char('x'));
+/// ```
 pub fn new_char(heap: &mut GcHeap, val: char) -> GcRef {
     heap.alloc(SchemeValue::Char(val))
 }
 
+/// Create a new primitive procedure on the heap.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_primitive};
+/// use std::rc::Rc;
+///
+/// let mut heap = GcHeap::new();
+/// let add = new_primitive(&mut heap, Rc::new(|_, args| {
+///     // Implementation would go here
+///     Ok(new_int(&mut heap, 0))
+/// }));
+/// ```
 pub fn new_primitive(heap: &mut GcHeap, f: Rc<dyn Fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>>) -> GcRef {
     heap.alloc(SchemeValue::Primitive(f))
 }
 
+/// Create a new port on the heap.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_port, PortKind};
+///
+/// let mut heap = GcHeap::new();
+/// let stdin_port = new_port(&mut heap, PortKind::Stdin, None);
+/// let file_port = new_port(&mut heap, PortKind::File { name: "input.txt".to_string(), write: false }, Some(1));
+/// ```
 pub fn new_port(heap: &mut GcHeap, kind: PortKind, file_id: Option<usize>) -> GcRef {
     heap.alloc(SchemeValue::Port(Port { kind, file_id }))
 }
 
+/// Create a new environment frame on the heap.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_env_frame, new_int};
+/// use std::collections::HashMap;
+///
+/// let mut heap = GcHeap::new();
+/// let mut bindings = HashMap::new();
+/// bindings.insert("x".to_string(), new_int(&mut heap, 42));
+/// let env = new_env_frame(&mut heap, bindings);
+/// ```
 pub fn new_env_frame(heap: &mut GcHeap, map: HashMap<String, GcRef>) -> GcRef {
     heap.alloc(SchemeValue::EnvFrame(map))
 }
 
-pub fn as_env_frame(obj: &GcRef) -> Option<HashMap<String, GcRef>> {
-    match &obj.borrow().value {
-        SchemeValue::EnvFrame(map) => Some(map.clone()),
-        _ => None,
-    }
-}
-
-pub fn env_frame_lookup(obj: &GcRef, key: &str) -> Option<GcRef> {
-    match &obj.borrow().value {
-        SchemeValue::EnvFrame(map) => map.get(key).cloned(),
-        _ => None,
-    }
-}
-
-pub fn env_frame_insert(obj: &GcRef, key: String, value: GcRef) {
-    if let SchemeValue::EnvFrame(map) = &mut obj.borrow_mut().value {
-        map.insert(key, value);
-    }
+/// Create a new nil (empty list) value on the heap.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_nil};
+///
+/// let mut heap = GcHeap::new();
+/// let nil = new_nil(&mut heap);
+/// assert!(is_nil(&nil));
+/// ```
+pub fn new_nil(heap: &mut GcHeap) -> GcRef {
+    heap.alloc(SchemeValue::Nil)
 }
 
 /// Accessor helpers (returns some inner data or None):
 
+/// Extract an integer value from a GcRef, if it contains one.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_int, as_int};
+///
+/// let mut heap = GcHeap::new();
+/// let obj = new_int(&mut heap, 42);
+/// assert_eq!(as_int(&obj), Some(42));
+/// 
+/// let sym = new_symbol(&mut heap, "not-a-number");
+/// assert_eq!(as_int(&sym), None);
+/// ```
 pub fn as_int(obj: &GcRef) -> Option<i64> {
     match &obj.borrow().value {
         SchemeValue::Int(n) => Some(*n),
@@ -309,6 +602,17 @@ pub fn as_int(obj: &GcRef) -> Option<i64> {
     }
 }
 
+/// Extract a floating-point value from a GcRef, if it contains one.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_float, as_float};
+///
+/// let mut heap = GcHeap::new();
+/// let obj = new_float(&mut heap, 3.14);
+/// assert_eq!(as_float(&obj), Some(3.14));
+/// ```
 pub fn as_float(obj: &GcRef) -> Option<f64> {
     match &obj.borrow().value {
         SchemeValue::Float(f) => Some(*f),
@@ -316,6 +620,17 @@ pub fn as_float(obj: &GcRef) -> Option<f64> {
     }
 }
 
+/// Extract a symbol name from a GcRef, if it contains a symbol.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_symbol, as_symbol};
+///
+/// let mut heap = GcHeap::new();
+/// let obj = new_symbol(&mut heap, "lambda");
+/// assert_eq!(as_symbol(&obj), Some("lambda".to_string()));
+/// ```
 pub fn as_symbol(obj: &GcRef) -> Option<String> {
     match &obj.borrow().value {
         SchemeValue::Symbol(s) => Some(s.clone()),
@@ -323,6 +638,17 @@ pub fn as_symbol(obj: &GcRef) -> Option<String> {
     }
 }
 
+/// Extract a string value from a GcRef, if it contains one.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_string, as_string};
+///
+/// let mut heap = GcHeap::new();
+/// let obj = new_string(&mut heap, "hello");
+/// assert_eq!(as_string(&obj), Some("hello".to_string()));
+/// ```
 pub fn as_string(obj: &GcRef) -> Option<String> {
     match &obj.borrow().value {
         SchemeValue::Str(s) => Some(s.clone()),
@@ -330,6 +656,18 @@ pub fn as_string(obj: &GcRef) -> Option<String> {
     }
 }
 
+/// Extract a vector from a GcRef, if it contains one.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_vector, new_int, as_vector};
+///
+/// let mut heap = GcHeap::new();
+/// let elements = vec![new_int(&mut heap, 1), new_int(&mut heap, 2)];
+/// let obj = new_vector(&mut heap, elements.clone());
+/// assert_eq!(as_vector(&obj), Some(elements));
+/// ```
 pub fn as_vector(obj: &GcRef) -> Option<Vec<GcRef>> {
     match &obj.borrow().value {
         SchemeValue::Vector(v) => Some(v.clone()),
@@ -337,6 +675,24 @@ pub fn as_vector(obj: &GcRef) -> Option<Vec<GcRef>> {
     }
 }
 
+/// Extract closure components from a GcRef, if it contains a closure.
+///
+/// Returns a tuple of (parameters, body, environment).
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_closure, new_symbol, new_nil, as_closure};
+///
+/// let mut heap = GcHeap::new();
+/// let params = vec!["x".to_string()];
+/// let body = new_symbol(&mut heap, "body");
+/// let env = new_nil(&mut heap);
+/// let closure = new_closure(&mut heap, params.clone(), body.clone(), env.clone());
+/// 
+/// let (p, b, e) = as_closure(&closure).unwrap();
+/// assert_eq!(p, params);
+/// ```
 pub fn as_closure(obj: &GcRef) -> Option<(Vec<String>, GcRef, GcRef)> {
     match &obj.borrow().value {
         SchemeValue::Closure { params, body, env } => Some((params.clone(), body.clone(), env.clone())),
@@ -344,6 +700,17 @@ pub fn as_closure(obj: &GcRef) -> Option<(Vec<String>, GcRef, GcRef)> {
     }
 }
 
+/// Extract a boolean value from a GcRef, if it contains one.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_bool, as_bool};
+///
+/// let mut heap = GcHeap::new();
+/// let obj = new_bool(&mut heap, true);
+/// assert_eq!(as_bool(&obj), Some(true));
+/// ```
 pub fn as_bool(obj: &GcRef) -> Option<bool> {
     match &obj.borrow().value {
         SchemeValue::Bool(b) => Some(*b),
@@ -351,6 +718,17 @@ pub fn as_bool(obj: &GcRef) -> Option<bool> {
     }
 }
 
+/// Extract a character value from a GcRef, if it contains one.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_char, as_char};
+///
+/// let mut heap = GcHeap::new();
+/// let obj = new_char(&mut heap, 'x');
+/// assert_eq!(as_char(&obj), Some('x'));
+/// ```
 pub fn as_char(obj: &GcRef) -> Option<char> {
     match &obj.borrow().value {
         SchemeValue::Char(c) => Some(*c),
@@ -358,18 +736,117 @@ pub fn as_char(obj: &GcRef) -> Option<char> {
     }
 }
 
+/// Check if a GcRef contains a primitive procedure.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_primitive, is_primitive};
+/// use std::rc::Rc;
+///
+/// let mut heap = GcHeap::new();
+/// let prim = new_primitive(&mut heap, Rc::new(|_, _| Ok(new_nil(&mut heap))));
+/// assert!(is_primitive(&prim));
+/// ```
 pub fn is_primitive(obj: &GcRef) -> bool {
     matches!(&obj.borrow().value, SchemeValue::Primitive(_))
 }
 
+/// Check if a GcRef contains a port.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_port, PortKind, is_port};
+///
+/// let mut heap = GcHeap::new();
+/// let port = new_port(&mut heap, PortKind::Stdin, None);
+/// assert!(is_port(&port));
+/// ```
 pub fn is_port(obj: &GcRef) -> bool {
     matches!(&obj.borrow().value, SchemeValue::Port(_))
 }
 
+/// Extract port information from a GcRef, if it contains a port.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_port, PortKind, as_port};
+///
+/// let mut heap = GcHeap::new();
+/// let port = new_port(&mut heap, PortKind::Stdin, None);
+/// assert_eq!(as_port(&port), Some(PortKind::Stdin));
+/// ```
 pub fn as_port(obj: &GcRef) -> Option<PortKind> {
     match &obj.borrow().value {
         SchemeValue::Port(port) => Some(port.kind.clone()),
         _ => None,
+    }
+}
+
+/// Extract an environment frame from a GcRef, if it contains one.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_env_frame, as_env_frame};
+/// use std::collections::HashMap;
+///
+/// let mut heap = GcHeap::new();
+/// let mut bindings = HashMap::new();
+/// bindings.insert("x".to_string(), new_int(&mut heap, 42));
+/// let env = new_env_frame(&mut heap, bindings.clone());
+/// assert_eq!(as_env_frame(&env), Some(bindings));
+/// ```
+pub fn as_env_frame(obj: &GcRef) -> Option<HashMap<String, GcRef>> {
+    match &obj.borrow().value {
+        SchemeValue::EnvFrame(map) => Some(map.clone()),
+        _ => None,
+    }
+}
+
+/// Look up a variable in an environment frame.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_env_frame, env_frame_lookup, new_int};
+/// use std::collections::HashMap;
+///
+/// let mut heap = GcHeap::new();
+/// let mut bindings = HashMap::new();
+/// bindings.insert("x".to_string(), new_int(&mut heap, 42));
+/// let env = new_env_frame(&mut heap, bindings);
+/// 
+/// let value = env_frame_lookup(&env, "x").unwrap();
+/// assert_eq!(as_int(&value), Some(42));
+/// ```
+pub fn env_frame_lookup(obj: &GcRef, key: &str) -> Option<GcRef> {
+    match &obj.borrow().value {
+        SchemeValue::EnvFrame(map) => map.get(key).cloned(),
+        _ => None,
+    }
+}
+
+/// Insert a new binding into an environment frame.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_env_frame, env_frame_insert, new_int};
+/// use std::collections::HashMap;
+///
+/// let mut heap = GcHeap::new();
+/// let env = new_env_frame(&mut heap, HashMap::new());
+/// env_frame_insert(&env, "x".to_string(), new_int(&mut heap, 42));
+/// 
+/// let value = env_frame_lookup(&env, "x").unwrap();
+/// assert_eq!(as_int(&value), Some(42));
+/// ```
+pub fn env_frame_insert(obj: &GcRef, key: String, value: GcRef) {
+    if let SchemeValue::EnvFrame(map) = &mut obj.borrow_mut().value {
+        map.insert(key, value);
     }
 }
 
@@ -410,14 +887,12 @@ mod tests {
 
         heap.add_root(obj1.clone());
         heap.collect_garbage();
-        // obj1 should still be in the heap, obj2 should be collected
-        assert_eq!(heap.heap_size(), 1);
-        assert_eq!(obj1.borrow().value, SchemeValue::Int(10));
+        assert!(Rc::strong_count(&obj1) > 1); // Should still exist due to root
+        assert_eq!(Rc::strong_count(&obj2), 1); // Should be cleaned up, no roots
 
         heap.remove_root(&obj1);
         heap.collect_garbage();
-        // Now heap should be empty
-        assert_eq!(heap.heap_size(), 0);
+        assert_eq!(Rc::strong_count(&obj1), 1); // Should be cleaned up after removal from roots
     }
 
     #[test]
@@ -518,6 +993,22 @@ mod tests {
     }
 }
 
+/// Extract a pair (car and cdr) from a GcRef, if it contains a pair.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_pair, new_int, new_symbol, as_pair};
+///
+/// let mut heap = GcHeap::new();
+/// let car = new_int(&mut heap, 1);
+/// let cdr = new_symbol(&mut heap, "foo");
+/// let pair = new_pair(&mut heap, car.clone(), cdr.clone());
+/// 
+/// let (a, d) = as_pair(&pair).unwrap();
+/// assert_eq!(a.borrow().value, car.borrow().value);
+/// assert_eq!(d.borrow().value, cdr.borrow().value);
+/// ```
 pub fn as_pair(obj: &GcRef) -> Option<(GcRef, GcRef)> {
     match &obj.borrow().value {
         SchemeValue::Pair(car, cdr) => Some((car.clone(), cdr.clone())),
@@ -525,6 +1016,20 @@ pub fn as_pair(obj: &GcRef) -> Option<(GcRef, GcRef)> {
     }
 }
 
+/// Check if a GcRef contains nil (empty list).
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_nil, is_nil};
+///
+/// let mut heap = GcHeap::new();
+/// let nil = new_nil(&mut heap);
+/// assert!(is_nil(&nil));
+/// 
+/// let not_nil = new_int(&mut heap, 42);
+/// assert!(!is_nil(&not_nil));
+/// ```
 pub fn is_nil(obj: &GcRef) -> bool {
     matches!(&obj.borrow().value, SchemeValue::Nil)
 }

@@ -1,30 +1,141 @@
+//! Tokenizer for the Scheme interpreter.
+//!
+//! This module provides lexical analysis for Scheme source code, converting
+//! character streams into tokens. The tokenizer handles:
+//! - Parentheses, dots, and quotes
+//! - Numbers (integers and floats)
+//! - Symbols (identifiers)
+//! - Strings with escape sequences
+//! - Comments (semicolon to end of line)
+//! - Whitespace skipping
+//!
+//! # Examples
+//!
+//! ```rust
+//! use s1::tokenizer::{Tokenizer, Token};
+//! use s1::io::{PortStack, FileTable};
+//! use s1::gc::{GcHeap, PortKind, new_port};
+//!
+//! let mut heap = GcHeap::new();
+//! let stdin_port = new_port(&mut heap, PortKind::Stdin, None);
+//! let mut port_stack = PortStack::new(stdin_port);
+//! let mut file_table = FileTable::new();
+//!
+//! let mut tokenizer = Tokenizer::new(&mut heap, &mut port_stack, &mut file_table);
+//! let token = tokenizer.next_token();
+//! ```
+//!
+//! # Token Types
+//!
+//! The tokenizer produces the following token types:
+//! - `LParen` - Left parenthesis `(`
+//! - `RParen` - Right parenthesis `)`
+//! - `Dot` - Dot `.` (when standalone)
+//! - `Quote` - Quote `'`
+//! - `String` - String literals in double quotes
+//! - `Number` - Numeric literals (integers and floats)
+//! - `Symbol` - Identifiers and special symbols
+//! - `EOF` - End of input
+
 use crate::io::{PortStack, FileTable, read_char};
 use crate::gc::GcHeap;
 
+/// Represents a lexical token in Scheme source code.
+///
+/// Tokens are the basic building blocks that the parser uses to construct
+/// the abstract syntax tree. Each token represents a meaningful unit of
+/// Scheme syntax.
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
+    /// Left parenthesis `(`
     LParen,
+    /// Right parenthesis `)`
     RParen,
+    /// Dot `.` (when it's a standalone token, not part of a symbol)
     Dot,
+    /// Quote `'`
     Quote,
+    /// String literal in double quotes
     String(String),
+    /// Numeric literal (integer or float)
     Number(String),
+    /// Symbol (identifier or special symbol)
     Symbol(String),
+    /// End of input
     EOF,
 }
 
+/// Lexical analyzer that converts character streams into tokens.
+///
+/// The tokenizer reads characters from a port stack and produces tokens
+/// according to Scheme lexical rules. It handles whitespace, comments,
+/// and all Scheme lexical constructs.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::tokenizer::{Tokenizer, Token};
+/// use s1::io::{PortStack, FileTable};
+/// use s1::gc::{GcHeap, PortKind, new_port};
+///
+/// let mut heap = GcHeap::new();
+/// let port = new_port(&mut heap, PortKind::Stdin, None);
+/// let mut port_stack = PortStack::new(port);
+/// let mut file_table = FileTable::new();
+///
+/// let mut tokenizer = Tokenizer::new(&mut heap, &mut port_stack, &mut file_table);
+/// let token = tokenizer.next_token();
+/// ```
 pub struct Tokenizer<'a> {
+    /// Reference to the garbage collected heap
     heap: &'a mut GcHeap,
+    /// Reference to the port stack for reading input
     port_stack: &'a mut PortStack,
+    /// Reference to the file table for file port operations
     file_table: &'a mut FileTable,
+    /// Character buffer for unreading characters
     buffer: Vec<char>,
 }
 
 impl<'a> Tokenizer<'a> {
+    /// Create a new tokenizer that reads from the given port stack.
+    ///
+    /// The tokenizer will read characters from the current port in the
+    /// port stack and produce tokens according to Scheme lexical rules.
+    ///
+    /// # Arguments
+    ///
+    /// * `heap` - The garbage collected heap for memory management
+    /// * `port_stack` - The port stack to read characters from
+    /// * `file_table` - The file table for file port operations
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use s1::tokenizer::Tokenizer;
+    /// use s1::io::{PortStack, FileTable};
+    /// use s1::gc::{GcHeap, PortKind, new_port};
+    ///
+    /// let mut heap = GcHeap::new();
+    /// let port = new_port(&mut heap, PortKind::Stdin, None);
+    /// let mut port_stack = PortStack::new(port);
+    /// let mut file_table = FileTable::new();
+    ///
+    /// let tokenizer = Tokenizer::new(&mut heap, &mut port_stack, &mut file_table);
+    /// ```
     pub fn new(heap: &'a mut GcHeap, port_stack: &'a mut PortStack, file_table: &'a mut FileTable) -> Self {
         Self { heap, port_stack, file_table, buffer: Vec::new() }
     }
 
+    /// Read a character from the input stream.
+    ///
+    /// This method first checks the internal buffer for unread characters,
+    /// then falls back to reading from the port stack.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(char)` if a character was read, or `None` if the
+    /// input stream is exhausted.
     fn read_char(&mut self) -> Option<char> {
         if let Some(c) = self.buffer.pop() {
             Some(c)
@@ -34,10 +145,22 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
+    /// Put a character back into the input stream.
+    ///
+    /// This method allows the tokenizer to "peek ahead" by reading a character
+    /// and then putting it back if it's not needed.
+    ///
+    /// # Arguments
+    ///
+    /// * `c` - The character to put back
     fn unread_char(&mut self, c: char) {
         self.buffer.push(c);
     }
 
+    /// Skip whitespace and comments until the next meaningful character.
+    ///
+    /// This method consumes whitespace characters and semicolon comments
+    /// until it encounters a character that could be part of a token.
     fn skip_whitespace_and_comments(&mut self) {
         loop {
             let c = self.read_char();
@@ -58,6 +181,31 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
+    /// Read and return the next token from the input stream.
+    ///
+    /// This method skips whitespace and comments, then reads characters
+    /// to determine the next token type. It handles all Scheme lexical
+    /// constructs including parentheses, numbers, symbols, and strings.
+    ///
+    /// # Returns
+    ///
+    /// Returns the next token, or `Token::EOF` if the input stream is exhausted.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use s1::tokenizer::{Tokenizer, Token};
+    /// use s1::io::{PortStack, FileTable};
+    /// use s1::gc::{GcHeap, PortKind, new_port};
+    ///
+    /// let mut heap = GcHeap::new();
+    /// let port = new_port(&mut heap, PortKind::Stdin, None);
+    /// let mut port_stack = PortStack::new(port);
+    /// let mut file_table = FileTable::new();
+    ///
+    /// let mut tokenizer = Tokenizer::new(&mut heap, &mut port_stack, &mut file_table);
+    /// let token = tokenizer.next_token();
+    /// ```
     pub fn next_token(&mut self) -> Token {
         self.skip_whitespace_and_comments();
         let c = match self.read_char() {
@@ -102,6 +250,14 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
+    /// Read a string literal from the input stream.
+    ///
+    /// This method reads characters until it encounters a closing double quote,
+    /// handling escape sequences (currently just `\"`).
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Token::String` containing the string content.
     fn read_string(&mut self) -> Token {
         let mut s = String::new();
         while let Some(ch) = self.read_char() {
@@ -123,6 +279,20 @@ impl<'a> Tokenizer<'a> {
         Token::String(s)
     }
 
+    /// Read a number or symbol starting with a digit or sign.
+    ///
+    /// This method handles the ambiguity between numbers and symbols that
+    /// start with digits or signs. It reads characters until it encounters
+    /// a delimiter, then determines if the result is a valid number.
+    ///
+    /// # Arguments
+    ///
+    /// * `first` - The first character (digit, `+`, or `-`)
+    ///
+    /// # Returns
+    ///
+    /// Returns either a `Token::Number` or `Token::Symbol` depending on
+    /// whether the characters form a valid number.
     fn read_number_or_symbol(&mut self, first: char) -> Token {
         let mut s = String::new();
         s.push(first);
@@ -144,6 +314,18 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
+    /// Read a symbol from the input stream.
+    ///
+    /// This method reads characters that are valid for symbols until it
+    /// encounters a delimiter.
+    ///
+    /// # Arguments
+    ///
+    /// * `first` - The first character of the symbol
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Token::Symbol` containing the symbol name.
     fn read_symbol(&mut self, first: char) -> Token {
         let mut s = String::new();
         s.push(first);
@@ -159,19 +341,115 @@ impl<'a> Tokenizer<'a> {
     }
 }
 
+/// Check if a character can be the first character of a symbol.
+///
+/// According to Scheme lexical rules, symbols can start with alphabetic
+/// characters or certain special characters.
+///
+/// # Arguments
+///
+/// * `ch` - The character to check
+///
+/// # Returns
+///
+/// Returns `true` if the character can start a symbol.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::tokenizer::is_initial_symbol_char;
+///
+/// assert!(is_initial_symbol_char('a'));
+/// assert!(is_initial_symbol_char('!'));
+/// assert!(is_initial_symbol_char('?'));
+/// assert!(!is_initial_symbol_char('1'));
+/// assert!(!is_initial_symbol_char('('));
+/// ```
 fn is_initial_symbol_char(ch: char) -> bool {
     ch.is_ascii_alphabetic() || "!$%&*/:<=>?^_~@".contains(ch)
 }
 
+/// Check if a character can be part of a symbol (after the first character).
+///
+/// Subsequent characters in symbols can include digits and additional
+/// special characters beyond those allowed as initial characters.
+///
+/// # Arguments
+///
+/// * `ch` - The character to check
+///
+/// # Returns
+///
+/// Returns `true` if the character can be part of a symbol.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::tokenizer::is_subsequent_symbol_char;
+///
+/// assert!(is_subsequent_symbol_char('a'));
+/// assert!(is_subsequent_symbol_char('1'));
+/// assert!(is_subsequent_symbol_char('!'));
+/// assert!(is_subsequent_symbol_char('+'));
+/// assert!(!is_subsequent_symbol_char('('));
+/// ```
 fn is_subsequent_symbol_char(ch: char) -> bool {
     is_initial_symbol_char(ch) || ch.is_ascii_digit() || ".+-@".contains(ch)
 }
 
-// Helper: check if a string is a valid number
+/// Check if a string represents a valid number.
+///
+/// This function attempts to parse the string as both an integer and a float.
+///
+/// # Arguments
+///
+/// * `s` - The string to check
+///
+/// # Returns
+///
+/// Returns `true` if the string can be parsed as a number.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::tokenizer::is_number;
+///
+/// assert!(is_number("123"));
+/// assert!(is_number("-45"));
+/// assert!(is_number("3.14"));
+/// assert!(is_number("+inf.0"));
+/// assert!(!is_number("abc"));
+/// assert!(!is_number("123abc"));
+/// ```
 fn is_number(s: &str) -> bool {
     s.parse::<i64>().is_ok() || s.parse::<f64>().is_ok()
 }
 
+/// Check if a character is a delimiter that ends tokens.
+///
+/// Delimiters include whitespace, parentheses, quotes, and semicolons.
+///
+/// # Arguments
+///
+/// * `ch` - The character to check
+///
+/// # Returns
+///
+/// Returns `true` if the character is a delimiter.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::tokenizer::is_delimiter;
+///
+/// assert!(is_delimiter(' '));
+/// assert!(is_delimiter('('));
+/// assert!(is_delimiter(')'));
+/// assert!(is_delimiter('"'));
+/// assert!(is_delimiter(';'));
+/// assert!(!is_delimiter('a'));
+/// assert!(!is_delimiter('1'));
+/// ```
 fn is_delimiter(ch: char) -> bool {
     ch.is_whitespace() || ch == '(' || ch == ')' || ch == '"' || ch == ';'
 }

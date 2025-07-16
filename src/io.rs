@@ -1,3 +1,29 @@
+//! Input/Output system for the Scheme interpreter.
+//!
+//! This module provides:
+//! - Port management (stdin, stdout, files, string ports)
+//! - Port stack for nested file loading with fallback to REPL
+//! - File table for managing open file handles
+//! - I/O operations (read/write lines and characters)
+//!
+//! # Examples
+//!
+//! ```rust
+//! use s1::io::{PortStack, FileTable, read_line, write_line};
+//! use s1::gc::{GcHeap, PortKind, new_port};
+//!
+//! let mut heap = GcHeap::new();
+//! let stdin_port = new_port(&mut heap, PortKind::Stdin, None);
+//! let mut port_stack = PortStack::new(stdin_port);
+//! let mut file_table = FileTable::new();
+//!
+//! // Read from current port (stdin)
+//! let line = read_line(&mut heap, &mut port_stack, &mut file_table);
+//!
+//! // Write to current port (stdout)
+//! write_line(&mut heap, &mut port_stack, &mut file_table, "Hello, World!");
+//! ```
+
 use crate::gc::{GcHeap, GcRef, SchemeValue, PortKind, new_port};
 // use std::cell::RefCell;
 use std::io::{self, Write, Read, BufRead, BufReader, BufWriter};
@@ -5,20 +31,116 @@ use std::collections::HashMap;
 use std::fs::File;
 
 /// Manages a stack of ports for input/output operations.
+///
+/// The port stack allows for nested file loading where reading from a file
+/// can temporarily switch the input source, then fall back to the previous
+/// port when the file is exhausted or closed.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::io::PortStack;
+/// use s1::gc::{GcHeap, PortKind, new_port};
+///
+/// let mut heap = GcHeap::new();
+/// let stdin_port = new_port(&mut heap, PortKind::Stdin, None);
+/// let file_port = new_port(&mut heap, PortKind::File { name: "input.txt".to_string(), write: false }, Some(1));
+///
+/// let mut stack = PortStack::new(stdin_port.clone());
+/// assert_eq!(stack.current().borrow().value, stdin_port.borrow().value);
+///
+/// stack.push(file_port.clone());
+/// assert_eq!(stack.current().borrow().value, file_port.borrow().value);
+///
+/// stack.pop();
+/// assert_eq!(stack.current().borrow().value, stdin_port.borrow().value);
+/// ```
 pub struct PortStack {
+    /// The stack of ports, with the current port at the top
     stack: Vec<GcRef>,
 }
 
 impl PortStack {
+    /// Create a new port stack with an initial port.
+    ///
+    /// The initial port is typically stdin for interactive use.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use s1::io::PortStack;
+    /// use s1::gc::{GcHeap, PortKind, new_port};
+    ///
+    /// let mut heap = GcHeap::new();
+    /// let stdin_port = new_port(&mut heap, PortKind::Stdin, None);
+    /// let stack = PortStack::new(stdin_port.clone());
+    /// assert_eq!(stack.current().borrow().value, stdin_port.borrow().value);
+    /// ```
     pub fn new(initial: GcRef) -> Self {
         Self { stack: vec![initial] }
     }
+
+    /// Get the current port (the top of the stack).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use s1::io::PortStack;
+    /// use s1::gc::{GcHeap, PortKind, new_port};
+    ///
+    /// let mut heap = GcHeap::new();
+    /// let port = new_port(&mut heap, PortKind::Stdin, None);
+    /// let stack = PortStack::new(port.clone());
+    /// assert_eq!(stack.current().borrow().value, port.borrow().value);
+    /// ```
     pub fn current(&self) -> GcRef {
         self.stack.last().unwrap().clone()
     }
+
+    /// Push a new port onto the stack, making it the current port.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use s1::io::PortStack;
+    /// use s1::gc::{GcHeap, PortKind, new_port};
+    ///
+    /// let mut heap = GcHeap::new();
+    /// let stdin_port = new_port(&mut heap, PortKind::Stdin, None);
+    /// let file_port = new_port(&mut heap, PortKind::File { name: "input.txt".to_string(), write: false }, Some(1));
+    ///
+    /// let mut stack = PortStack::new(stdin_port.clone());
+    /// stack.push(file_port.clone());
+    /// assert_eq!(stack.current().borrow().value, file_port.borrow().value);
+    /// ```
     pub fn push(&mut self, port: GcRef) {
         self.stack.push(port);
     }
+
+    /// Pop the current port from the stack, returning to the previous port.
+    ///
+    /// Returns `true` if a port was popped, `false` if the stack would become empty.
+    /// The stack always maintains at least one port (typically stdin).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use s1::io::PortStack;
+    /// use s1::gc::{GcHeap, PortKind, new_port};
+    ///
+    /// let mut heap = GcHeap::new();
+    /// let stdin_port = new_port(&mut heap, PortKind::Stdin, None);
+    /// let file_port = new_port(&mut heap, PortKind::File { name: "input.txt".to_string(), write: false }, Some(1));
+    ///
+    /// let mut stack = PortStack::new(stdin_port.clone());
+    /// stack.push(file_port.clone());
+    /// assert_eq!(stack.current().borrow().value, file_port.borrow().value);
+    ///
+    /// assert!(stack.pop());
+    /// assert_eq!(stack.current().borrow().value, stdin_port.borrow().value);
+    ///
+    /// assert!(!stack.pop()); // Cannot pop the last port
+    /// ```
     pub fn pop(&mut self) -> bool {
         if self.stack.len() > 1 {
             self.stack.pop();
@@ -30,15 +152,92 @@ impl PortStack {
 }
 
 /// Manages open file handles for file ports.
+///
+/// The file table maintains a mapping from file IDs to actual file handles,
+/// allowing multiple file ports to reference the same underlying file
+/// and ensuring proper cleanup when files are closed.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::io::FileTable;
+/// use std::fs::File;
+/// use std::io::Write;
+///
+/// let mut table = FileTable::new();
+///
+/// // Create a test file
+/// {
+///     let mut file = File::create("test.txt").unwrap();
+///     writeln!(file, "hello").unwrap();
+/// }
+///
+/// // Open the file for reading
+/// let id = table.open_file("test.txt", false).unwrap();
+/// assert!(table.get(id).is_some());
+///
+/// // Close the file
+/// table.close_file(id);
+/// assert!(table.get(id).is_none());
+/// ```
 pub struct FileTable {
+    /// Next available file ID
     next_id: usize,
+    /// Mapping from file IDs to file handles
     files: HashMap<usize, File>,
 }
 
 impl FileTable {
+    /// Create a new empty file table.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use s1::io::FileTable;
+    ///
+    /// let table = FileTable::new();
+    /// ```
     pub fn new() -> Self {
         Self { next_id: 1, files: HashMap::new() }
     }
+
+    /// Open a file and return its ID.
+    ///
+    /// The file ID can be used to create file ports and access the file handle.
+    /// Files are opened in read mode if `write` is `false`, or write mode if `write` is `true`.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The filename to open
+    /// * `write` - Whether to open in write mode (true) or read mode (false)
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(file_id)` on success, or `Err` if the file cannot be opened.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use s1::io::FileTable;
+    /// use std::fs::File;
+    /// use std::io::Write;
+    ///
+    /// let mut table = FileTable::new();
+    ///
+    /// // Create a test file
+    /// {
+    ///     let mut file = File::create("test.txt").unwrap();
+    ///     writeln!(file, "hello").unwrap();
+    /// }
+    ///
+    /// // Open for reading
+    /// let read_id = table.open_file("test.txt", false).unwrap();
+    /// assert!(table.get(read_id).is_some());
+    ///
+    /// // Open for writing
+    /// let write_id = table.open_file("output.txt", true).unwrap();
+    /// assert!(table.get(write_id).is_some());
+    /// ```
     pub fn open_file(&mut self, name: &str, write: bool) -> io::Result<usize> {
         let file = if write {
             File::create(name)?
@@ -50,15 +249,105 @@ impl FileTable {
         self.files.insert(id, file);
         Ok(id)
     }
+
+    /// Close a file by its ID.
+    ///
+    /// The file handle is removed from the table and the underlying file is closed.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The file ID to close
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use s1::io::FileTable;
+    /// use std::fs::File;
+    /// use std::io::Write;
+    ///
+    /// let mut table = FileTable::new();
+    ///
+    /// // Create and open a test file
+    /// {
+    ///     let mut file = File::create("test.txt").unwrap();
+    ///     writeln!(file, "hello").unwrap();
+    /// }
+    ///
+    /// let id = table.open_file("test.txt", false).unwrap();
+    /// assert!(table.get(id).is_some());
+    ///
+    /// table.close_file(id);
+    /// assert!(table.get(id).is_none());
+    /// ```
     pub fn close_file(&mut self, id: usize) {
         self.files.remove(&id);
     }
+
+    /// Get a mutable reference to a file handle by ID.
+    ///
+    /// Returns `None` if the file ID is not found in the table.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The file ID to look up
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use s1::io::FileTable;
+    /// use std::fs::File;
+    /// use std::io::Write;
+    ///
+    /// let mut table = FileTable::new();
+    ///
+    /// // Create and open a test file
+    /// {
+    ///     let mut file = File::create("test.txt").unwrap();
+    ///     writeln!(file, "hello").unwrap();
+    /// }
+    ///
+    /// let id = table.open_file("test.txt", false).unwrap();
+    /// assert!(table.get(id).is_some());
+    ///
+    /// table.close_file(id);
+    /// assert!(table.get(id).is_none());
+    /// ```
     pub fn get(&mut self, id: usize) -> Option<&mut File> {
         self.files.get_mut(&id)
     }
 }
 
 /// Read a line from the current input port.
+///
+/// This function reads from the current port on the port stack. If the current
+/// port is exhausted (EOF), it automatically pops the port and tries the next
+/// port in the stack, falling back to stdin if no more ports are available.
+///
+/// # Arguments
+///
+/// * `heap` - The garbage collected heap
+/// * `port_stack` - The port stack to read from
+/// * `file_table` - The file table for file port operations
+///
+/// # Returns
+///
+/// Returns `Some(line)` if a line was successfully read, or `None` if all
+/// ports are exhausted.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::io::{PortStack, FileTable, read_line};
+/// use s1::gc::{GcHeap, PortKind, new_port};
+///
+/// let mut heap = GcHeap::new();
+/// let stdin_port = new_port(&mut heap, PortKind::Stdin, None);
+/// let mut port_stack = PortStack::new(stdin_port);
+/// let mut file_table = FileTable::new();
+///
+/// // Read from stdin (in a real scenario, this would block for user input)
+/// let line = read_line(&mut heap, &mut port_stack, &mut file_table);
+/// ```
 pub fn read_line(heap: &mut GcHeap, port_stack: &mut PortStack, file_table: &mut FileTable) -> Option<String> {
     let port = port_stack.current();
     match &port.borrow().value {
@@ -100,6 +389,36 @@ pub fn read_line(heap: &mut GcHeap, port_stack: &mut PortStack, file_table: &mut
 }
 
 /// Write a line to the current output port.
+///
+/// This function writes to the current port on the port stack. For stdout ports,
+/// the line is printed to the console. For file ports, the line is written to
+/// the file.
+///
+/// # Arguments
+///
+/// * `heap` - The garbage collected heap
+/// * `port_stack` - The port stack to write to
+/// * `file_table` - The file table for file port operations
+/// * `line` - The line to write
+///
+/// # Returns
+///
+/// Returns `true` if the write was successful, `false` otherwise.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::io::{PortStack, FileTable, write_line};
+/// use s1::gc::{GcHeap, PortKind, new_port};
+///
+/// let mut heap = GcHeap::new();
+/// let stdout_port = new_port(&mut heap, PortKind::Stdout, None);
+/// let mut port_stack = PortStack::new(stdout_port);
+/// let mut file_table = FileTable::new();
+///
+/// // Write to stdout
+/// write_line(&mut heap, &mut port_stack, &mut file_table, "Hello, World!");
+/// ```
 pub fn write_line(heap: &mut GcHeap, port_stack: &mut PortStack, file_table: &mut FileTable, line: &str) -> bool {
     let port = port_stack.current();
     match &port.borrow().value {
@@ -128,6 +447,35 @@ pub fn write_line(heap: &mut GcHeap, port_stack: &mut PortStack, file_table: &mu
 }
 
 /// Read a single character from the current input port.
+///
+/// This function reads one character from the current port on the port stack.
+/// For string ports, it advances the position pointer after reading.
+///
+/// # Arguments
+///
+/// * `heap` - The garbage collected heap
+/// * `port_stack` - The port stack to read from
+/// * `file_table` - The file table for file port operations
+///
+/// # Returns
+///
+/// Returns `Some(char)` if a character was successfully read, or `None` if
+/// the port is exhausted or an error occurred.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::io::{PortStack, FileTable, read_char};
+/// use s1::gc::{GcHeap, PortKind, new_port};
+///
+/// let mut heap = GcHeap::new();
+/// let stdin_port = new_port(&mut heap, PortKind::Stdin, None);
+/// let mut port_stack = PortStack::new(stdin_port);
+/// let mut file_table = FileTable::new();
+///
+/// // Read a character from stdin (in a real scenario, this would block for user input)
+/// let ch = read_char(&mut heap, &mut port_stack, &mut file_table);
+/// ```
 pub fn read_char(heap: &mut GcHeap, port_stack: &mut PortStack, file_table: &mut FileTable) -> Option<char> {
     let port = port_stack.current();
     match &mut port.borrow_mut().value {
@@ -171,6 +519,36 @@ pub fn read_char(heap: &mut GcHeap, port_stack: &mut PortStack, file_table: &mut
 }
 
 /// Write a single character to the current output port.
+///
+/// This function writes one character to the current port on the port stack.
+/// For stdout ports, the character is printed to the console. For file ports,
+/// the character is written to the file.
+///
+/// # Arguments
+///
+/// * `heap` - The garbage collected heap
+/// * `port_stack` - The port stack to write to
+/// * `file_table` - The file table for file port operations
+/// * `ch` - The character to write
+///
+/// # Returns
+///
+/// Returns `true` if the write was successful, `false` otherwise.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::io::{PortStack, FileTable, write_char};
+/// use s1::gc::{GcHeap, PortKind, new_port};
+///
+/// let mut heap = GcHeap::new();
+/// let stdout_port = new_port(&mut heap, PortKind::Stdout, None);
+/// let mut port_stack = PortStack::new(stdout_port);
+/// let mut file_table = FileTable::new();
+///
+/// // Write a character to stdout
+/// write_char(&mut heap, &mut port_stack, &mut file_table, 'A');
+/// ```
 pub fn write_char(heap: &mut GcHeap, port_stack: &mut PortStack, file_table: &mut FileTable, ch: char) -> bool {
     let port = port_stack.current();
     match &port.borrow().value {
@@ -198,6 +576,36 @@ pub fn write_char(heap: &mut GcHeap, port_stack: &mut PortStack, file_table: &mu
     }
 }
 
+/// Create a new string port for in-memory string I/O.
+///
+/// String ports allow reading from a string as if it were a file, with
+/// an internal position pointer that advances as characters are read.
+///
+/// # Arguments
+///
+/// * `heap` - The garbage collected heap
+/// * `s` - The string to create a port from
+///
+/// # Returns
+///
+/// Returns a `GcRef` to a new string port.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::io::{new_string_port, PortStack, FileTable, read_char};
+/// use s1::gc::{GcHeap, PortKind, new_port};
+///
+/// let mut heap = GcHeap::new();
+/// let string_port = new_string_port(&mut heap, "hello");
+/// let mut port_stack = PortStack::new(string_port);
+/// let mut file_table = FileTable::new();
+///
+/// // Read characters from the string
+/// assert_eq!(read_char(&mut heap, &mut port_stack, &mut file_table), Some('h'));
+/// assert_eq!(read_char(&mut heap, &mut port_stack, &mut file_table), Some('e'));
+/// assert_eq!(read_char(&mut heap, &mut port_stack, &mut file_table), Some('l'));
+/// ```
 pub fn new_string_port(heap: &mut GcHeap, s: &str) -> GcRef {
     new_port(heap, PortKind::StringPort(s.to_string(), 0), None)
 }
