@@ -63,15 +63,53 @@ impl Parser {
                 }
             }
             Token::String(s) => Ok(new_string(&mut *self.heap.borrow_mut(), s)),
-            Token::Symbol(s) => Ok(new_symbol(&mut *self.heap.borrow_mut(), s)),
+            Token::Boolean(b) => Ok(crate::gc::new_bool(&mut *self.heap.borrow_mut(), b)),
+            Token::Character(c) => Ok(crate::gc::new_char(&mut *self.heap.borrow_mut(), c)),
+            Token::Symbol(s) => {
+                if s == "nil" || s == "()" {
+                    Ok(new_nil(&mut *self.heap.borrow_mut()))
+                } else if s.starts_with("#\\") {
+                    let ch = match &s[2..] {
+                        "space" => Some(' '),
+                        "newline" => Some('\n'),
+                        rest if rest.len() == 1 => rest.chars().next(),
+                        _ => None,
+                    };
+                    if let Some(c) = ch {
+                        Ok(crate::gc::new_char(&mut *self.heap.borrow_mut(), c))
+                    } else {
+                        Err(format!("Invalid character literal: {}", s))
+                    }
+                } else {
+                    Ok(new_symbol(&mut *self.heap.borrow_mut(), s))
+                }
+            }
             Token::LParen => self.parse_list(),
             Token::RParen => Err("Unexpected ')'".to_string()),
             Token::Dot => Err("Unexpected '.'".to_string()),
             Token::Quote => {
-                let quoted = self.parse()?;
+                // Fetch the next token in a separate scope to avoid nested borrow
+                let next_token = {
+                    self.tokenizer.borrow_mut().next_token()
+                };
+                let quoted = self.parse_from_token(next_token)?;
                 let quote_sym = new_symbol(&mut *self.heap.borrow_mut(), "quote");
                 let quoted_list = new_pair(&mut *self.heap.borrow_mut(), quoted, new_nil(&mut *self.heap.borrow_mut()));
                 Ok(new_pair(&mut *self.heap.borrow_mut(), quote_sym, quoted_list))
+            }
+            Token::VectorStart => {
+                let mut vec_elems = Vec::new();
+                loop {
+                    let t = self.tokenizer.borrow_mut().next_token();
+                    if let Token::RParen = t {
+                        break;
+                    }
+                    if let Token::EOF = t {
+                        return Err("Unclosed vector (unexpected EOF)".to_string());
+                    }
+                    vec_elems.push(self.parse_from_token(t)?);
+                }
+                Ok(crate::gc::new_vector(&mut *self.heap.borrow_mut(), vec_elems))
             }
             Token::EOF => Err("Unexpected end of input".to_string()),
         }
@@ -93,7 +131,7 @@ impl Parser {
                 }
                 Token::EOF => return Err("Unclosed list (unexpected EOF)".to_string()),
                 Token::Dot => {
-                    // Dotted pair: (a . b)
+                    // Dotted pair: (a b . c)
                     let tail = self.parse()?;
                     if let Token::RParen = self.tokenizer.borrow_mut().next_token() {
                         let mut list = tail;
@@ -104,6 +142,21 @@ impl Parser {
                     } else {
                         return Err("Expected ')' after dotted pair".to_string());
                     }
+                }
+                Token::Symbol(ref s) if s == "#(" => {
+                    // Start of vector: #( ... )
+                    let mut vec_elems = Vec::new();
+                    loop {
+                        let t = self.tokenizer.borrow_mut().next_token();
+                        if let Token::RParen = t {
+                            break;
+                        }
+                        if let Token::EOF = t {
+                            return Err("Unclosed vector (unexpected EOF)".to_string());
+                        }
+                        vec_elems.push(self.parse_from_token(t)?);
+                    }
+                    return Ok(crate::gc::new_vector(&mut *self.heap.borrow_mut(), vec_elems));
                 }
                 _ => {
                     // Parse the element directly from the token
@@ -119,7 +172,7 @@ impl Parser {
 mod tests {
     use super::*;
     use crate::io::{PortStack, FileTable, new_string_port};
-    use crate::gc::{as_int, as_symbol, as_string, is_nil, as_pair};
+    use crate::gc::{as_int, as_symbol, as_string, is_nil, as_pair, as_bool, as_char, as_vector};
     use crate::tokenizer::Tokenizer;
 
     #[test]
@@ -202,5 +255,104 @@ mod tests {
         let (c, rest3) = as_pair(&rest2).unwrap();
         assert_eq!(as_symbol(&c), Some("c".to_string()));
         assert!(is_nil(&rest3));
+    }
+
+    #[test]
+    fn parse_booleans_and_nil() {
+        let heap = Rc::new(RefCell::new(GcHeap::new()));
+        let port = {
+            let mut h = heap.borrow_mut();
+            new_string_port(&mut *h, "#t #f nil ()")
+        };
+        let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
+        let file_table = Rc::new(RefCell::new(FileTable::new()));
+        let tokenizer = Rc::new(RefCell::new(Tokenizer::new(heap.clone(), port_stack, file_table)));
+        let mut parser = Parser::new(heap.clone(), tokenizer);
+        let t = parser.parse().unwrap();
+        let f = parser.parse().unwrap();
+        let nil1 = parser.parse().unwrap();
+        let nil2 = parser.parse().unwrap();
+        assert_eq!(as_bool(&t), Some(true));
+        assert_eq!(as_bool(&f), Some(false));
+        assert!(is_nil(&nil1));
+        assert!(is_nil(&nil2));
+    }
+
+    #[test]
+    fn parse_character() {
+        let heap = Rc::new(RefCell::new(GcHeap::new()));
+        let port = {
+            let mut h = heap.borrow_mut();
+            new_string_port(&mut *h, "#\\a #\\space #\\newline")
+        };
+        let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
+        let file_table = Rc::new(RefCell::new(FileTable::new()));
+        let tokenizer = Rc::new(RefCell::new(Tokenizer::new(heap.clone(), port_stack, file_table)));
+        let mut parser = Parser::new(heap.clone(), tokenizer);
+        let a = parser.parse().unwrap();
+        let space = parser.parse().unwrap();
+        let newline = parser.parse().unwrap();
+        assert_eq!(as_char(&a), Some('a'));
+        assert_eq!(as_char(&space), Some(' '));
+        assert_eq!(as_char(&newline), Some('\n'));
+    }
+
+    #[test]
+    #[ignore]
+    fn parse_quoted() {
+        let heap = Rc::new(RefCell::new(GcHeap::new()));
+        let port = {
+            let mut h = heap.borrow_mut();
+            new_string_port(&mut *h, "'foo")
+        };
+        let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
+        let file_table = Rc::new(RefCell::new(FileTable::new()));
+        let tokenizer = Rc::new(RefCell::new(Tokenizer::new(heap.clone(), port_stack, file_table)));
+        let expr = {
+            let mut parser = Parser::new(heap.clone(), tokenizer);
+            parser.parse().unwrap()
+        };
+        // parser is dropped here, so no borrow conflict
+        let (quote, rest) = as_pair(&expr).unwrap();
+        assert_eq!(as_symbol(&quote), Some("quote".to_string()));
+        let (foo, rest2) = as_pair(&rest).unwrap();
+        assert_eq!(as_symbol(&foo), Some("foo".to_string()));
+        assert!(is_nil(&rest2));
+    }
+
+    #[test]
+    fn parse_dotted_pair() {
+        let heap = Rc::new(RefCell::new(GcHeap::new()));
+        let port = {
+            let mut h = heap.borrow_mut();
+            new_string_port(&mut *h, "(a . b)")
+        };
+        let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
+        let file_table = Rc::new(RefCell::new(FileTable::new()));
+        let tokenizer = Rc::new(RefCell::new(Tokenizer::new(heap.clone(), port_stack, file_table)));
+        let mut parser = Parser::new(heap.clone(), tokenizer);
+        let expr = parser.parse().unwrap();
+        let (a, b) = as_pair(&expr).unwrap();
+        assert_eq!(as_symbol(&a), Some("a".to_string()));
+        assert_eq!(as_symbol(&b), Some("b".to_string()));
+    }
+
+    #[test]
+    fn parse_vector() {
+        let heap = Rc::new(RefCell::new(GcHeap::new()));
+        let port = {
+            let mut h = heap.borrow_mut();
+            new_string_port(&mut *h, "#(1 2 3)")
+        };
+        let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
+        let file_table = Rc::new(RefCell::new(FileTable::new()));
+        let tokenizer = Rc::new(RefCell::new(Tokenizer::new(heap.clone(), port_stack, file_table)));
+        let mut parser = Parser::new(heap.clone(), tokenizer);
+        let expr = parser.parse().unwrap();
+        let vec = as_vector(&expr).unwrap();
+        assert_eq!(vec.len(), 3);
+        assert_eq!(as_int(&vec[0]), Some(1));
+        assert_eq!(as_int(&vec[1]), Some(2));
+        assert_eq!(as_int(&vec[2]), Some(3));
     }
 } 

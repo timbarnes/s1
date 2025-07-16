@@ -352,7 +352,6 @@ impl GcHeap {
                 }
             }
             // Bool, Char, Primitive, Port: nothing to mark
-            // Add more types (e.g., vectors, closures) if they store GcRefs.
             _ => {}
         }
     }

@@ -63,6 +63,12 @@ pub enum Token {
     Number(String),
     /// Symbol (identifier or special symbol)
     Symbol(String),
+    /// Boolean literal (#t or #f)
+    Boolean(bool),
+    /// Character literal (#\...)
+    Character(char),
+    /// Vector start (#(...))
+    VectorStart,
     /// End of input
     EOF,
 }
@@ -173,6 +179,9 @@ impl Tokenizer {
             Token::Dot => self.unread_char('.'),
             Token::Quote => self.unread_char(' '), // Not supported for now
             Token::String(_) | Token::Number(_) | Token::Symbol(_) | Token::EOF => {}
+            Token::Boolean(_) => {},
+            Token::Character(_) => {},
+            Token::VectorStart => {},
         }
     }
 
@@ -237,7 +246,6 @@ impl Tokenizer {
                 '(' => return Token::LParen,
                 ')' => return Token::RParen,
                 '.' => {
-                    // Peek ahead: if next char is delimiter/whitespace/EOF, it's a dot token
                     let next = self.read_char();
                     match next {
                         Some(nc) if is_delimiter(nc) => {
@@ -246,7 +254,6 @@ impl Tokenizer {
                         }
                         None => return Token::Dot,
                         Some(nc) => {
-                            // Not a delimiter, treat as symbol starting with '.'
                             self.unread_char(nc);
                             return self.read_symbol('.');
                         }
@@ -254,12 +261,49 @@ impl Tokenizer {
                 }
                 '\'' => return Token::Quote,
                 '"' => return self.read_string(),
+                '#' => {
+                    // Boolean, character, or vector
+                    match self.read_char() {
+                        Some('t') => return Token::Boolean(true),
+                        Some('f') => return Token::Boolean(false),
+                        Some('(') => return Token::VectorStart,
+                        Some('\\') => {
+                            // Character literal
+                            let mut name = String::new();
+                            while let Some(ch) = self.read_char() {
+                                if is_delimiter(ch) { self.unread_char(ch); break; }
+                                name.push(ch);
+                            }
+                            let c = match name.as_str() {
+                                "space" => Some(' '),
+                                "newline" => Some('\n'),
+                                s if s.len() == 1 => s.chars().next(),
+                                _ => None,
+                            };
+                            if let Some(c) = c {
+                                return Token::Character(c);
+                            } else {
+                                return Token::Symbol(format!("#\\{}", name));
+                            }
+                        }
+                        Some(other) => {
+                            // Not a recognized # form, treat as symbol
+                            let mut s = String::from("#");
+                            s.push(other);
+                            while let Some(ch) = self.read_char() {
+                                if is_delimiter(ch) { self.unread_char(ch); break; }
+                                s.push(ch);
+                            }
+                            return Token::Symbol(s);
+                        }
+                        None => return Token::Symbol("#".to_string()),
+                    }
+                }
                 ch if ch.is_ascii_digit() || (ch == '-' || ch == '+') => {
                     return self.read_number_or_symbol(ch)
                 }
                 ch if is_initial_symbol_char(ch) => return self.read_symbol(ch),
                 _ => {
-                    // Skip unknown chars, try next
                     ch = match self.read_char() {
                         Some(next) => next,
                         None => return Token::EOF,
@@ -281,20 +325,17 @@ impl Tokenizer {
         let mut s = String::new();
         while let Some(ch) = self.read_char() {
             if ch == '"' {
-                return Token::String(s);
+                break;
             } else if ch == '\\' {
-                // Handle escape
                 if let Some(next) = self.read_char() {
                     s.push(next);
                 } else {
-                    // EOF after escape, return what we have
-                    return Token::String(s);
+                    break;
                 }
             } else {
                 s.push(ch);
             }
         }
-        // EOF before closing quote, return what we have
         Token::String(s)
     }
 
@@ -566,6 +607,44 @@ mod tests {
         assert_eq!(t.next_token(), Token::EOF);
         let mut t = tokenizer_from_str(heap.clone(), "foo");
         assert_eq!(t.next_token(), Token::Symbol("foo".to_string()));
+        assert_eq!(t.next_token(), Token::EOF);
+    }
+
+    #[test]
+    fn test_booleans_and_nil() {
+        let heap = Rc::new(RefCell::new(GcHeap::new()));
+        let mut t = tokenizer_from_str(heap.clone(), "#t #f nil ()");
+        assert_eq!(t.next_token(), Token::Boolean(true));
+        assert_eq!(t.next_token(), Token::Boolean(false));
+        assert_eq!(t.next_token(), Token::Symbol("nil".to_string()));
+        assert_eq!(t.next_token(), Token::LParen);
+        assert_eq!(t.next_token(), Token::RParen);
+        assert_eq!(t.next_token(), Token::EOF);
+    }
+
+    #[test]
+    fn test_character() {
+        let heap = Rc::new(RefCell::new(GcHeap::new()));
+        let mut t = tokenizer_from_str(heap.clone(), "#\\a #\\space #\\newline");
+        assert_eq!(t.next_token(), Token::Character('a'));
+        assert_eq!(t.next_token(), Token::Character(' '));
+        assert_eq!(t.next_token(), Token::Character('\n'));
+        assert_eq!(t.next_token(), Token::EOF);
+    }
+
+    #[test]
+    fn test_vector_start() {
+        let heap = Rc::new(RefCell::new(GcHeap::new()));
+        let mut t = tokenizer_from_str(heap.clone(), "#(1 2 3)");
+        assert_eq!(t.next_token(), Token::VectorStart);
+        let n1 = t.next_token();
+        assert_eq!(n1, Token::Number("1".to_string()));
+        let n2 = t.next_token();
+        assert_eq!(n2, Token::Number("2".to_string()));
+        let n3 = t.next_token();
+        assert_eq!(n3, Token::Number("3".to_string()));
+        let rparen = t.next_token();
+        assert_eq!(rparen, Token::RParen);
         assert_eq!(t.next_token(), Token::EOF);
     }
 } 
