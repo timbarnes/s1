@@ -39,6 +39,8 @@
 
 use crate::io::{PortStack, FileTable, read_char};
 use crate::gc::GcHeap;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 /// Represents a lexical token in Scheme source code.
 ///
@@ -86,18 +88,18 @@ pub enum Token {
 /// let mut tokenizer = Tokenizer::new(&mut heap, &mut port_stack, &mut file_table);
 /// let token = tokenizer.next_token();
 /// ```
-pub struct Tokenizer<'a> {
-    /// Reference to the garbage collected heap
-    heap: &'a mut GcHeap,
+pub struct Tokenizer {
+    /// Shared reference to the garbage collected heap
+    pub heap: Rc<RefCell<GcHeap>>,
     /// Reference to the port stack for reading input
-    port_stack: &'a mut PortStack,
+    pub port_stack: Rc<RefCell<PortStack>>,
     /// Reference to the file table for file port operations
-    file_table: &'a mut FileTable,
+    pub file_table: Rc<RefCell<FileTable>>,
     /// Character buffer for unreading characters
     buffer: Vec<char>,
 }
 
-impl<'a> Tokenizer<'a> {
+impl Tokenizer {
     /// Create a new tokenizer that reads from the given port stack.
     ///
     /// The tokenizer will read characters from the current port in the
@@ -123,7 +125,7 @@ impl<'a> Tokenizer<'a> {
     ///
     /// let tokenizer = Tokenizer::new(&mut heap, &mut port_stack, &mut file_table);
     /// ```
-    pub fn new(heap: &'a mut GcHeap, port_stack: &'a mut PortStack, file_table: &'a mut FileTable) -> Self {
+    pub fn new(heap: Rc<RefCell<GcHeap>>, port_stack: Rc<RefCell<PortStack>>, file_table: Rc<RefCell<FileTable>>) -> Self {
         Self { heap, port_stack, file_table, buffer: Vec::new() }
     }
 
@@ -140,8 +142,7 @@ impl<'a> Tokenizer<'a> {
         if let Some(c) = self.buffer.pop() {
             Some(c)
         } else {
-            // Use the global heap for all tokenization
-            read_char(self.heap, self.port_stack, self.file_table)
+            read_char(&mut *self.heap.borrow_mut(), &mut *self.port_stack.borrow_mut(), &mut *self.file_table.borrow_mut())
         }
     }
 
@@ -153,8 +154,26 @@ impl<'a> Tokenizer<'a> {
     /// # Arguments
     ///
     /// * `c` - The character to put back
-    fn unread_char(&mut self, c: char) {
+    pub fn unread_char(&mut self, c: char) {
         self.buffer.push(c);
+    }
+
+    /// Put a token back into the input stream.
+    ///
+    /// This method allows the tokenizer to "peek ahead" by reading a token
+    /// and then putting it back if it's not needed.
+    ///
+    /// # Arguments
+    ///
+    /// * `token` - The token to put back
+    pub fn unread_char_if_token(&mut self, token: Token) {
+        match token {
+            Token::LParen => self.unread_char('('),
+            Token::RParen => self.unread_char(')'),
+            Token::Dot => self.unread_char('.'),
+            Token::Quote => self.unread_char(' '), // Not supported for now
+            Token::String(_) | Token::Number(_) | Token::Symbol(_) | Token::EOF => {}
+        }
     }
 
     /// Skip whitespace and comments until the next meaningful character.
@@ -462,18 +481,18 @@ mod tests {
     use std::fs::File;
     use std::io::Write;
 
-    fn tokenizer_from_str<'a>(heap: &'a mut GcHeap, s: &str) -> Tokenizer<'a> {
+    fn tokenizer_from_str(heap: Rc<RefCell<GcHeap>>, s: &str) -> Tokenizer {
         use crate::io::new_string_port;
-        let port = new_string_port(heap, s);
-        let mut port_stack = Box::new(PortStack::new(port));
-        let mut file_table = Box::new(FileTable::new());
-        Tokenizer::new(heap, Box::leak(port_stack), Box::leak(file_table))
+        let port = new_string_port(&mut *heap.borrow_mut(), s);
+        let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
+        let file_table = Rc::new(RefCell::new(FileTable::new()));
+        Tokenizer::new(heap, port_stack, file_table)
     }
 
     #[test]
     fn test_simple_tokens() {
-        let mut heap = GcHeap::new();
-        let mut t = tokenizer_from_str(&mut heap, "( ) . '");
+        let heap = Rc::new(RefCell::new(GcHeap::new()));
+        let mut t = tokenizer_from_str(heap.clone(), "( ) . '");
         assert_eq!(t.next_token(), Token::LParen);
         assert_eq!(t.next_token(), Token::RParen);
         assert_eq!(t.next_token(), Token::Dot);
@@ -483,8 +502,8 @@ mod tests {
 
     #[test]
     fn test_numbers_and_symbols() {
-        let mut heap = GcHeap::new();
-        let mut t = tokenizer_from_str(&mut heap, "123 -45 3.14 foo bar-1 +inf.0");
+        let heap = Rc::new(RefCell::new(GcHeap::new()));
+        let mut t = tokenizer_from_str(heap.clone(), "123 -45 3.14 foo bar-1 +inf.0");
         assert_eq!(t.next_token(), Token::Number("123".to_string()));
         assert_eq!(t.next_token(), Token::Number("-45".to_string()));
         assert_eq!(t.next_token(), Token::Number("3.14".to_string()));
@@ -496,8 +515,8 @@ mod tests {
 
     #[test]
     fn test_strings() {
-        let mut heap = GcHeap::new();
-        let mut t = tokenizer_from_str(&mut heap, "\"hello\" \"a b c\"");
+        let heap = Rc::new(RefCell::new(GcHeap::new()));
+        let mut t = tokenizer_from_str(heap.clone(), "\"hello\" \"a b c\"");
         assert_eq!(t.next_token(), Token::String("hello".to_string()));
         assert_eq!(t.next_token(), Token::String("a b c".to_string()));
         assert_eq!(t.next_token(), Token::EOF);
@@ -505,8 +524,8 @@ mod tests {
 
     #[test]
     fn test_comments_and_whitespace() {
-        let mut heap = GcHeap::new();
-        let mut t = tokenizer_from_str(&mut heap, "foo ; this is a comment\nbar\n; full line\n123");
+        let heap = Rc::new(RefCell::new(GcHeap::new()));
+        let mut t = tokenizer_from_str(heap.clone(), "foo ; this is a comment\nbar\n; full line\n123");
         assert_eq!(t.next_token(), Token::Symbol("foo".to_string()));
         assert_eq!(t.next_token(), Token::Symbol("bar".to_string()));
         assert_eq!(t.next_token(), Token::Number("123".to_string()));
@@ -515,8 +534,8 @@ mod tests {
 
     #[test]
     fn test_multiple_tokens_per_line() {
-        let mut heap = GcHeap::new();
-        let mut t = tokenizer_from_str(&mut heap, "(foo 123) (bar)");
+        let heap = Rc::new(RefCell::new(GcHeap::new()));
+        let mut t = tokenizer_from_str(heap.clone(), "(foo 123) (bar)");
         assert_eq!(t.next_token(), Token::LParen);
         assert_eq!(t.next_token(), Token::Symbol("foo".to_string()));
         assert_eq!(t.next_token(), Token::Number("123".to_string()));
@@ -529,8 +548,8 @@ mod tests {
 
     #[test]
     fn test_special_symbol_chars() {
-        let mut heap = GcHeap::new();
-        let mut t = tokenizer_from_str(&mut heap, "foo@bar . + - ... @@@");
+        let heap = Rc::new(RefCell::new(GcHeap::new()));
+        let mut t = tokenizer_from_str(heap.clone(), "foo@bar . + - ... @@@");
         assert_eq!(t.next_token(), Token::Symbol("foo@bar".to_string()));
         assert_eq!(t.next_token(), Token::Dot);
         assert_eq!(t.next_token(), Token::Symbol("+".to_string()));
@@ -542,10 +561,10 @@ mod tests {
 
     #[test]
     fn test_eof_handling() {
-        let mut heap = GcHeap::new();
-        let mut t = tokenizer_from_str(&mut heap, "");
+        let heap = Rc::new(RefCell::new(GcHeap::new()));
+        let mut t = tokenizer_from_str(heap.clone(), "");
         assert_eq!(t.next_token(), Token::EOF);
-        let mut t = tokenizer_from_str(&mut heap, "foo");
+        let mut t = tokenizer_from_str(heap.clone(), "foo");
         assert_eq!(t.next_token(), Token::Symbol("foo".to_string()));
         assert_eq!(t.next_token(), Token::EOF);
     }
