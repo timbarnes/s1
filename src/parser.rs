@@ -15,7 +15,7 @@
 //! use std::cell::RefCell;
 //!
 //! let heap = Rc::new(RefCell::new(GcHeap::new()));
-//! let port = Port { kind: PortKind::StringPort { content:42.to_string(), pos: 0 } };
+//! let port = Port { kind: PortKind::StringPortInput { content:42.to_string(), pos: 0 } };
 //! let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
 //! let file_table = Rc::new(RefCell::new(FileTable::new()));
 //! let tokenizer = Tokenizer::new(port_stack, file_table);
@@ -200,7 +200,7 @@ mod tests {
     #[test]
     fn parse_number() {
         let heap = Rc::new(RefCell::new(GcHeap::new()));
-        let port = Port { kind: PortKind::StringPort { content:42.to_string(), pos: 0 } };
+        let port = Port { kind: PortKind::StringPortInput { content:42.to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
@@ -211,7 +211,7 @@ mod tests {
     #[test]
     fn parse_symbol() {
         let heap = Rc::new(RefCell::new(GcHeap::new()));
-        let port = Port { kind: PortKind::StringPort { content: "hello".to_string(), pos: 0 } };
+        let port = Port { kind: PortKind::StringPortInput { content: "hello".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
@@ -222,7 +222,7 @@ mod tests {
     #[test]
     fn parse_string() {
         let heap = Rc::new(RefCell::new(GcHeap::new()));
-        let port = Port { kind: PortKind::StringPort { content: "\"hello world\"".to_string(), pos: 0 } };
+        let port = Port { kind: PortKind::StringPortInput { content: "\"hello world\"".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
@@ -233,7 +233,7 @@ mod tests {
     #[test]
     fn parse_nil() {
         let heap = Rc::new(RefCell::new(GcHeap::new()));
-        let port = Port { kind: PortKind::StringPort { content: "nil".to_string(), pos: 0 } };
+        let port = Port { kind: PortKind::StringPortInput { content: "nil".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn parse_simple_list() {
         let heap = Rc::new(RefCell::new(GcHeap::new()));
-        let port = Port { kind: PortKind::StringPort { content: "(1 2 3)".to_string(), pos: 0 } };
+        let port = Port { kind: PortKind::StringPortInput { content: "(1 2 3)".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
@@ -264,7 +264,7 @@ mod tests {
     #[test]
     fn parse_booleans_and_nil() {
         let heap = Rc::new(RefCell::new(GcHeap::new()));
-        let port = Port { kind: PortKind::StringPort { content: "#t #f".to_string(), pos: 0 } };
+        let port = Port { kind: PortKind::StringPortInput { content: "#t #f".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
@@ -279,7 +279,7 @@ mod tests {
     #[test]
     fn parse_character() {
         let heap = Rc::new(RefCell::new(GcHeap::new()));
-        let port = Port { kind: PortKind::StringPort { content: "#\\a #\\space".to_string(), pos: 0 } };
+        let port = Port { kind: PortKind::StringPortInput { content: "#\\a #\\space".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn parse_quoted() {
         let heap = Rc::new(RefCell::new(GcHeap::new()));
-        let port = Port { kind: PortKind::StringPort { content: "'hello".to_string(), pos: 0 } };
+        let port = Port { kind: PortKind::StringPortInput { content: "'hello".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
@@ -311,7 +311,7 @@ mod tests {
     #[test]
     fn parse_dotted_pair() {
         let heap = Rc::new(RefCell::new(GcHeap::new()));
-        let port = Port { kind: PortKind::StringPort { content: "(1 . 2)".to_string(), pos: 0 } };
+        let port = Port { kind: PortKind::StringPortInput { content: "(1 . 2)".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
@@ -325,7 +325,7 @@ mod tests {
     #[test]
     fn parse_vector() {
         let heap = Rc::new(RefCell::new(GcHeap::new()));
-        let port = Port { kind: PortKind::StringPort { content: "#(1 2 3)".to_string(), pos: 0 } };
+        let port = Port { kind: PortKind::StringPortInput { content: "#(1 2 3)".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
@@ -341,7 +341,7 @@ mod tests {
     #[test]
     fn parse_string_debug() {
         let heap = Rc::new(RefCell::new(GcHeap::new()));
-        let port = Port { kind: PortKind::StringPort { content: "hello world".to_string(), pos: 0 } };
+        let port = Port { kind: PortKind::StringPortInput { content: "hello world".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
@@ -358,7 +358,7 @@ mod tests {
     fn eval_quote_special_form() {
         // Set up heap, parser, and environment with quote registered
         let heap = Rc::new(RefCell::new(GcHeap::new()));
-        let port = Port { kind: PortKind::StringPort { content: "'foo".to_string(), pos: 0 } };
+        let port = Port { kind: PortKind::StringPortInput { content: "'foo".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         let tokenizer = Tokenizer::new(port_stack.clone(), file_table.clone());
@@ -414,7 +414,7 @@ mod tests {
     #[test]
     fn parse_nested_quoted() {
         let heap = Rc::new(RefCell::new(GcHeap::new()));
-        let port = Port { kind: PortKind::StringPort { content: "''foo".to_string(), pos: 0 } };
+        let port = Port { kind: PortKind::StringPortInput { content: "''foo".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
@@ -434,7 +434,7 @@ mod tests {
     #[test]
     fn parse_negative_and_positive_numbers() {
         let heap = Rc::new(RefCell::new(GcHeap::new()));
-        let port = Port { kind: PortKind::StringPort { content: "-45 +123 -123412341234123412341234".to_string(), pos: 0 } };
+        let port = Port { kind: PortKind::StringPortInput { content: "-45 +123 -123412341234123412341234".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());

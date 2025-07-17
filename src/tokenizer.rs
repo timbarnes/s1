@@ -419,7 +419,7 @@ mod tests {
 
     fn tokenizer_from_str(port_stack: Rc<RefCell<PortStack>>, file_table: Rc<RefCell<FileTable>>, s: &str) -> Tokenizer {
         // Create a string port
-        let port = Port { kind: PortKind::StringPort { content: s.to_string(), pos:0 } };
+        let port = Port { kind: PortKind::StringPortInput { content: s.to_string(), pos:0 } };
         // Replace the port stack's current port with our string port
         port_stack.borrow_mut().push(port);
         Tokenizer::new(port_stack, file_table)

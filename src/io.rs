@@ -40,8 +40,10 @@ pub enum PortKind {
     Stdout,
     /// File-based port with read/write mode and optional file ID
     File { name: String, write: bool, file_id: Option<usize> },
-    /// In-memory string port with content and current position
-    StringPort { content: String, pos: usize },
+    /// In-memory string port for input with content and current position
+    StringPortInput { content: String, pos: usize },
+    /// In-memory string port for output with accumulating content
+    StringPortOutput { content: String },
 }
 
 /// Represents an open port (input or output).
@@ -341,7 +343,7 @@ impl FileTable {
 
 /// Helper function to read a line from a string port and update its position
 fn read_line_from_string_port(port: &Port) -> Option<(String, Port)> {
-    if let PortKind::StringPort { content, pos } = &port.kind {
+    if let PortKind::StringPortInput { content, pos } = &port.kind {
         let mut lines = content.lines();
         // Skip to the current position
         for _ in 0..*pos {
@@ -350,7 +352,7 @@ fn read_line_from_string_port(port: &Port) -> Option<(String, Port)> {
         if let Some(line) = lines.next() {
             let new_pos = *pos + 1;
             let new_port = Port {
-                kind: PortKind::StringPort {
+                kind: PortKind::StringPortInput {
                     content: content.clone(),
                     pos: new_pos,
                 }
@@ -465,8 +467,8 @@ pub fn read_line(port_stack: &mut PortStack, file_table: &mut FileTable) -> Opti
 /// write_line(&mut port_stack, &mut file_table, "Hello, World!");
 /// ```
 pub fn write_line(port_stack: &mut PortStack, file_table: &mut FileTable, line: &str) -> bool {
-    let port = port_stack.current();
-    match &port.kind {
+    let port = port_stack.current_mut();
+    match &mut port.kind {
         PortKind::Stdout => {
             print!("{}", line);
             io::stdout().flush().ok();
@@ -483,6 +485,10 @@ pub fn write_line(port_stack: &mut PortStack, file_table: &mut FileTable, line: 
             } else {
                 false
             }
+        }
+        PortKind::StringPortOutput { content } => {
+            content.push_str(line);
+            true
         }
         _ => false,
     }
@@ -541,7 +547,7 @@ pub fn read_char(port_stack: &mut PortStack, file_table: &mut FileTable) -> Opti
                 None
             }
         }
-        PortKind::StringPort { content, pos } => {
+        PortKind::StringPortInput { content, pos } => {
             if *pos < content.len() {
                 let ch = content.chars().nth(*pos).unwrap();
                 *pos += 1;
@@ -550,6 +556,7 @@ pub fn read_char(port_stack: &mut PortStack, file_table: &mut FileTable) -> Opti
                 None
             }
         }
+        PortKind::StringPortOutput { .. } => None,
     }
 }
 
@@ -582,8 +589,8 @@ pub fn read_char(port_stack: &mut PortStack, file_table: &mut FileTable) -> Opti
 /// write_char(&mut port_stack, &mut file_table, 'A');
 /// ```
 pub fn write_char(port_stack: &mut PortStack, file_table: &mut FileTable, ch: char) -> bool {
-    let port = port_stack.current();
-    match &port.kind {
+    let port = port_stack.current_mut();
+    match &mut port.kind {
         PortKind::Stdout => {
             print!("{}", ch);
             io::stdout().flush().ok();
@@ -600,6 +607,10 @@ pub fn write_char(port_stack: &mut PortStack, file_table: &mut FileTable, ch: ch
             } else {
                 false
             }
+        }
+        PortKind::StringPortOutput { content } => {
+            content.push(ch);
+            true
         }
         _ => false,
     }
@@ -634,10 +645,73 @@ pub fn write_char(port_stack: &mut PortStack, file_table: &mut FileTable, ch: ch
 /// ```
 pub fn new_string_port(s: &str) -> Port {
     Port {
-        kind: PortKind::StringPort {
+        kind: PortKind::StringPortInput {
             content: s.to_string(),
             pos: 0,
         }
+    }
+}
+
+/// Create a new output string port for in-memory string output.
+///
+/// Output string ports allow writing to a string as if it were a file,
+/// accumulating content that can be retrieved later.
+///
+/// # Returns
+///
+/// Returns a new output string port.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::io::{new_output_string_port, PortStack, FileTable, write_line, get_output_string, Port, PortKind};
+///
+/// let output_port = new_output_string_port();
+/// let mut port_stack = PortStack::new(output_port);
+/// let mut file_table = FileTable::new();
+///
+/// // Write to the string port
+/// write_line(&mut port_stack, &mut file_table, "hello");
+/// 
+/// // Get the accumulated content
+/// let content = get_output_string(&port_stack.current());
+/// assert_eq!(content, "hello");
+/// ```
+pub fn new_output_string_port() -> Port {
+    Port {
+        kind: PortKind::StringPortOutput {
+            content: String::new(),
+        }
+    }
+}
+
+/// Get the content from an output string port.
+///
+/// This function retrieves the accumulated content from a string output port.
+/// It should only be called on ports that are output string ports.
+///
+/// # Arguments
+///
+/// * `port` - The port to get content from
+///
+/// # Returns
+///
+/// Returns the accumulated content as a string, or an empty string if the port
+/// is not an output string port.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::io::{new_output_string_port, get_output_string, Port, PortKind};
+///
+/// let port = new_output_string_port();
+/// let content = get_output_string(&port);
+/// assert_eq!(content, "");
+/// ```
+pub fn get_output_string(port: &Port) -> String {
+    match &port.kind {
+        PortKind::StringPortOutput { content } => content.clone(),
+        _ => String::new(),
     }
 }
 
@@ -746,5 +820,21 @@ mod tests {
         assert_eq!(read_char(&mut stack, &mut file_table), Some('l'));
         assert_eq!(read_char(&mut stack, &mut file_table), Some('o'));
         assert_eq!(read_char(&mut stack, &mut file_table), None);
+    }
+
+    #[test]
+    fn test_output_string_port() {
+        let output_port = new_output_string_port();
+        let mut stack = PortStack::new(output_port);
+        let mut file_table = FileTable::new();
+        
+        // Write to the output string port
+        assert!(write_line(&mut stack, &mut file_table, "hello"));
+        assert!(write_char(&mut stack, &mut file_table, ' '));
+        assert!(write_line(&mut stack, &mut file_table, "world"));
+        
+        // Get the accumulated content
+        let content = get_output_string(&stack.current());
+        assert_eq!(content, "hello world");
     }
 } 
