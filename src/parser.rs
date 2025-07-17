@@ -27,6 +27,8 @@ use crate::gc::{GcHeap, GcRef, new_int, new_float, new_symbol, new_string, new_p
 use crate::tokenizer::{Tokenizer, Token};
 use std::rc::Rc;
 use std::cell::RefCell;
+use num_bigint::BigInt;
+use num_traits::Num;
 
 /// Parser for Scheme s-expressions.
 ///
@@ -72,40 +74,67 @@ impl Parser {
         Ok(new_pair(&mut heap, quote_sym, quoted_list))
     }
 
+    fn parse_number_token(&mut self, s: &str) -> Result<GcRef, String> {
+        if s.contains('.') || s.contains('e') || s.contains('E') {
+            // Parse as float if it looks like a float
+            if let Ok(f) = s.parse::<f64>() {
+                Ok(new_float(&mut *self.heap.borrow_mut(), f))
+            } else {
+                Err(format!("Invalid float literal: {}", s))
+            }
+        } else {
+            // Parse as BigInt
+            if let Some(i) = BigInt::parse_bytes(s.as_bytes(), 10) {
+                Ok(new_int(&mut *self.heap.borrow_mut(), i))
+            } else {
+                Err(format!("Invalid integer literal: {}", s))
+            }
+        }
+    }
+
+    fn parse_symbol_token(&mut self, s: &str) -> Result<GcRef, String> {
+        if s == "nil" || s == "()" {
+            Ok(self.heap.borrow().nil())
+        } else if s.starts_with("#\\") {
+            let ch = match &s[2..] {
+                "space" => Some(' '),
+                "newline" => Some('\n'),
+                rest if rest.len() == 1 => rest.chars().next(),
+                _ => None,
+            };
+            if let Some(c) = ch {
+                Ok(crate::gc::new_char(&mut *self.heap.borrow_mut(), c))
+            } else {
+                Err(format!("Invalid character literal: {}", s))
+            }
+        } else {
+            Ok(new_symbol(&mut *self.heap.borrow_mut(), s))
+        }
+    }
+
+    fn parse_vector_token(&mut self) -> Result<GcRef, String> {
+        let mut vec_elems = Vec::new();
+        loop {
+            let t = self.tokenizer.next_token();
+            if let Some(Token::RightBracket) = t {
+                break;
+            }
+            if let None = t {
+                return Err("Unclosed vector (unexpected EOF)".to_string());
+            }
+            vec_elems.push(self.parse_from_token(t)?);
+        }
+        Ok(crate::gc::new_vector(&mut *self.heap.borrow_mut(), vec_elems))
+    }
+
     /// Parse an s-expression from a given token (used for list elements).
     fn parse_from_token(&mut self, token: Option<Token>) -> Result<GcRef, String> {
         match token {
-            Some(Token::Number(s)) => {
-                if let Ok(i) = s.parse::<i64>() {
-                    Ok(new_int(&mut *self.heap.borrow_mut(), i))
-                } else if let Ok(f) = s.parse::<f64>() {
-                    Ok(new_float(&mut *self.heap.borrow_mut(), f))
-                } else {
-                    Err(format!("Invalid number literal: {}", s))
-                }
-            }
+            Some(Token::Number(s)) => self.parse_number_token(&s),
             Some(Token::String(s)) => Ok(new_string(&mut *self.heap.borrow_mut(), s)),
             Some(Token::Boolean(b)) => Ok(crate::gc::new_bool(&mut *self.heap.borrow_mut(), b)),
             Some(Token::Character(c)) => Ok(crate::gc::new_char(&mut *self.heap.borrow_mut(), c)),
-            Some(Token::Symbol(s)) => {
-                if s == "nil" || s == "()" {
-                    Ok(self.heap.borrow().nil())
-                } else if s.starts_with("#\\") {
-                    let ch = match &s[2..] {
-                        "space" => Some(' '),
-                        "newline" => Some('\n'),
-                        rest if rest.len() == 1 => rest.chars().next(),
-                        _ => None,
-                    };
-                    if let Some(c) = ch {
-                        Ok(crate::gc::new_char(&mut *self.heap.borrow_mut(), c))
-                    } else {
-                        Err(format!("Invalid character literal: {}", s))
-                    }
-                } else {
-                    Ok(new_symbol(&mut *self.heap.borrow_mut(), s))
-                }
-            }
+            Some(Token::Symbol(s)) => self.parse_symbol_token(&s),
             Some(Token::LeftParen) => self.parse_list(),
             Some(Token::RightParen) => Err("Unexpected ')'".to_string()),
             Some(Token::Dot) => Err("Unexpected '.'".to_string()),
@@ -113,22 +142,7 @@ impl Parser {
                 // This should not happen since quotes are handled in parse()
                 Err("Unexpected quote token".to_string())
             }
-            Some(Token::LeftBracket) => {
-                // Drop the heap borrow and handle vector parsing
-                let mut vec_elems = Vec::new();
-                loop {
-                    let t = self.tokenizer.next_token();
-                    if let Some(Token::RightBracket) = t {
-                        break;
-                    }
-                    if let None = t {
-                        return Err("Unclosed vector (unexpected EOF)".to_string());
-                    }
-                    vec_elems.push(self.parse_from_token(t)?);
-                }
-                let mut heap = self.heap.borrow_mut();
-                Ok(crate::gc::new_vector(&mut heap, vec_elems))
-            }
+            Some(Token::LeftBracket) => self.parse_vector_token(),
             Some(Token::RightBracket) => Err("Unexpected ']'".to_string()),
             Some(Token::Eof) => Err("Unexpected end of input".to_string()),
             None => Err("Unexpected end of input".to_string()),
