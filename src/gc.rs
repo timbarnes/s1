@@ -3,7 +3,6 @@
 //! This module provides a garbage-collected heap for Scheme objects, including:
 //! - Basic Scheme types (integers, floats, symbols, strings, booleans, characters)
 //! - Compound types (pairs, vectors, closures, environment frames)
-//! - I/O types (ports for stdin, stdout, files, and string ports)
 //! - Built-in procedures and special values
 //!
 //! # Examples
@@ -20,6 +19,8 @@
 //! heap.collect_garbage();
 //! ```
 
+#![allow(dead_code)]
+
 use std::cell::RefCell;
 
 use std::rc::Rc;
@@ -27,37 +28,6 @@ use std::rc::Rc;
 use std::cmp::PartialEq;
 
 use std::collections::HashMap;
-
-/// Represents the different types of ports supported by the Scheme interpreter.
-///
-/// Ports are used for input/output operations and can be:
-/// - Standard input/output streams
-/// - File-based ports for reading/writing files
-/// - String ports for in-memory string operations
-#[derive(Clone, Debug, PartialEq)]
-pub enum PortKind {
-    /// Standard input stream
-    Stdin,
-    /// Standard output stream
-    Stdout,
-    /// File-based port with read/write mode
-    File { name: String, write: bool },
-    /// In-memory string port with current position
-    StringPort(String, usize),
-}
-
-/// Represents a Scheme port with its kind and optional file identifier.
-///
-/// File ports store a file_id that maps to an open file handle in the FileTable.
-/// String ports store the string content and current read position.
-#[derive(Clone, Debug)]
-pub struct Port {
-    /// The type and configuration of this port
-    pub kind: PortKind,
-    /// File identifier for file ports (None for other port types)
-    pub file_id: Option<usize>,
-    // In a real implementation, you might add file handles, buffers, etc.
-}
 
 /// The core type representing a Scheme value in the heap.
 ///
@@ -91,8 +61,6 @@ pub enum SchemeValue {
     Char(char),
     /// Built-in procedures (native Rust functions)
     Primitive(Rc<dyn Fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>>),
-    /// I/O ports
-    Port(Port),
     /// Environment frames (variable bindings)
     EnvFrame(HashMap<String, GcRef>),
     /// Empty list (nil)
@@ -114,7 +82,6 @@ impl std::fmt::Debug for SchemeValue {
             SchemeValue::Bool(b) => write!(f, "Bool({})", b),
             SchemeValue::Char(c) => write!(f, "Char({:?})", c),
             SchemeValue::Primitive(_) => write!(f, "Primitive(<builtin>)"),
-            SchemeValue::Port(port) => f.debug_tuple("Port").field(&port.kind).finish(),
             SchemeValue::EnvFrame(map) => f.debug_map().entries(map.iter()).finish(),
             SchemeValue::Nil => write!(f, "Nil"),
         }
@@ -148,9 +115,6 @@ impl PartialEq for SchemeValue {
             (SchemeValue::Char(a), SchemeValue::Char(b)) => a == b,
             // For Primitive and Port, just compare type (not function pointer or port identity)
             (SchemeValue::Primitive(_), SchemeValue::Primitive(_)) => true,
-            (SchemeValue::Port(a), SchemeValue::Port(b)) => {
-                a.kind == b.kind && a.file_id == b.file_id
-            }
             (SchemeValue::EnvFrame(a), SchemeValue::EnvFrame(b)) => {
                 if a.len() != b.len() { return false; }
                 for (k, va) in a.iter() {
@@ -198,6 +162,7 @@ pub struct GcHeap {
     objects: Vec<GcRef>,
     /// Root references that keep objects alive
     roots: Vec<GcRef>,
+    nil: Option<GcRef>,
 }
 
 impl GcHeap {
@@ -212,10 +177,14 @@ impl GcHeap {
     /// assert_eq!(heap.heap_size(), 0);
     /// ```
     pub fn new() -> Self {
-        Self {
+        let mut heap = GcHeap {
             objects: Vec::new(),
             roots: Vec::new(),
-        }
+            nil: None,
+        };
+        let nil_obj = heap.alloc(SchemeValue::Nil);
+        heap.nil = Some(nil_obj.clone());
+        heap
     }
 
     /// Allocate a new SchemeValue on the heap and return a reference.
@@ -370,6 +339,10 @@ impl GcHeap {
     /// Roots are objects that are kept alive across garbage collection.
     pub fn root_count(&self) -> usize {
         self.roots.len()
+    }
+
+    pub fn nil(&self) -> GcRef {
+        self.nil.as_ref().unwrap().clone()
     }
 }
 
@@ -531,21 +504,6 @@ pub fn new_primitive(heap: &mut GcHeap, f: Rc<dyn Fn(&mut GcHeap, &[GcRef]) -> R
     heap.alloc(SchemeValue::Primitive(f))
 }
 
-/// Create a new port on the heap.
-///
-/// # Examples
-///
-/// ```rust
-/// use s1::gc::{GcHeap, new_port, PortKind};
-///
-/// let mut heap = GcHeap::new();
-/// let stdin_port = new_port(&mut heap, PortKind::Stdin, None);
-/// let file_port = new_port(&mut heap, PortKind::File { name: "input.txt".to_string(), write: false }, Some(1));
-/// ```
-pub fn new_port(heap: &mut GcHeap, kind: PortKind, file_id: Option<usize>) -> GcRef {
-    heap.alloc(SchemeValue::Port(Port { kind, file_id }))
-}
-
 /// Create a new environment frame on the heap.
 ///
 /// # Examples
@@ -575,7 +533,7 @@ pub fn new_env_frame(heap: &mut GcHeap, map: HashMap<String, GcRef>) -> GcRef {
 /// assert!(is_nil(&nil));
 /// ```
 pub fn new_nil(heap: &mut GcHeap) -> GcRef {
-    heap.alloc(SchemeValue::Nil)
+    heap.nil()
 }
 
 /// Accessor helpers (returns some inner data or None):
@@ -751,39 +709,6 @@ pub fn is_primitive(obj: &GcRef) -> bool {
     matches!(&obj.borrow().value, SchemeValue::Primitive(_))
 }
 
-/// Check if a GcRef contains a port.
-///
-/// # Examples
-///
-/// ```rust
-/// use s1::gc::{GcHeap, new_port, PortKind, is_port};
-///
-/// let mut heap = GcHeap::new();
-/// let port = new_port(&mut heap, PortKind::Stdin, None);
-/// assert!(is_port(&port));
-/// ```
-pub fn is_port(obj: &GcRef) -> bool {
-    matches!(&obj.borrow().value, SchemeValue::Port(_))
-}
-
-/// Extract port information from a GcRef, if it contains a port.
-///
-/// # Examples
-///
-/// ```rust
-/// use s1::gc::{GcHeap, new_port, PortKind, as_port};
-///
-/// let mut heap = GcHeap::new();
-/// let port = new_port(&mut heap, PortKind::Stdin, None);
-/// assert_eq!(as_port(&port), Some(PortKind::Stdin));
-/// ```
-pub fn as_port(obj: &GcRef) -> Option<PortKind> {
-    match &obj.borrow().value {
-        SchemeValue::Port(port) => Some(port.kind.clone()),
-        _ => None,
-    }
-}
-
 /// Extract an environment frame from a GcRef, if it contains one.
 ///
 /// # Examples
@@ -934,7 +859,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bool_char_primitive_port() {
+    fn test_bool_char_primitive() {
         use std::rc::Rc;
         let mut heap = GcHeap::new();
         // Bool
@@ -950,10 +875,6 @@ mod tests {
         // Primitive
         let prim = new_primitive(&mut heap, Rc::new(|_, _| Err("not implemented".to_string())));
         assert!(is_primitive(&prim));
-
-        // Port
-        let port = new_port(&mut heap, PortKind::Stdin, None);
-        assert!(is_port(&port));
     }
 
     #[test]
@@ -972,23 +893,6 @@ mod tests {
         let v3 = new_float(&mut heap, 3.14);
         env_frame_insert(&env, "z".to_string(), v3.clone());
         assert_eq!(env_frame_lookup(&env, "z").unwrap().borrow().value, SchemeValue::Float(3.14));
-    }
-
-    #[test]
-    fn test_port_struct() {
-        let mut heap = GcHeap::new();
-        let p1 = new_port(&mut heap, PortKind::Stdin, None);
-        let p2 = new_port(&mut heap, PortKind::Stdout, None);
-        let p3 = new_port(&mut heap, PortKind::File { name: "foo.txt".to_string(), write: false }, None);
-        let p4 = new_port(&mut heap, PortKind::File { name: "bar.txt".to_string(), write: true }, None);
-        assert!(is_port(&p1));
-        assert!(is_port(&p2));
-        assert!(is_port(&p3));
-        assert!(is_port(&p4));
-        assert_eq!(as_port(&p1), Some(PortKind::Stdin));
-        assert_eq!(as_port(&p2), Some(PortKind::Stdout));
-        assert_eq!(as_port(&p3), Some(PortKind::File { name: "foo.txt".to_string(), write: false }));
-        assert_eq!(as_port(&p4), Some(PortKind::File { name: "bar.txt".to_string(), write: true }));
     }
 }
 

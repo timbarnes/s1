@@ -9,26 +9,51 @@
 //! # Examples
 //!
 //! ```rust
-//! use s1::io::{PortStack, FileTable, read_line, write_line};
-//! use s1::gc::{GcHeap, PortKind, new_port};
+//! use s1::io::{PortStack, FileTable, read_line, write_line, Port, PortKind};
 //!
-//! let mut heap = GcHeap::new();
-//! let stdin_port = new_port(&mut heap, PortKind::Stdin, None);
+//! let stdin_port = Port { kind: PortKind::Stdin };
 //! let mut port_stack = PortStack::new(stdin_port);
 //! let mut file_table = FileTable::new();
 //!
 //! // Read from current port (stdin)
-//! let line = read_line(&mut heap, &mut port_stack, &mut file_table);
+//! let line = read_line(&mut port_stack, &mut file_table);
 //!
 //! // Write to current port (stdout)
-//! write_line(&mut heap, &mut port_stack, &mut file_table, "Hello, World!");
+//! write_line(&mut port_stack, &mut file_table, "Hello, World!");
 //! ```
 
-use crate::gc::{GcHeap, GcRef, SchemeValue, PortKind, new_port};
-// use std::cell::RefCell;
 use std::io::{self, Write, Read, BufRead, BufReader, BufWriter};
 use std::collections::HashMap;
 use std::fs::File;
+
+/// The different types of ports supported by the I/O system.
+///
+/// Ports are used for input/output operations and can be:
+/// - Standard input/output streams
+/// - File-based ports for reading/writing files
+/// - String ports for in-memory string operations
+#[derive(Clone, Debug, PartialEq)]
+pub enum PortKind {
+    /// Standard input stream
+    Stdin,
+    /// Standard output stream
+    Stdout,
+    /// File-based port with read/write mode and optional file ID
+    File { name: String, write: bool, file_id: Option<usize> },
+    /// In-memory string port with content and current position
+    StringPort { content: String, pos: usize },
+}
+
+/// Represents an open port (input or output).
+///
+/// Ports can be stdin, stdout, file-based, or string-based.
+/// File ports store a file_id that maps to an open file handle in the FileTable.
+/// String ports store the string content and current read position.
+#[derive(Clone, Debug)]
+pub struct Port {
+    /// The type and configuration of this port
+    pub kind: PortKind,
+}
 
 /// Manages a stack of ports for input/output operations.
 ///
@@ -39,25 +64,23 @@ use std::fs::File;
 /// # Examples
 ///
 /// ```rust
-/// use s1::io::PortStack;
-/// use s1::gc::{GcHeap, PortKind, new_port};
+/// use s1::io::{PortStack, Port, PortKind};
 ///
-/// let mut heap = GcHeap::new();
-/// let stdin_port = new_port(&mut heap, PortKind::Stdin, None);
-/// let file_port = new_port(&mut heap, PortKind::File { name: "input.txt".to_string(), write: false }, Some(1));
+/// let stdin_port = Port { kind: PortKind::Stdin };
+/// let file_port = Port { kind: PortKind::File { name: "input.txt".to_string(), write: false, file_id: Some(1) } };
 ///
-/// let mut stack = PortStack::new(stdin_port.clone());
-/// assert_eq!(stack.current().borrow().value, stdin_port.borrow().value);
+/// let mut stack = PortStack::new(stdin_port);
+/// assert_eq!(stack.current().kind, PortKind::Stdin);
 ///
-/// stack.push(file_port.clone());
-/// assert_eq!(stack.current().borrow().value, file_port.borrow().value);
+/// stack.push(file_port);
+/// assert_eq!(stack.current().kind, PortKind::File { name: "input.txt".to_string(), write: false, file_id: Some(1) });
 ///
 /// stack.pop();
-/// assert_eq!(stack.current().borrow().value, stdin_port.borrow().value);
+/// assert_eq!(stack.current().kind, PortKind::Stdin);
 /// ```
 pub struct PortStack {
     /// The stack of ports, with the current port at the top
-    stack: Vec<GcRef>,
+    stack: Vec<Port>,
 }
 
 impl PortStack {
@@ -68,15 +91,13 @@ impl PortStack {
     /// # Examples
     ///
     /// ```rust
-    /// use s1::io::PortStack;
-    /// use s1::gc::{GcHeap, PortKind, new_port};
+    /// use s1::io::{PortStack, Port, PortKind};
     ///
-    /// let mut heap = GcHeap::new();
-    /// let stdin_port = new_port(&mut heap, PortKind::Stdin, None);
-    /// let stack = PortStack::new(stdin_port.clone());
-    /// assert_eq!(stack.current().borrow().value, stdin_port.borrow().value);
+    /// let stdin_port = Port { kind: PortKind::Stdin };
+    /// let stack = PortStack::new(stdin_port);
+    /// assert_eq!(stack.current().kind, PortKind::Stdin);
     /// ```
-    pub fn new(initial: GcRef) -> Self {
+    pub fn new(initial: Port) -> Self {
         Self { stack: vec![initial] }
     }
 
@@ -85,16 +106,21 @@ impl PortStack {
     /// # Examples
     ///
     /// ```rust
-    /// use s1::io::PortStack;
-    /// use s1::gc::{GcHeap, PortKind, new_port};
+    /// use s1::io::{PortStack, Port, PortKind};
     ///
-    /// let mut heap = GcHeap::new();
-    /// let port = new_port(&mut heap, PortKind::Stdin, None);
-    /// let stack = PortStack::new(port.clone());
-    /// assert_eq!(stack.current().borrow().value, port.borrow().value);
+    /// let port = Port { kind: PortKind::Stdin };
+    /// let stack = PortStack::new(port);
+    /// assert_eq!(stack.current().kind, PortKind::Stdin);
     /// ```
-    pub fn current(&self) -> GcRef {
-        self.stack.last().unwrap().clone()
+    pub fn current(&self) -> &Port {
+        self.stack.last().unwrap()
+    }
+
+    /// Get a mutable reference to the current port.
+    ///
+    /// This is useful for updating port state (like string port position).
+    pub fn current_mut(&mut self) -> &mut Port {
+        self.stack.last_mut().unwrap()
     }
 
     /// Push a new port onto the stack, making it the current port.
@@ -102,18 +128,16 @@ impl PortStack {
     /// # Examples
     ///
     /// ```rust
-    /// use s1::io::PortStack;
-    /// use s1::gc::{GcHeap, PortKind, new_port};
+    /// use s1::io::{PortStack, Port, PortKind};
     ///
-    /// let mut heap = GcHeap::new();
-    /// let stdin_port = new_port(&mut heap, PortKind::Stdin, None);
-    /// let file_port = new_port(&mut heap, PortKind::File { name: "input.txt".to_string(), write: false }, Some(1));
+    /// let stdin_port = Port { kind: PortKind::Stdin };
+    /// let file_port = Port { kind: PortKind::File { name: "input.txt".to_string(), write: false, file_id: Some(1) } };
     ///
-    /// let mut stack = PortStack::new(stdin_port.clone());
-    /// stack.push(file_port.clone());
-    /// assert_eq!(stack.current().borrow().value, file_port.borrow().value);
+    /// let mut stack = PortStack::new(stdin_port);
+    /// stack.push(file_port);
+    /// assert_eq!(stack.current().kind, PortKind::File { name: "input.txt".to_string(), write: false, file_id: Some(1) });
     /// ```
-    pub fn push(&mut self, port: GcRef) {
+    pub fn push(&mut self, port: Port) {
         self.stack.push(port);
     }
 
@@ -125,19 +149,17 @@ impl PortStack {
     /// # Examples
     ///
     /// ```rust
-    /// use s1::io::PortStack;
-    /// use s1::gc::{GcHeap, PortKind, new_port};
+    /// use s1::io::{PortStack, Port, PortKind};
     ///
-    /// let mut heap = GcHeap::new();
-    /// let stdin_port = new_port(&mut heap, PortKind::Stdin, None);
-    /// let file_port = new_port(&mut heap, PortKind::File { name: "input.txt".to_string(), write: false }, Some(1));
+    /// let stdin_port = Port { kind: PortKind::Stdin };
+    /// let file_port = Port { kind: PortKind::File { name: "input.txt".to_string(), write: false, file_id: Some(1) } };
     ///
-    /// let mut stack = PortStack::new(stdin_port.clone());
-    /// stack.push(file_port.clone());
-    /// assert_eq!(stack.current().borrow().value, file_port.borrow().value);
+    /// let mut stack = PortStack::new(stdin_port);
+    /// stack.push(file_port);
+    /// assert_eq!(stack.current().kind, PortKind::File { name: "input.txt".to_string(), write: false, file_id: Some(1) });
     ///
     /// assert!(stack.pop());
-    /// assert_eq!(stack.current().borrow().value, stdin_port.borrow().value);
+    /// assert_eq!(stack.current().kind, PortKind::Stdin);
     ///
     /// assert!(!stack.pop()); // Cannot pop the last port
     /// ```
@@ -317,6 +339,31 @@ impl FileTable {
     }
 }
 
+/// Helper function to read a line from a string port and update its position
+fn read_line_from_string_port(port: &Port) -> Option<(String, Port)> {
+    if let PortKind::StringPort { content, pos } = &port.kind {
+        let mut lines = content.lines();
+        // Skip to the current position
+        for _ in 0..*pos {
+            lines.next();
+        }
+        if let Some(line) = lines.next() {
+            let new_pos = *pos + 1;
+            let new_port = Port {
+                kind: PortKind::StringPort {
+                    content: content.clone(),
+                    pos: new_pos,
+                }
+            };
+            Some((line.to_string() + "\n", new_port))
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
 /// Read a line from the current input port.
 ///
 /// This function reads from the current port on the port stack. If the current
@@ -325,7 +372,6 @@ impl FileTable {
 ///
 /// # Arguments
 ///
-/// * `heap` - The garbage collected heap
 /// * `port_stack` - The port stack to read from
 /// * `file_table` - The file table for file port operations
 ///
@@ -337,53 +383,55 @@ impl FileTable {
 /// # Examples
 ///
 /// ```rust
-/// use s1::io::{PortStack, FileTable, read_line};
-/// use s1::gc::{GcHeap, PortKind, new_port};
+/// use s1::io::{PortStack, FileTable, read_line, Port, PortKind};
 ///
-/// let mut heap = GcHeap::new();
-/// let stdin_port = new_port(&mut heap, PortKind::Stdin, None);
+/// let stdin_port = Port { kind: PortKind::Stdin };
 /// let mut port_stack = PortStack::new(stdin_port);
 /// let mut file_table = FileTable::new();
 ///
 /// // Read from stdin (in a real scenario, this would block for user input)
-/// let line = read_line(&mut heap, &mut port_stack, &mut file_table);
+/// let line = read_line(&mut port_stack, &mut file_table);
 /// ```
-pub fn read_line(heap: &mut GcHeap, port_stack: &mut PortStack, file_table: &mut FileTable) -> Option<String> {
+pub fn read_line(port_stack: &mut PortStack, file_table: &mut FileTable) -> Option<String> {
+    // Handle StringPort case separately to avoid borrow checker issues
+    if let Some((line, new_port)) = read_line_from_string_port(port_stack.current()) {
+        *port_stack.current_mut() = new_port;
+        return Some(line);
+    }
+
+    // Handle other port types
     let port = port_stack.current();
-    match &port.borrow().value {
-        SchemeValue::Port(p) => match &p.kind {
-            PortKind::Stdin => {
-                let mut buf = String::new();
-                let n = io::stdin().read_line(&mut buf).ok()?;
-                if n == 0 {
-                    if port_stack.pop() {
-                        return read_line(heap, port_stack, file_table);
-                    } else {
-                        return None;
-                    }
+    match &port.kind {
+        PortKind::Stdin => {
+            let mut buf = String::new();
+            let n = io::stdin().read_line(&mut buf).ok()?;
+            if n == 0 {
+                if port_stack.pop() {
+                    return read_line(port_stack, file_table);
+                } else {
+                    return None;
                 }
-                Some(buf)
             }
-            PortKind::File { .. } => {
-                if let Some(file_id) = p.file_id {
-                    if let Some(file) = file_table.get(file_id) {
-                        let mut reader = BufReader::new(file);
-                        let mut buf = String::new();
-                        let n = reader.read_line(&mut buf).ok()?;
-                        if n == 0 {
-                            port_stack.pop();
-                            return read_line(heap, port_stack, file_table);
-                        }
-                        Some(buf)
-                    } else {
-                        None
+            Some(buf)
+        }
+        PortKind::File { file_id, .. } => {
+            if let Some(file_id) = file_id {
+                if let Some(file) = file_table.get(*file_id) {
+                    let mut reader = BufReader::new(file);
+                    let mut buf = String::new();
+                    let n = reader.read_line(&mut buf).ok()?;
+                    if n == 0 {
+                        port_stack.pop();
+                        return read_line(port_stack, file_table);
                     }
+                    Some(buf)
                 } else {
                     None
                 }
+            } else {
+                None
             }
-            _ => None,
-        },
+        }
         _ => None,
     }
 }
@@ -396,7 +444,6 @@ pub fn read_line(heap: &mut GcHeap, port_stack: &mut PortStack, file_table: &mut
 ///
 /// # Arguments
 ///
-/// * `heap` - The garbage collected heap
 /// * `port_stack` - The port stack to write to
 /// * `file_table` - The file table for file port operations
 /// * `line` - The line to write
@@ -408,40 +455,35 @@ pub fn read_line(heap: &mut GcHeap, port_stack: &mut PortStack, file_table: &mut
 /// # Examples
 ///
 /// ```rust
-/// use s1::io::{PortStack, FileTable, write_line};
-/// use s1::gc::{GcHeap, PortKind, new_port};
+/// use s1::io::{PortStack, FileTable, write_line, Port, PortKind};
 ///
-/// let mut heap = GcHeap::new();
-/// let stdout_port = new_port(&mut heap, PortKind::Stdout, None);
+/// let stdout_port = Port { kind: PortKind::Stdout };
 /// let mut port_stack = PortStack::new(stdout_port);
 /// let mut file_table = FileTable::new();
 ///
 /// // Write to stdout
-/// write_line(&mut heap, &mut port_stack, &mut file_table, "Hello, World!");
+/// write_line(&mut port_stack, &mut file_table, "Hello, World!");
 /// ```
-pub fn write_line(heap: &mut GcHeap, port_stack: &mut PortStack, file_table: &mut FileTable, line: &str) -> bool {
+pub fn write_line(port_stack: &mut PortStack, file_table: &mut FileTable, line: &str) -> bool {
     let port = port_stack.current();
-    match &port.borrow().value {
-        SchemeValue::Port(p) => match &p.kind {
-            PortKind::Stdout => {
-                print!("{}", line);
-                io::stdout().flush().ok();
-                true
-            }
-            PortKind::File { .. } => {
-                if let Some(file_id) = p.file_id {
-                    if let Some(file) = file_table.get(file_id) {
-                        let mut writer = BufWriter::new(file);
-                        writer.write_all(line.as_bytes()).is_ok()
-                    } else {
-                        false
-                    }
+    match &port.kind {
+        PortKind::Stdout => {
+            print!("{}", line);
+            io::stdout().flush().ok();
+            true
+        }
+        PortKind::File { file_id, .. } => {
+            if let Some(file_id) = file_id {
+                if let Some(file) = file_table.get(*file_id) {
+                    let mut writer = BufWriter::new(file);
+                    writer.write_all(line.as_bytes()).is_ok()
                 } else {
                     false
                 }
+            } else {
+                false
             }
-            _ => false,
-        },
+        }
         _ => false,
     }
 }
@@ -453,7 +495,6 @@ pub fn write_line(heap: &mut GcHeap, port_stack: &mut PortStack, file_table: &mu
 ///
 /// # Arguments
 ///
-/// * `heap` - The garbage collected heap
 /// * `port_stack` - The port stack to read from
 /// * `file_table` - The file table for file port operations
 ///
@@ -465,56 +506,50 @@ pub fn write_line(heap: &mut GcHeap, port_stack: &mut PortStack, file_table: &mu
 /// # Examples
 ///
 /// ```rust
-/// use s1::io::{PortStack, FileTable, read_char};
-/// use s1::gc::{GcHeap, PortKind, new_port};
+/// use s1::io::{PortStack, FileTable, read_char, Port, PortKind};
 ///
-/// let mut heap = GcHeap::new();
-/// let stdin_port = new_port(&mut heap, PortKind::Stdin, None);
+/// let stdin_port = Port { kind: PortKind::Stdin };
 /// let mut port_stack = PortStack::new(stdin_port);
 /// let mut file_table = FileTable::new();
 ///
 /// // Read a character from stdin (in a real scenario, this would block for user input)
-/// let ch = read_char(&mut heap, &mut port_stack, &mut file_table);
+/// let ch = read_char(&mut port_stack, &mut file_table);
 /// ```
-pub fn read_char(heap: &mut GcHeap, port_stack: &mut PortStack, file_table: &mut FileTable) -> Option<char> {
-    let port = port_stack.current();
-    match &mut port.borrow_mut().value {
-        SchemeValue::Port(p) => match &mut p.kind {
-            PortKind::Stdin => {
-                let mut buf = [0u8; 1];
-                match std::io::stdin().read_exact(&mut buf) {
-                    Ok(_) => Some(buf[0] as char),
-                    Err(_) => None,
-                }
+pub fn read_char(port_stack: &mut PortStack, file_table: &mut FileTable) -> Option<char> {
+    let port = port_stack.current_mut();
+    match &mut port.kind {
+        PortKind::Stdin => {
+            let mut buf = [0u8; 1];
+            match std::io::stdin().read_exact(&mut buf) {
+                Ok(_) => Some(buf[0] as char),
+                Err(_) => None,
             }
-            PortKind::Stdout => None,
-            PortKind::File { .. } => {
-                if let Some(file_id) = p.file_id {
-                    if let Some(file) = file_table.get(file_id) {
-                        let mut buf = [0u8; 1];
-                        match file.read_exact(&mut buf) {
-                            Ok(_) => Some(buf[0] as char),
-                            Err(_) => None,
-                        }
-                    } else {
-                        None
+        }
+        PortKind::Stdout => None,
+        PortKind::File { file_id, .. } => {
+            if let Some(file_id) = file_id {
+                if let Some(file) = file_table.get(*file_id) {
+                    let mut buf = [0u8; 1];
+                    match file.read_exact(&mut buf) {
+                        Ok(_) => Some(buf[0] as char),
+                        Err(_) => None,
                     }
                 } else {
                     None
                 }
+            } else {
+                None
             }
-            PortKind::StringPort(s, pos) => {
-                if *pos < s.len() {
-                    let ch = s.chars().nth(*pos).unwrap();
-                    *pos += 1;
-                    Some(ch)
-                } else {
-                    None
-                }
+        }
+        PortKind::StringPort { content, pos } => {
+            if *pos < content.len() {
+                let ch = content.chars().nth(*pos).unwrap();
+                *pos += 1;
+                Some(ch)
+            } else {
+                None
             }
-            _ => None,
-        },
-        _ => None,
+        }
     }
 }
 
@@ -526,7 +561,6 @@ pub fn read_char(heap: &mut GcHeap, port_stack: &mut PortStack, file_table: &mut
 ///
 /// # Arguments
 ///
-/// * `heap` - The garbage collected heap
 /// * `port_stack` - The port stack to write to
 /// * `file_table` - The file table for file port operations
 /// * `ch` - The character to write
@@ -538,40 +572,35 @@ pub fn read_char(heap: &mut GcHeap, port_stack: &mut PortStack, file_table: &mut
 /// # Examples
 ///
 /// ```rust
-/// use s1::io::{PortStack, FileTable, write_char};
-/// use s1::gc::{GcHeap, PortKind, new_port};
+/// use s1::io::{PortStack, FileTable, write_char, Port, PortKind};
 ///
-/// let mut heap = GcHeap::new();
-/// let stdout_port = new_port(&mut heap, PortKind::Stdout, None);
+/// let stdout_port = Port { kind: PortKind::Stdout };
 /// let mut port_stack = PortStack::new(stdout_port);
 /// let mut file_table = FileTable::new();
 ///
 /// // Write a character to stdout
-/// write_char(&mut heap, &mut port_stack, &mut file_table, 'A');
+/// write_char(&mut port_stack, &mut file_table, 'A');
 /// ```
-pub fn write_char(heap: &mut GcHeap, port_stack: &mut PortStack, file_table: &mut FileTable, ch: char) -> bool {
+pub fn write_char(port_stack: &mut PortStack, file_table: &mut FileTable, ch: char) -> bool {
     let port = port_stack.current();
-    match &port.borrow().value {
-        SchemeValue::Port(p) => match &p.kind {
-            PortKind::Stdout => {
-                print!("{}", ch);
-                io::stdout().flush().ok();
-                true
-            }
-            PortKind::File { .. } => {
-                if let Some(file_id) = p.file_id {
-                    if let Some(file) = file_table.get(file_id) {
-                        let mut writer = BufWriter::new(file);
-                        writer.write_all(&[ch as u8]).is_ok()
-                    } else {
-                        false
-                    }
+    match &port.kind {
+        PortKind::Stdout => {
+            print!("{}", ch);
+            io::stdout().flush().ok();
+            true
+        }
+        PortKind::File { file_id, .. } => {
+            if let Some(file_id) = file_id {
+                if let Some(file) = file_table.get(*file_id) {
+                    let mut writer = BufWriter::new(file);
+                    writer.write_all(&[ch as u8]).is_ok()
                 } else {
                     false
                 }
+            } else {
+                false
             }
-            _ => false,
-        },
+        }
         _ => false,
     }
 }
@@ -583,51 +612,51 @@ pub fn write_char(heap: &mut GcHeap, port_stack: &mut PortStack, file_table: &mu
 ///
 /// # Arguments
 ///
-/// * `heap` - The garbage collected heap
 /// * `s` - The string to create a port from
 ///
 /// # Returns
 ///
-/// Returns a `GcRef` to a new string port.
+/// Returns a new string port.
 ///
 /// # Examples
 ///
 /// ```rust
-/// use s1::io::{new_string_port, PortStack, FileTable, read_char};
-/// use s1::gc::{GcHeap, PortKind, new_port};
+/// use s1::io::{new_string_port, PortStack, FileTable, read_char, Port, PortKind};
 ///
-/// let mut heap = GcHeap::new();
-/// let string_port = new_string_port(&mut heap, "hello");
+/// let string_port = new_string_port("hello");
 /// let mut port_stack = PortStack::new(string_port);
 /// let mut file_table = FileTable::new();
 ///
 /// // Read characters from the string
-/// assert_eq!(read_char(&mut heap, &mut port_stack, &mut file_table), Some('h'));
-/// assert_eq!(read_char(&mut heap, &mut port_stack, &mut file_table), Some('e'));
-/// assert_eq!(read_char(&mut heap, &mut port_stack, &mut file_table), Some('l'));
+/// assert_eq!(read_char(&mut port_stack, &mut file_table), Some('h'));
+/// assert_eq!(read_char(&mut port_stack, &mut file_table), Some('e'));
+/// assert_eq!(read_char(&mut port_stack, &mut file_table), Some('l'));
 /// ```
-pub fn new_string_port(heap: &mut GcHeap, s: &str) -> GcRef {
-    new_port(heap, PortKind::StringPort(s.to_string(), 0), None)
+pub fn new_string_port(s: &str) -> Port {
+    Port {
+        kind: PortKind::StringPort {
+            content: s.to_string(),
+            pos: 0,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gc::{PortKind, new_port};
     use std::fs::{File, remove_file};
     use std::io::Write;
 
     #[test]
     fn test_port_stack_push_pop() {
-        let mut heap = GcHeap::new();
-        let stdin_port = new_port(&mut heap, PortKind::Stdin, None);
-        let file_port = new_port(&mut heap, PortKind::File { name: "foo.scm".to_string(), write: false }, Some(0));
-        let mut stack = PortStack::new(stdin_port.clone());
-        assert_eq!(stack.current().borrow().value, stdin_port.borrow().value);
-        stack.push(file_port.clone());
-        assert_eq!(stack.current().borrow().value, file_port.borrow().value);
+        let stdin_port = Port { kind: PortKind::Stdin };
+        let file_port = Port { kind: PortKind::File { name: "foo.scm".to_string(), write: false, file_id: Some(0) } };
+        let mut stack = PortStack::new(stdin_port);
+        assert_eq!(stack.current().kind, PortKind::Stdin);
+        stack.push(file_port);
+        assert_eq!(stack.current().kind, PortKind::File { name: "foo.scm".to_string(), write: false, file_id: Some(0) });
         assert!(stack.pop());
-        assert_eq!(stack.current().borrow().value, stdin_port.borrow().value);
+        assert_eq!(stack.current().kind, PortKind::Stdin);
         assert!(!stack.pop());
     }
 
@@ -648,20 +677,19 @@ mod tests {
 
     #[test]
     fn test_file_read_write() {
-        let mut heap = GcHeap::new();
         let mut table = FileTable::new();
         let fname = "test_io_file2.txt";
         // Write
         let id = table.open_file(fname, true).unwrap();
-        let port = new_port(&mut heap, PortKind::File { name: fname.to_string(), write: true }, Some(id));
-        let mut stack = PortStack::new(port.clone());
-        assert!(write_line(&mut heap, &mut stack, &mut table, "abc\n"));
+        let port = Port { kind: PortKind::File { name: fname.to_string(), write: true, file_id: Some(id) } };
+        let mut stack = PortStack::new(port);
+        assert!(write_line(&mut stack, &mut table, "abc\n"));
         table.close_file(id);
         // Read
         let id = table.open_file(fname, false).unwrap();
-        let port = new_port(&mut heap, PortKind::File { name: fname.to_string(), write: false }, Some(id));
-        let mut stack = PortStack::new(port.clone());
-        let line = read_line(&mut heap, &mut stack, &mut table).unwrap();
+        let port = Port { kind: PortKind::File { name: fname.to_string(), write: false, file_id: Some(id) } };
+        let mut stack = PortStack::new(port);
+        let line = read_line(&mut stack, &mut table).unwrap();
         assert_eq!(line, "abc\n");
         table.close_file(id);
         remove_file(fname).unwrap();
@@ -669,20 +697,19 @@ mod tests {
 
     #[test]
     fn test_file_read_write_char() {
-        let mut heap = GcHeap::new();
         let mut table = FileTable::new();
         let fname = "test_io_file3.txt";
         // Write a char
         let id = table.open_file(fname, true).unwrap();
-        let port = new_port(&mut heap, PortKind::File { name: fname.to_string(), write: true }, Some(id));
-        let mut stack = PortStack::new(port.clone());
-        assert!(write_char(&mut heap, &mut stack, &mut table, 'Z'));
+        let port = Port { kind: PortKind::File { name: fname.to_string(), write: true, file_id: Some(id) } };
+        let mut stack = PortStack::new(port);
+        assert!(write_char(&mut stack, &mut table, 'Z'));
         table.close_file(id);
         // Read a char
         let id = table.open_file(fname, false).unwrap();
-        let port = new_port(&mut heap, PortKind::File { name: fname.to_string(), write: false }, Some(id));
-        let mut stack = PortStack::new(port.clone());
-        let ch = read_char(&mut heap, &mut stack, &mut table).unwrap();
+        let port = Port { kind: PortKind::File { name: fname.to_string(), write: false, file_id: Some(id) } };
+        let mut stack = PortStack::new(port);
+        let ch = read_char(&mut stack, &mut table).unwrap();
         assert_eq!(ch, 'Z');
         table.close_file(id);
         remove_file(fname).unwrap();
@@ -690,21 +717,34 @@ mod tests {
 
     #[test]
     fn test_port_stack_nesting_and_fallback() {
-        let mut heap = GcHeap::new();
-        let stdin_port = new_port(&mut heap, PortKind::Stdin, None);
-        let file1_port = new_port(&mut heap, PortKind::File { name: "file1.scm".to_string(), write: false }, Some(1));
-        let file2_port = new_port(&mut heap, PortKind::File { name: "file2.scm".to_string(), write: false }, Some(2));
-        let mut stack = PortStack::new(stdin_port.clone());
-        assert_eq!(stack.current().borrow().value, stdin_port.borrow().value);
-        stack.push(file1_port.clone());
-        assert_eq!(stack.current().borrow().value, file1_port.borrow().value);
-        stack.push(file2_port.clone());
-        assert_eq!(stack.current().borrow().value, file2_port.borrow().value);
+        let stdin_port = Port { kind: PortKind::Stdin };
+        let file1_port = Port { kind: PortKind::File { name: "file1.scm".to_string(), write: false, file_id: Some(1) } };
+        let file2_port = Port { kind: PortKind::File { name: "file2.scm".to_string(), write: false, file_id: Some(2) } };
+        let mut stack = PortStack::new(stdin_port);
+        assert_eq!(stack.current().kind, PortKind::Stdin);
+        stack.push(file1_port);
+        assert_eq!(stack.current().kind, PortKind::File { name: "file1.scm".to_string(), write: false, file_id: Some(1) });
+        stack.push(file2_port);
+        assert_eq!(stack.current().kind, PortKind::File { name: "file2.scm".to_string(), write: false, file_id: Some(2) });
         assert!(stack.pop());
-        assert_eq!(stack.current().borrow().value, file1_port.borrow().value);
+        assert_eq!(stack.current().kind, PortKind::File { name: "file1.scm".to_string(), write: false, file_id: Some(1) });
         assert!(stack.pop());
-        assert_eq!(stack.current().borrow().value, stdin_port.borrow().value);
+        assert_eq!(stack.current().kind, PortKind::Stdin);
         // Can't pop last port
         assert!(!stack.pop());
+    }
+
+    #[test]
+    fn test_string_port() {
+        let string_port = new_string_port("hello");
+        let mut stack = PortStack::new(string_port);
+        let mut file_table = FileTable::new();
+        
+        assert_eq!(read_char(&mut stack, &mut file_table), Some('h'));
+        assert_eq!(read_char(&mut stack, &mut file_table), Some('e'));
+        assert_eq!(read_char(&mut stack, &mut file_table), Some('l'));
+        assert_eq!(read_char(&mut stack, &mut file_table), Some('l'));
+        assert_eq!(read_char(&mut stack, &mut file_table), Some('o'));
+        assert_eq!(read_char(&mut stack, &mut file_table), None);
     }
 } 
