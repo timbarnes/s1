@@ -29,6 +29,8 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use num_bigint::BigInt;
 use num_traits::Num;
+use crate::builtin::{register_all, BuiltinKind};
+use std::collections::HashMap;
 
 /// Parser for Scheme s-expressions.
 ///
@@ -191,8 +193,10 @@ impl Parser {
 mod tests {
     use super::*;
     use crate::io::{PortStack, FileTable, Port, PortKind};
-    use crate::gc::{as_int, as_symbol, as_string, is_nil, as_pair, as_bool, as_char, as_vector};
+    use crate::gc::{as_int, as_symbol, as_string, is_nil, as_pair, as_bool, as_char, as_vector, SchemeValue};
     use crate::tokenizer::Tokenizer;
+    use crate::builtin::{register_all, BuiltinKind};
+    use std::collections::HashMap;
 
     #[test]
     fn parse_number() {
@@ -360,5 +364,62 @@ mod tests {
         
         // This test is just for debugging, so we'll make it pass
         assert!(true);
+    }
+
+    #[test]
+    fn eval_quote_special_form() {
+        // Set up heap, parser, and environment with quote registered
+        let heap = Rc::new(RefCell::new(GcHeap::new()));
+        let port = Port { kind: PortKind::StringPort { content: "'foo".to_string(), pos: 0 } };
+        let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
+        let file_table = Rc::new(RefCell::new(FileTable::new()));
+        let tokenizer = Tokenizer::new(port_stack.clone(), file_table.clone());
+        let mut parser = Parser::new(heap.clone(), tokenizer);
+        let expr = parser.parse().unwrap();
+
+        // Set up environment with quote special form
+        let mut env = HashMap::new();
+        register_all(&mut heap.borrow_mut(), &mut env);
+
+        // Simulate evaluation of (quote foo)
+        if let SchemeValue::Pair(car, cdr) = &expr.borrow().value {
+            if let SchemeValue::Symbol(ref name) = car.borrow().value {
+                if let Some(builtin) = env.get(name).cloned() {
+                    if let BuiltinKind::SpecialForm(f) = builtin {
+                        let mut args = Vec::new();
+                        let mut cur = cdr.clone();
+                        loop {
+                            let next = {
+                                let cur_borrow = cur.borrow();
+                                match &cur_borrow.value {
+                                    SchemeValue::Pair(arg, next) => {
+                                        args.push(arg.clone());
+                                        Some(next.clone())
+                                    }
+                                    SchemeValue::Nil => None,
+                                    _ => panic!("Malformed argument list"),
+                                }
+                            };
+                            if let Some(next_cdr) = next {
+                                cur = next_cdr;
+                            } else {
+                                break;
+                            }
+                        }
+                        assert!(matches!(&cur.borrow().value, SchemeValue::Nil));
+                        let result = f(&mut *heap.borrow_mut(), &args, &mut env).unwrap();
+                        assert_eq!(as_symbol(&result), Some("foo".to_string()));
+                    } else {
+                        panic!("quote not registered as special form");
+                    }
+                } else {
+                    panic!("quote not registered as special form");
+                }
+            } else {
+                panic!("First element is not a symbol");
+            }
+        } else {
+            panic!("Not a pair");
+        }
     }
 } 
