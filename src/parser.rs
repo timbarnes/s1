@@ -140,10 +140,7 @@ impl Parser {
             Some(Token::LeftParen) => self.parse_list(),
             Some(Token::RightParen) => Err("Unexpected ')'".to_string()),
             Some(Token::Dot) => Err("Unexpected '.'".to_string()),
-            Some(Token::Quote) => {
-                // This should not happen since quotes are handled in parse()
-                Err("Unexpected quote token".to_string())
-            }
+            Some(Token::Quote) => self.parse_quoted_expression(),
             Some(Token::LeftBracket) => self.parse_vector_token(),
             Some(Token::RightBracket) => Err("Unexpected ']'".to_string()),
             Some(Token::Eof) => Err("Unexpected end of input".to_string()),
@@ -421,5 +418,26 @@ mod tests {
         } else {
             panic!("Not a pair");
         }
+    }
+
+    #[test]
+    fn parse_nested_quoted() {
+        let heap = Rc::new(RefCell::new(GcHeap::new()));
+        let port = Port { kind: PortKind::StringPort { content: "''foo".to_string(), pos: 0 } };
+        let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
+        let file_table = Rc::new(RefCell::new(FileTable::new()));
+        let tokenizer = Tokenizer::new(port_stack, file_table);
+        let mut parser = Parser::new(heap.clone(), tokenizer);
+        let expr = parser.parse().unwrap();
+        // Should be (quote (quote foo))
+        let (outer_quote, outer_cdr) = as_pair(&expr).unwrap();
+        assert_eq!(as_symbol(&outer_quote), Some("quote".to_string()));
+        let (inner_expr, nil1) = as_pair(&outer_cdr).unwrap();
+        assert!(is_nil(&nil1));
+        let (inner_quote, inner_cdr) = as_pair(&inner_expr).unwrap();
+        assert_eq!(as_symbol(&inner_quote), Some("quote".to_string()));
+        let (foo_sym, nil2) = as_pair(&inner_cdr).unwrap();
+        assert_eq!(as_symbol(&foo_sym), Some("foo".to_string()));
+        assert!(is_nil(&nil2));
     }
 } 
