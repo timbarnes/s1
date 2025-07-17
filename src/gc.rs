@@ -29,13 +29,17 @@ use std::cmp::PartialEq;
 
 use std::collections::HashMap;
 
+use num_bigint::BigInt;
+use num_traits::ToPrimitive;
+
 /// The core type representing a Scheme value in the heap.
 ///
 /// All Scheme values are allocated on the garbage-collected heap and referenced
 /// through `GcRef` pointers. This enum covers the complete set of Scheme data types.
+#[derive(Clone)]
 pub enum SchemeValue {
-    /// Integer values (i64)
-    Int(i64),
+    /// Integer values (arbitrary precision)
+    Int(BigInt),
     /// Floating-point values (f64)
     Float(f64),
     /// Symbols (interned identifiers)
@@ -59,8 +63,11 @@ pub enum SchemeValue {
     Bool(bool),
     /// Character literals
     Char(char),
-    /// Built-in procedures (native Rust functions)
-    Primitive(Rc<dyn Fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>>),
+    /// Built-in procedures (native Rust functions) with doc string
+    Primitive {
+        func: Rc<dyn Fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>>,
+        doc: String,
+    },
     /// Environment frames (variable bindings)
     EnvFrame(HashMap<String, GcRef>),
     /// Empty list (nil)
@@ -81,7 +88,7 @@ impl std::fmt::Debug for SchemeValue {
             SchemeValue::Closure { params, body, env } => f.debug_struct("Closure").field("params", params).field("body", &body.borrow().value).field("env", &env.borrow().value).finish(),
             SchemeValue::Bool(b) => write!(f, "Bool({})", b),
             SchemeValue::Char(c) => write!(f, "Char({:?})", c),
-            SchemeValue::Primitive(_) => write!(f, "Primitive(<builtin>)"),
+            SchemeValue::Primitive { .. } => write!(f, "Primitive(<builtin>)"),
             SchemeValue::EnvFrame(map) => f.debug_map().entries(map.iter()).finish(),
             SchemeValue::Nil => write!(f, "Nil"),
         }
@@ -114,7 +121,7 @@ impl PartialEq for SchemeValue {
             (SchemeValue::Bool(a), SchemeValue::Bool(b)) => a == b,
             (SchemeValue::Char(a), SchemeValue::Char(b)) => a == b,
             // For Primitive and Port, just compare type (not function pointer or port identity)
-            (SchemeValue::Primitive(_), SchemeValue::Primitive(_)) => true,
+            (SchemeValue::Primitive { .. }, SchemeValue::Primitive { .. }) => true,
             (SchemeValue::EnvFrame(a), SchemeValue::EnvFrame(b)) => {
                 if a.len() != b.len() { return false; }
                 for (k, va) in a.iter() {
@@ -359,7 +366,7 @@ impl GcHeap {
 /// let x = new_int(&mut heap, 42);
 /// assert_eq!(x.borrow().value, SchemeValue::Int(42));
 /// ```
-pub fn new_int(heap: &mut GcHeap, val: i64) -> GcRef {
+pub fn new_int(heap: &mut GcHeap, val: BigInt) -> GcRef {
     heap.alloc(SchemeValue::Int(val))
 }
 
@@ -498,10 +505,14 @@ pub fn new_char(heap: &mut GcHeap, val: char) -> GcRef {
 /// let add = new_primitive(&mut heap, Rc::new(|_, args| {
 ///     // Implementation would go here
 ///     Ok(new_int(&mut heap, 0))
-/// }));
+/// }), "Add two numbers".to_string());
 /// ```
-pub fn new_primitive(heap: &mut GcHeap, f: Rc<dyn Fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>>) -> GcRef {
-    heap.alloc(SchemeValue::Primitive(f))
+pub fn new_primitive(
+    heap: &mut GcHeap,
+    f: Rc<dyn Fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>>,
+    doc: String,
+) -> GcRef {
+    heap.alloc(SchemeValue::Primitive { func: f, doc })
 }
 
 /// Create a new environment frame on the heap.
@@ -554,7 +565,7 @@ pub fn new_nil(heap: &mut GcHeap) -> GcRef {
 /// ```
 pub fn as_int(obj: &GcRef) -> Option<i64> {
     match &obj.borrow().value {
-        SchemeValue::Int(n) => Some(*n),
+        SchemeValue::Int(n) => Some(n.to_i64().unwrap()),
         _ => None,
     }
 }
@@ -702,11 +713,11 @@ pub fn as_char(obj: &GcRef) -> Option<char> {
 /// use std::rc::Rc;
 ///
 /// let mut heap = GcHeap::new();
-/// let prim = new_primitive(&mut heap, Rc::new(|_, _| Ok(new_nil(&mut heap))));
+/// let prim = new_primitive(&mut heap, Rc::new(|_, _| Ok(new_nil(&mut heap))), "Add two numbers".to_string());
 /// assert!(is_primitive(&prim));
 /// ```
 pub fn is_primitive(obj: &GcRef) -> bool {
-    matches!(&obj.borrow().value, SchemeValue::Primitive(_))
+    matches!(&obj.borrow().value, SchemeValue::Primitive { .. })
 }
 
 /// Extract an environment frame from a GcRef, if it contains one.
@@ -781,11 +792,11 @@ mod tests {
     #[test]
     fn test_allocation_and_retrieval() {
         let mut heap = GcHeap::new();
-        let int_val = new_int(&mut heap, 42);
+        let int_val = new_int(&mut heap, BigInt::from(42));
         let float_val = new_float(&mut heap, 3.14);
         let sym_val = new_symbol(&mut heap, "lambda");
 
-        assert_eq!(int_val.borrow().value, SchemeValue::Int(42));
+        assert_eq!(int_val.borrow().value, SchemeValue::Int(BigInt::from(42)));
         assert_eq!(float_val.borrow().value, SchemeValue::Float(3.14));
         assert_eq!(as_symbol(&sym_val).unwrap(), "lambda");
     }
@@ -793,7 +804,7 @@ mod tests {
     #[test]
     fn test_root_management() {
         let mut heap = GcHeap::new();
-        let obj = new_int(&mut heap, 10);
+        let obj = new_int(&mut heap, BigInt::from(10));
         assert_eq!(heap.root_count(), 0);
 
         heap.add_root(obj.clone());
@@ -806,8 +817,8 @@ mod tests {
     #[test]
     fn test_garbage_collection() {
         let mut heap = GcHeap::new();
-        let obj1 = new_int(&mut heap, 10);
-        let obj2 = new_int(&mut heap, 20);
+        let obj1 = new_int(&mut heap, BigInt::from(10));
+        let obj2 = new_int(&mut heap, BigInt::from(20));
 
         heap.add_root(obj1.clone());
         heap.collect_garbage();
@@ -827,8 +838,8 @@ mod tests {
         assert_eq!(as_string(&s).unwrap(), "hello");
 
         // Vector
-        let v1 = new_int(&mut heap, 1);
-        let v2 = new_int(&mut heap, 2);
+        let v1 = new_int(&mut heap, BigInt::from(1));
+        let v2 = new_int(&mut heap, BigInt::from(2));
         let v = new_vector(&mut heap, vec![v1.clone(), v2.clone()]);
         let vec_contents = as_vector(&v).unwrap();
         assert_eq!(vec_contents.len(), 2);
@@ -873,7 +884,7 @@ mod tests {
         assert_eq!(as_char(&c), Some('x'));
 
         // Primitive
-        let prim = new_primitive(&mut heap, Rc::new(|_, _| Err("not implemented".to_string())));
+        let prim = new_primitive(&mut heap, Rc::new(|_, _| Err("not implemented".to_string())), "Add two numbers".to_string());
         assert!(is_primitive(&prim));
     }
 
@@ -881,12 +892,12 @@ mod tests {
     fn test_env_frame() {
         let mut heap = GcHeap::new();
         let mut map = HashMap::new();
-        let v1 = new_int(&mut heap, 42);
+        let v1 = new_int(&mut heap, BigInt::from(42));
         let v2 = new_symbol(&mut heap, "foo");
         map.insert("x".to_string(), v1.clone());
         map.insert("y".to_string(), v2.clone());
         let env = new_env_frame(&mut heap, map);
-        assert_eq!(env_frame_lookup(&env, "x").unwrap().borrow().value, SchemeValue::Int(42));
+        assert_eq!(env_frame_lookup(&env, "x").unwrap().borrow().value, SchemeValue::Int(BigInt::from(42)));
         assert_eq!(env_frame_lookup(&env, "y").unwrap().borrow().value, SchemeValue::Symbol("foo".to_string()));
 
         // Insert new binding

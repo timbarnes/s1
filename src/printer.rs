@@ -52,7 +52,7 @@ pub fn scheme_display(val: &SchemeValue) -> String {
                 .join(" ");
             format!("#({})", contents)
         }
-        SchemeValue::Primitive(_) => "#<procedure>".to_string(),
+        SchemeValue::Primitive { .. } => "#<procedure>".to_string(),
         SchemeValue::Closure { .. } => "#<closure>".to_string(),
         SchemeValue::EnvFrame(_) => "#<env-frame>".to_string(),
     }
