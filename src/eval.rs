@@ -81,7 +81,7 @@ pub fn repl(
                                     continue;
                                 }
                                 BuiltinKind::Normal(f) => {
-                                    // Evaluate arguments
+                                    // Evaluate arguments recursively
                                     let mut evaled_args = Vec::new();
                                     let mut cur = cdr.clone();
                                     loop {
@@ -91,17 +91,16 @@ pub fn repl(
                                                 SchemeValue::Pair(arg, next) => {
                                                     // Recursively evaluate each argument
                                                     let evaled = {
-                                                        // Evaluate the argument
-                                                        // For now, only self-evaluating and symbols are supported
-                                                        let arg_val = arg.borrow().value.clone();
-                                                        if is_self_evaluating(&arg_val) {
-                                                            arg.clone()
-                                                        } else {
-                                                            println!("Error: argument evaluation not fully implemented");
-                                                            arg.clone()
-                                                        }
+                                                        // Evaluate the argument recursively
+                                                        eval_expr(arg.clone(), &heap, &mut env)
                                                     };
-                                                    evaled_args.push(evaled);
+                                                    match evaled {
+                                                        Ok(val) => evaled_args.push(val),
+                                                        Err(e) => {
+                                                            println!("Error: {}", e);
+                                                            return;
+                                                        }
+                                                    }
                                                     Some(next.clone())
                                                 }
                                                 SchemeValue::Nil => None,
@@ -141,5 +140,80 @@ pub fn repl(
             Err(e) if e.contains("end of input") => break, // EOF: exit
             Err(e) => println!("Error: {}", e),
         }
+    }
+}
+
+fn eval_expr(expr: GcRef, heap: &Rc<RefCell<GcHeap>>, env: &mut HashMap<String, BuiltinKind>) -> Result<GcRef, String> {
+    let value = expr.borrow().value.clone();
+    if is_self_evaluating(&value) {
+        Ok(expr)
+    } else if let SchemeValue::Pair(car, cdr) = &value {
+        if let SchemeValue::Symbol(ref name) = car.borrow().value {
+            if let Some(builtin) = env.get(name).cloned() {
+                match builtin {
+                    BuiltinKind::SpecialForm(f) => {
+                        // Collect args as a slice
+                        let mut args = Vec::new();
+                        let mut cur = cdr.clone();
+                        loop {
+                            let next = {
+                                let cur_borrow = cur.borrow();
+                                match &cur_borrow.value {
+                                    SchemeValue::Pair(arg, next) => {
+                                        args.push(arg.clone());
+                                        Some(next.clone())
+                                    }
+                                    SchemeValue::Nil => None,
+                                    _ => return Err("Malformed argument list".to_string()),
+                                }
+                            };
+                            if let Some(next_cdr) = next {
+                                cur = next_cdr;
+                            } else {
+                                break;
+                            }
+                        }
+                        if !matches!(&cur.borrow().value, SchemeValue::Nil) {
+                            return Err("Malformed argument list".to_string());
+                        }
+                        f(&mut *heap.borrow_mut(), &args, env)
+                    }
+                    BuiltinKind::Normal(f) => {
+                        // Recursively evaluate arguments
+                        let mut evaled_args = Vec::new();
+                        let mut cur = cdr.clone();
+                        loop {
+                            let next = {
+                                let cur_borrow = cur.borrow();
+                                match &cur_borrow.value {
+                                    SchemeValue::Pair(arg, next) => {
+                                        let evaled = eval_expr(arg.clone(), heap, env)?;
+                                        evaled_args.push(evaled);
+                                        Some(next.clone())
+                                    }
+                                    SchemeValue::Nil => None,
+                                    _ => return Err("Malformed argument list".to_string()),
+                                }
+                            };
+                            if let Some(next_cdr) = next {
+                                cur = next_cdr;
+                            } else {
+                                break;
+                            }
+                        }
+                        if !matches!(&cur.borrow().value, SchemeValue::Nil) {
+                            return Err("Malformed argument list".to_string());
+                        }
+                        f(&mut *heap.borrow_mut(), &evaled_args)
+                    }
+                }
+            } else {
+                Err(format!("not a builtin: {}", name))
+            }
+        } else {
+            Err("cannot evaluate non-symbol operator".to_string())
+        }
+    } else {
+        Err("cannot evaluate form".to_string())
     }
 } 
