@@ -35,6 +35,7 @@ pub fn register_all(heap: &mut crate::gc::GcHeap, env: &mut std::collections::Ha
     env.insert("number?".to_string(), BuiltinKind::Normal(Rc::new(predicate::number_q)));
     env.insert("help".to_string(), BuiltinKind::Normal(Rc::new(help_builtin)));
     env.insert("quote".to_string(), BuiltinKind::SpecialForm(Rc::new(quote_handler)));
+    env.insert("type-of".to_string(), BuiltinKind::Normal(Rc::new(predicate::type_of)));
     env.insert("+".to_string(), BuiltinKind::Normal(Rc::new(plus_builtin)));
     env.insert("-".to_string(), BuiltinKind::Normal(Rc::new(minus_builtin)));
     env.insert("*".to_string(), BuiltinKind::Normal(Rc::new(times_builtin)));
