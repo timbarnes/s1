@@ -340,9 +340,25 @@ impl Tokenizer {
     /// ```
     pub fn next_token(&mut self) -> Option<Token> {
         self.skip_whitespace_and_comments();
-        
         match self.read_char() {
             Some(c) if c.is_ascii_digit() => Some(Token::Number(self.read_number(c))),
+            Some(c @ '-') | Some(c @ '+') => {
+                // Peek next char to decide if this is a number or symbol
+                match self.read_char() {
+                    Some(next) if next.is_ascii_digit() => {
+                        // It's a number (e.g., -45, +123)
+                        let mut num = c.to_string();
+                        num.push(next);
+                        num.push_str(&self.read_number_body());
+                        Some(Token::Number(num))
+                    }
+                    Some(next) => {
+                        self.unread_char(next);
+                        Some(Token::Symbol(self.read_symbol(c)))
+                    }
+                    None => Some(Token::Symbol(self.read_symbol(c))),
+                }
+            }
             Some(c) if c.is_alphabetic() || "!$%&*/:<=>?^_~@".contains(c) => Some(Token::Symbol(self.read_symbol(c))),
             Some('"') => self.read_string().map(Token::String),
             Some('(') => Some(Token::LeftParen),
@@ -366,7 +382,6 @@ impl Tokenizer {
                         Some(Token::LeftBracket)
                     },
                     Some(c) => {
-                        // Put back the character and delegate to read_boolean_or_char
                         self.unread_char(c);
                         self.read_boolean_or_char()
                     }
@@ -376,6 +391,24 @@ impl Tokenizer {
             Some(c) => Some(Token::Symbol(c.to_string())),
             None => Some(Token::Eof),
         }
+    }
+
+    /// Helper to read the rest of a number after the first digit (for -123, +456, etc.)
+    fn read_number_body(&mut self) -> String {
+        let mut number = String::new();
+        loop {
+            match self.read_char() {
+                Some(c) if c.is_ascii_digit() || c == '.' || c == 'e' || c == 'E' => {
+                    number.push(c);
+                }
+                Some(c) => {
+                    self.unread_char(c);
+                    break;
+                }
+                None => break,
+            }
+        }
+        number
     }
 }
 
@@ -533,5 +566,17 @@ mod tests {
         }
         // This test is just for debugging, so we'll make it pass
         assert!(true);
+    }
+
+    #[test]
+    fn test_negative_and_positive_numbers() {
+        let port = Port { kind: PortKind::Stdin };
+        let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
+        let file_table = Rc::new(RefCell::new(FileTable::new()));
+        let mut tokenizer = tokenizer_from_str(port_stack, file_table, "-45 +123 -123412341234123412341234");
+        assert_eq!(tokenizer.next_token(), Some(Token::Number("-45".to_string())));
+        assert_eq!(tokenizer.next_token(), Some(Token::Number("+123".to_string())));
+        assert_eq!(tokenizer.next_token(), Some(Token::Number("-123412341234123412341234".to_string())));
+        assert_eq!(tokenizer.next_token(), Some(Token::Eof));
     }
 } 

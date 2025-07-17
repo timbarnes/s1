@@ -4,6 +4,10 @@ pub mod predicate;
 use crate::gc::{GcHeap, GcRef, new_primitive, new_string};
 use std::collections::HashMap;
 use std::rc::Rc;
+use num_bigint::BigInt;
+use crate::gc::{as_int, as_float, new_int, new_float, SchemeValue};
+use num_traits::ToPrimitive;
+use number::{plus_builtin, minus_builtin, times_builtin, div_builtin, mod_builtin};
 
 pub enum BuiltinKind {
     SpecialForm(Rc<dyn Fn(&mut crate::gc::GcHeap, &[crate::gc::GcRef], &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String>>),
@@ -31,6 +35,11 @@ pub fn register_all(heap: &mut crate::gc::GcHeap, env: &mut std::collections::Ha
     env.insert("number?".to_string(), BuiltinKind::Normal(Rc::new(predicate::number_q)));
     env.insert("help".to_string(), BuiltinKind::Normal(Rc::new(help_builtin)));
     env.insert("quote".to_string(), BuiltinKind::SpecialForm(Rc::new(quote_handler)));
+    env.insert("+".to_string(), BuiltinKind::Normal(Rc::new(plus_builtin)));
+    env.insert("-".to_string(), BuiltinKind::Normal(Rc::new(minus_builtin)));
+    env.insert("*".to_string(), BuiltinKind::Normal(Rc::new(times_builtin)));
+    env.insert("/".to_string(), BuiltinKind::Normal(Rc::new(div_builtin)));
+    env.insert("mod".to_string(), BuiltinKind::Normal(Rc::new(mod_builtin)));
     // Add more builtins and special forms here
 }
 

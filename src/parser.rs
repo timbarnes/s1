@@ -31,6 +31,7 @@ use num_bigint::BigInt;
 use num_traits::Num;
 use crate::builtin::{register_all, BuiltinKind};
 use std::collections::HashMap;
+use crate::io::{PortStack, FileTable, Port, PortKind};
 
 /// Parser for Scheme s-expressions.
 ///
@@ -43,8 +44,9 @@ pub struct Parser {
 }
 
 impl Parser {
-    /// Create a new parser from a heap and tokenizer.
-    pub fn new(heap: Rc<RefCell<GcHeap>>, tokenizer: Tokenizer) -> Self {
+    /// Create a new parser from a heap, port stack, and file table.
+    pub fn new(heap: Rc<RefCell<GcHeap>>, port_stack: Rc<RefCell<PortStack>>, file_table: Rc<RefCell<FileTable>>) -> Self {
+        let tokenizer = Tokenizer::new(port_stack, file_table);
         Self { heap, tokenizer }
     }
 
@@ -201,8 +203,7 @@ mod tests {
         let port = Port { kind: PortKind::StringPort { content:42.to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
-        let tokenizer = Tokenizer::new(port_stack, file_table);
-        let mut parser = Parser::new(heap.clone(), tokenizer);
+        let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
         let expr = parser.parse().unwrap();
         assert_eq!(as_int(&expr), Some(42));
     }
@@ -213,8 +214,7 @@ mod tests {
         let port = Port { kind: PortKind::StringPort { content: "hello".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
-        let tokenizer = Tokenizer::new(port_stack, file_table);
-        let mut parser = Parser::new(heap.clone(), tokenizer);
+        let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
         let expr = parser.parse().unwrap();
         assert_eq!(as_symbol(&expr), Some("hello".to_string()));
     }
@@ -225,8 +225,7 @@ mod tests {
         let port = Port { kind: PortKind::StringPort { content: "\"hello world\"".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
-        let tokenizer = Tokenizer::new(port_stack, file_table);
-        let mut parser = Parser::new(heap.clone(), tokenizer);
+        let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
         let expr = parser.parse().unwrap();
         assert_eq!(as_string(&expr), Some("hello world".to_string()));
     }
@@ -237,8 +236,7 @@ mod tests {
         let port = Port { kind: PortKind::StringPort { content: "nil".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
-        let tokenizer = Tokenizer::new(port_stack, file_table);
-        let mut parser = Parser::new(heap.clone(), tokenizer);
+        let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
         let expr = parser.parse().unwrap();
         assert!(is_nil(&expr));
     }
@@ -249,8 +247,7 @@ mod tests {
         let port = Port { kind: PortKind::StringPort { content: "(1 2 3)".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
-        let tokenizer = Tokenizer::new(port_stack, file_table);
-        let mut parser = Parser::new(heap.clone(), tokenizer);
+        let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
         let expr = parser.parse().unwrap();
         
         let (car, cdr) = as_pair(&expr).unwrap();
@@ -270,8 +267,7 @@ mod tests {
         let port = Port { kind: PortKind::StringPort { content: "#t #f".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
-        let tokenizer = Tokenizer::new(port_stack, file_table);
-        let mut parser = Parser::new(heap.clone(), tokenizer);
+        let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
         
         let expr = parser.parse().unwrap();
         assert_eq!(as_bool(&expr), Some(true));
@@ -286,8 +282,7 @@ mod tests {
         let port = Port { kind: PortKind::StringPort { content: "#\\a #\\space".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
-        let tokenizer = Tokenizer::new(port_stack, file_table);
-        let mut parser = Parser::new(heap.clone(), tokenizer);
+        let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
         
         let expr = parser.parse().unwrap();
         assert_eq!(as_char(&expr), Some('a'));
@@ -302,8 +297,7 @@ mod tests {
         let port = Port { kind: PortKind::StringPort { content: "'hello".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
-        let tokenizer = Tokenizer::new(port_stack, file_table);
-        let mut parser = Parser::new(heap.clone(), tokenizer);
+        let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
         let expr = parser.parse().unwrap();
         
         let (quote_sym, quoted_expr) = as_pair(&expr).unwrap();
@@ -320,8 +314,7 @@ mod tests {
         let port = Port { kind: PortKind::StringPort { content: "(1 . 2)".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
-        let tokenizer = Tokenizer::new(port_stack, file_table);
-        let mut parser = Parser::new(heap.clone(), tokenizer);
+        let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
         let expr = parser.parse().unwrap();
         
         let (car, cdr) = as_pair(&expr).unwrap();
@@ -335,8 +328,7 @@ mod tests {
         let port = Port { kind: PortKind::StringPort { content: "#(1 2 3)".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
-        let tokenizer = Tokenizer::new(port_stack, file_table);
-        let mut parser = Parser::new(heap.clone(), tokenizer);
+        let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
         let expr = parser.parse().unwrap();
         
         let vec = as_vector(&expr).unwrap();
@@ -352,8 +344,7 @@ mod tests {
         let port = Port { kind: PortKind::StringPort { content: "hello world".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
-        let tokenizer = Tokenizer::new(port_stack, file_table);
-        let mut parser = Parser::new(heap.clone(), tokenizer);
+        let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
         let expr = parser.parse().unwrap();
         
         println!("Parsed expr: {:?}", expr);
@@ -371,7 +362,7 @@ mod tests {
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         let tokenizer = Tokenizer::new(port_stack.clone(), file_table.clone());
-        let mut parser = Parser::new(heap.clone(), tokenizer);
+        let mut parser = Parser::new(heap.clone(), port_stack, file_table);
         let expr = parser.parse().unwrap();
 
         // Set up environment with quote special form
@@ -426,8 +417,7 @@ mod tests {
         let port = Port { kind: PortKind::StringPort { content: "''foo".to_string(), pos: 0 } };
         let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
-        let tokenizer = Tokenizer::new(port_stack, file_table);
-        let mut parser = Parser::new(heap.clone(), tokenizer);
+        let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
         let expr = parser.parse().unwrap();
         // Should be (quote (quote foo))
         let (outer_quote, outer_cdr) = as_pair(&expr).unwrap();
@@ -439,5 +429,22 @@ mod tests {
         let (foo_sym, nil2) = as_pair(&inner_cdr).unwrap();
         assert_eq!(as_symbol(&foo_sym), Some("foo".to_string()));
         assert!(is_nil(&nil2));
+    }
+
+    #[test]
+    fn parse_negative_and_positive_numbers() {
+        let heap = Rc::new(RefCell::new(GcHeap::new()));
+        let port = Port { kind: PortKind::StringPort { content: "-45 +123 -123412341234123412341234".to_string(), pos: 0 } };
+        let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
+        let file_table = Rc::new(RefCell::new(FileTable::new()));
+        let mut parser = Parser::new(heap.clone(), port_stack.clone(), file_table.clone());
+        let expr = parser.parse().unwrap();
+        assert_eq!(as_int(&expr), Some(-45));
+        let expr = parser.parse().unwrap();
+        assert_eq!(as_int(&expr), Some(123));
+        let expr = parser.parse().unwrap();
+        // Check that the bignum parses as a negative number
+        use num_bigint::BigInt;
+        assert_eq!(expr.borrow().value, crate::gc::SchemeValue::Int(BigInt::parse_bytes(b"-123412341234123412341234", 10).unwrap()));
     }
 } 
