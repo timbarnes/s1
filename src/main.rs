@@ -3,6 +3,7 @@ mod io;
 mod tokenizer;
 mod parser;
 mod eval;
+mod printer;
 
 use gc::GcHeap;
 use crate::io::{Port, PortKind, PortStack, FileTable};
