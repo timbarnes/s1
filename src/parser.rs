@@ -23,7 +23,7 @@
 //! let expr = parser.parse().unwrap();
 //! ```
 
-use crate::gc::{GcHeap, GcRef, new_int, new_float, new_symbol, new_string, new_nil, new_pair};
+use crate::gc::{GcHeap, GcRef, new_int, new_float, new_symbol, new_string, new_pair};
 use crate::tokenizer::{Tokenizer, Token};
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -50,17 +50,26 @@ impl Parser {
     pub fn parse(&mut self) -> Result<GcRef, String> {
         let token = self.tokenizer.next_token();
         match token {
-            Some(Token::Quote) => {
-                // Use a local scope to ensure the first borrow is dropped
-                let next_token = self.tokenizer.next_token();
-                let quoted = self.parse_from_token(next_token)?;
-                let quote_sym = new_symbol(&mut *self.heap.borrow_mut(), "quote");
-                let quoted_list = new_pair(&mut *self.heap.borrow_mut(), quoted, new_nil(&mut *self.heap.borrow_mut()));
-                Ok(new_pair(&mut *self.heap.borrow_mut(), quote_sym, quoted_list))
-            }
+            Some(Token::Quote) => self.parse_quoted_expression(),
             Some(token) => self.parse_from_token(Some(token)),
             None => Err("Unexpected end of input".to_string()),
         }
+    }
+
+    /// Parse a quoted expression (after encountering).
+    fn parse_quoted_expression(&mut self) -> Result<GcRef, String> {
+        // Get the next token
+        let next_token = self.tokenizer.next_token();
+        
+        // Parse the quoted expression first and ensure the borrow is dropped
+        let quoted = self.parse_from_token(next_token)?;
+        
+        // Now create the quote structure with a fresh borrow
+        let mut heap = self.heap.borrow_mut();
+        let quote_sym = new_symbol(&mut heap, "quote");
+        let nil = heap.nil();
+        let quoted_list = new_pair(&mut heap, quoted, nil);
+        Ok(new_pair(&mut heap, quote_sym, quoted_list))
     }
 
     /// Parse an s-expression from a given token (used for list elements).
@@ -80,7 +89,7 @@ impl Parser {
             Some(Token::Character(c)) => Ok(crate::gc::new_char(&mut *self.heap.borrow_mut(), c)),
             Some(Token::Symbol(s)) => {
                 if s == "nil" || s == "()" {
-                    Ok(new_nil(&mut *self.heap.borrow_mut()))
+                    Ok(self.heap.borrow().nil())
                 } else if s.starts_with("#\\") {
                     let ch = match &s[2..] {
                         "space" => Some(' '),
@@ -105,6 +114,7 @@ impl Parser {
                 Err("Unexpected quote token".to_string())
             }
             Some(Token::LeftBracket) => {
+                // Drop the heap borrow and handle vector parsing
                 let mut vec_elems = Vec::new();
                 loop {
                     let t = self.tokenizer.next_token();
@@ -116,7 +126,8 @@ impl Parser {
                     }
                     vec_elems.push(self.parse_from_token(t)?);
                 }
-                Ok(crate::gc::new_vector(&mut *self.heap.borrow_mut(), vec_elems))
+                let mut heap = self.heap.borrow_mut();
+                Ok(crate::gc::new_vector(&mut heap, vec_elems))
             }
             Some(Token::RightBracket) => Err("Unexpected ']'".to_string()),
             Some(Token::Eof) => Err("Unexpected end of input".to_string()),
@@ -132,7 +143,7 @@ impl Parser {
             match token {
                 Some(Token::RightParen) => {
                     // End of list
-                    let mut list = new_nil(&mut *self.heap.borrow_mut());
+                    let mut list = self.heap.borrow().nil();
                     for elem in elements.into_iter().rev() {
                         list = new_pair(&mut *self.heap.borrow_mut(), elem, list);
                     }

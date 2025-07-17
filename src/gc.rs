@@ -838,7 +838,7 @@ mod tests {
         // Closure
         let params = vec!["x".to_string(), "y".to_string()];
         let body = new_symbol(&mut heap, "body");
-        let env = new_nil(&mut heap);
+        let env = heap.nil();
         let clo = new_closure(&mut heap, params.clone(), body.clone(), env.clone());
         let (p, b, e) = as_closure(&clo).unwrap();
         assert_eq!(p, params);
