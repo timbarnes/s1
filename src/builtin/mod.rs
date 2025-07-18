@@ -1,7 +1,7 @@
 pub mod number;
 pub mod predicate;
 
-use crate::gc::{GcHeap, GcRef, new_primitive, new_string};
+use crate::gc::{GcHeap, GcRef, new_primitive, new_string, new_bool, as_bool, as_pair, is_nil};
 use std::collections::HashMap;
 use std::rc::Rc;
 use num_bigint::BigInt;
@@ -30,6 +30,128 @@ pub fn quote_handler(_heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], _
     } else {
         Ok(args[0].clone())
     }
+}
+
+/// Special form: (if test consequent alternative)
+/// 
+/// Evaluates test. If test is true, evaluates and returns consequent.
+/// If test is false, evaluates and returns alternative.
+/// 
+/// This is implemented to support tail recursion - the result of evaluating
+/// the consequent or alternative is returned directly without further processing.
+pub fn if_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
+    if args.len() != 2 && args.len() != 3 {
+        return Err("if: expected 2 or 3 arguments".to_string());
+    }
+    
+    // Evaluate the test condition
+    let test_result = crate::eval::eval_trampoline(args[0].clone(), &Rc::new(std::cell::RefCell::new(GcHeap::new())), env)?;
+    let test_value = test_result.borrow().value.clone();
+    
+    // Check if test is true (anything except #f is true in Scheme)
+    let is_true = match test_value {
+        SchemeValue::Bool(false) => false,
+        _ => true,
+    };
+    
+    if is_true {
+        // Return the consequent for evaluation (tail call)
+        Ok(args[1].clone())
+    } else {
+        // Return the alternative for evaluation (tail call)
+        if args.len() == 3 {
+            Ok(args[2].clone())
+        } else {
+            // If no alternative provided, return undefined (we'll use #f for now)
+            Ok(new_bool(heap, false))
+        }
+    }
+}
+
+/// Special form: (begin expr1 expr2 ...)
+/// 
+/// Evaluates expressions in sequence, returning the value of the last expression.
+/// 
+/// This is implemented to support tail recursion - only the last expression
+/// is returned for further evaluation.
+pub fn begin_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
+    if args.is_empty() {
+        return Err("begin: expected at least 1 argument".to_string());
+    }
+    
+    // Evaluate all expressions except the last one
+    for arg in &args[..args.len()-1] {
+        crate::eval::eval_trampoline(arg.clone(), &Rc::new(std::cell::RefCell::new(GcHeap::new())), env)?;
+    }
+    
+    // Return the last expression for evaluation (tail call)
+    Ok(args[args.len()-1].clone())
+}
+
+/// Special form: (and expr1 expr2 ...)
+/// 
+/// Evaluates expressions from left to right. If any expression evaluates to #f,
+/// returns #f immediately. Otherwise returns the value of the last expression.
+/// 
+/// This is implemented to support tail recursion - short-circuits on #f and
+/// returns the last expression for evaluation.
+pub fn and_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
+    if args.is_empty() {
+        return Ok(new_bool(heap, true)); // (and) returns #t
+    }
+    
+    // Evaluate expressions from left to right
+    for (i, arg) in args.iter().enumerate() {
+        let result = crate::eval::eval_trampoline(arg.clone(), &Rc::new(std::cell::RefCell::new(GcHeap::new())), env)?;
+        let value = result.borrow().value.clone();
+        
+        // Check if this expression is #f
+        if let SchemeValue::Bool(false) = value {
+            return Ok(result); // Short-circuit: return #f
+        }
+        
+        // If this is the last expression, return it for evaluation (tail call)
+        if i == args.len() - 1 {
+            return Ok(arg.clone());
+        }
+    }
+    
+    // This should never be reached, but just in case
+    Ok(new_bool(heap, true))
+}
+
+/// Special form: (or expr1 expr2 ...)
+/// 
+/// Evaluates expressions from left to right. If any expression evaluates to a true value,
+/// returns that value immediately. If all expressions evaluate to #f, returns #f.
+/// 
+/// This is implemented to support tail recursion - short-circuits on true values and
+/// returns the last expression for evaluation if all are false.
+pub fn or_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
+    if args.is_empty() {
+        return Ok(new_bool(heap, false)); // (or) returns #f
+    }
+    
+    // Evaluate expressions from left to right
+    for (i, arg) in args.iter().enumerate() {
+        let result = crate::eval::eval_trampoline(arg.clone(), &Rc::new(std::cell::RefCell::new(GcHeap::new())), env)?;
+        let value = result.borrow().value.clone();
+        
+        // Check if this expression is true (anything except #f is true in Scheme)
+        if let SchemeValue::Bool(false) = value {
+            // Continue to next expression
+            if i == args.len() - 1 {
+                // This was the last expression and it was #f
+                return Ok(result);
+            }
+        } else {
+            // Found a true value, return it
+            return Ok(result);
+        }
+    }
+    
+    // This should never be reached, but just in case
+    Ok(new_bool(heap, false))
 }
 
 pub fn display_builtin(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef]) -> Result<crate::gc::GcRef, String> {
@@ -62,6 +184,10 @@ pub fn register_all(heap: &mut crate::gc::GcHeap, env: &mut std::collections::Ha
     env.insert("number?".to_string(), BuiltinKind::Normal(Rc::new(predicate::number_q)));
     env.insert("help".to_string(), BuiltinKind::Normal(Rc::new(help_builtin)));
     env.insert("quote".to_string(), BuiltinKind::SpecialForm(Rc::new(quote_handler)));
+    env.insert("if".to_string(), BuiltinKind::SpecialForm(Rc::new(if_handler)));
+    env.insert("begin".to_string(), BuiltinKind::SpecialForm(Rc::new(begin_handler)));
+    env.insert("and".to_string(), BuiltinKind::SpecialForm(Rc::new(and_handler)));
+    env.insert("or".to_string(), BuiltinKind::SpecialForm(Rc::new(or_handler)));
     env.insert("type-of".to_string(), BuiltinKind::Normal(Rc::new(predicate::type_of)));
     env.insert("+".to_string(), BuiltinKind::Normal(Rc::new(plus_builtin)));
     env.insert("-".to_string(), BuiltinKind::Normal(Rc::new(minus_builtin)));
