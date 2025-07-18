@@ -3,7 +3,7 @@ use crate::io::{PortStack, FileTable, Port, PortKind};
 use crate::parser::Parser;
 use crate::printer::scheme_display;
 use crate::builtin::BuiltinKind;
-use std::rc::Rc;
+// use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs;
@@ -75,10 +75,10 @@ fn is_self_evaluating(expr: &SchemeValue) -> bool {
 /// an error occurred during loading, parsing, or evaluation.
 pub fn load_file(
     filename: &str,
-    heap: &Rc<RefCell<GcHeap>>,
-    port_stack: &Rc<RefCell<PortStack>>,
-    file_table: &Rc<RefCell<FileTable>>,
-    parser: &Rc<RefCell<Parser>>,
+    heap: &mut GcHeap,
+    port_stack: &mut PortStack,
+    file_table: &mut FileTable,
+    parser: &mut Parser,
     env: &mut HashMap<String, BuiltinKind>,
 ) -> Result<(), String> {
     // Read the file content
@@ -94,64 +94,53 @@ pub fn load_file(
     };
     
     // Push the file port onto the port stack
-    port_stack.borrow_mut().push(file_port);
+    port_stack.push(file_port);
     
-    // Update the parser's port to use the new current port
-    let current_port = Rc::new(RefCell::new(port_stack.borrow().current().clone()));
-    parser.borrow_mut().update_port(current_port);
+    // No longer needed: parser.update_port
     
-    // Parse and evaluate all expressions in the file using the existing parser
     loop {
-        let parse_result = parser.borrow_mut().parse();
+        let parse_result = {
+            let current_port = port_stack.current_mut();
+            parser.parse(heap, current_port)
+        };
         match parse_result {
             Ok(expr) => {
-                // Evaluate the expression using the trampoline
                 let eval_result = eval_trampoline(expr, heap, env);
                 match eval_result {
-                    Ok(_) => {
-                        // Expression evaluated successfully, continue to next
-                    }
+                    Ok(_) => {}
                     Err(e) => {
-                        // Pop the file port and return the error
-                        port_stack.borrow_mut().pop();
+                        port_stack.pop();
                         return Err(format!("Evaluation error in '{}': {}", filename, e));
                     }
                 }
             }
-            Err(e) if e.contains("end of input") => {
-                // End of file reached, success
-                break;
-            }
+            Err(e) if e.contains("end of input") => break,
             Err(e) => {
-                // Parse error
-                port_stack.borrow_mut().pop();
+                port_stack.pop();
                 return Err(format!("Parse error in '{}': {}", filename, e));
             }
         }
     }
     
     // Pop the file port from the stack
-    port_stack.borrow_mut().pop();
-    
-    // Update the parser's port to use the new current port
-    let current_port = Rc::new(RefCell::new(port_stack.borrow().current().clone()));
-    parser.borrow_mut().update_port(current_port);
-    
+    port_stack.pop();   
     Ok(())
 }
 
 pub fn repl(
-    heap: Rc<RefCell<GcHeap>>,
-    port_stack: Rc<RefCell<PortStack>>,
-    file_table: Rc<RefCell<FileTable>>,
-    parser: Rc<RefCell<Parser>>,
+    heap: &mut GcHeap,
+    port_stack: &mut PortStack,
+    parser: &mut Parser,
     mut env: HashMap<String, BuiltinKind>,
 ) {
     loop {
         print!("s1> ");
         use std::io::Write;
         std::io::stdout().flush().unwrap();
-        let result = parser.borrow_mut().parse();
+        let result = {
+            let current_port = port_stack.current_mut();
+            parser.parse(heap, current_port)
+        };
         match result {
             Ok(expr) => {
                 let value = expr.borrow().value.clone();
@@ -195,7 +184,7 @@ pub fn repl(
                                         println!("Error: malformed argument list");
                                         continue;
                                     }
-                                    match f(&mut *heap.borrow_mut(), &args, &mut env) {
+                                    match f(heap, &args, &mut env) {
                                         Ok(result) => println!("=> {}", scheme_display(&result.borrow().value)),
                                         Err(e) => println!("Error: {}", e),
                                     }
@@ -230,7 +219,7 @@ pub fn repl(
                                         println!("Error: malformed argument list");
                                         continue;
                                     }
-                                    match f(&heap, &args, &mut env) {
+                                    match f(heap, &args, &mut env) {
                                         Ok(result) => println!("=> {}", scheme_display(&result.borrow().value)),
                                         Err(e) => println!("Error: {}", e),
                                     }
@@ -246,7 +235,7 @@ pub fn repl(
                                             match &cur_borrow.value {
                                                 SchemeValue::Pair(arg, next) => {
                                                     // Recursively evaluate each argument using trampoline
-                                                    let evaled = eval_trampoline(arg.clone(), &heap, &mut env);
+                                                    let evaled = eval_trampoline(arg.clone(), heap, &mut env);
                                                     match evaled {
                                                         Ok(val) => evaled_args.push(val),
                                                         Err(e) => {
@@ -273,7 +262,7 @@ pub fn repl(
                                         println!("Error: malformed argument list");
                                         continue;
                                     }
-                                    match f(&mut *heap.borrow_mut(), &evaled_args) {
+                                    match f(heap, &evaled_args) {
                                         Ok(result) => println!("=> {}", scheme_display(&result.borrow().value)),
                                         Err(e) => println!("Error: {}", e),
                                     }
@@ -329,7 +318,7 @@ pub fn repl(
 /// let result = eval_trampoline(expr, &heap, &mut env);
 /// assert!(result.is_ok());
 /// ```
-pub fn eval_trampoline(expr: GcRef, heap: &Rc<RefCell<GcHeap>>, env: &mut HashMap<String, BuiltinKind>) -> Result<GcRef, String> {
+pub fn eval_trampoline(expr: GcRef, heap: &mut GcHeap, env: &mut HashMap<String, BuiltinKind>) -> Result<GcRef, String> {
     let mut current_expr = expr;
     
     loop {
@@ -352,7 +341,7 @@ pub fn eval_trampoline(expr: GcRef, heap: &Rc<RefCell<GcHeap>>, env: &mut HashMa
 /// - `Done(value)` if evaluation is complete
 ///
 /// This is the core of the trampoline pattern for tail recursion optimization.
-fn eval_step(expr: GcRef, heap: &Rc<RefCell<GcHeap>>, env: &mut HashMap<String, BuiltinKind>) -> Result<EvalResult, String> {
+fn eval_step(expr: GcRef, heap: &mut GcHeap, env: &mut HashMap<String, BuiltinKind>) -> Result<EvalResult, String> {
     let value = expr.borrow().value.clone();
     
     if is_self_evaluating(&value) {
@@ -388,7 +377,7 @@ fn eval_step(expr: GcRef, heap: &Rc<RefCell<GcHeap>>, env: &mut HashMap<String, 
                         }
                         
                         // For special forms, we evaluate them directly
-                        let result = f(&mut *heap.borrow_mut(), &args, env)?;
+                        let result = f(heap, &args, env)?;
                         Ok(EvalResult::Done(result))
                     }
                     BuiltinKind::SpecialFormWithEval(f) => {
@@ -416,7 +405,7 @@ fn eval_step(expr: GcRef, heap: &Rc<RefCell<GcHeap>>, env: &mut HashMap<String, 
                         if !matches!(&cur.borrow().value, SchemeValue::Nil) {
                             return Err("Malformed argument list".to_string());
                         }
-                        let result = f(&heap, &args, env)?;
+                        let result = f(heap, &args, env)?;
                         Ok(EvalResult::Done(result))
                     }
                     BuiltinKind::Normal(f) => {
@@ -448,7 +437,7 @@ fn eval_step(expr: GcRef, heap: &Rc<RefCell<GcHeap>>, env: &mut HashMap<String, 
                         }
                         
                         // Apply the function
-                        let result = f(&mut *heap.borrow_mut(), &evaled_args)?;
+                        let result = f(heap, &evaled_args)?;
                         Ok(EvalResult::Done(result))
                     }
                 }
@@ -466,7 +455,7 @@ fn eval_step(expr: GcRef, heap: &Rc<RefCell<GcHeap>>, env: &mut HashMap<String, 
 /// Legacy eval_expr function for backward compatibility.
 /// 
 /// This function is kept for compatibility but now uses the trampoline internally.
-fn eval_expr(expr: GcRef, heap: &Rc<RefCell<GcHeap>>, env: &mut HashMap<String, BuiltinKind>) -> Result<GcRef, String> {
+fn eval_expr(expr: GcRef, heap: &mut GcHeap, env: &mut HashMap<String, BuiltinKind>) -> Result<GcRef, String> {
     eval_trampoline(expr, heap, env)
 } 
 
@@ -486,6 +475,6 @@ pub fn lookup_global_binding(name: &str) -> Option<GcRef> {
     })
 }
 
-pub fn evaluate_expression(expr: GcRef, heap: &Rc<RefCell<GcHeap>>, env: &mut HashMap<String, BuiltinKind>) -> Result<GcRef, String> {
+pub fn evaluate_expression(expr: GcRef, heap: &mut GcHeap, env: &mut HashMap<String, BuiltinKind>) -> Result<GcRef, String> {
     eval_trampoline(expr, heap, env)
 } 

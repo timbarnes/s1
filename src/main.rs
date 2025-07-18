@@ -9,8 +9,8 @@ mod builtin;
 use gc::GcHeap;
 use crate::io::{Port, PortKind, PortStack, FileTable};
 use parser::Parser;
-use std::rc::Rc;
-use std::cell::RefCell;
+// use std::rc::Rc;
+//  use std::cell::RefCell;
 use std::collections::HashMap;
 use builtin::BuiltinKind;
 use argh::FromArgs;
@@ -47,22 +47,19 @@ fn main() {
     }
     
     // Set up GC heap, stdin port, port stack, file table
-    let heap = Rc::new(RefCell::new(GcHeap::new()));
+    let mut heap = GcHeap::new();
     let stdin_port = Port { kind: PortKind::Stdin };
-    let port_stack = Rc::new(RefCell::new(PortStack::new(stdin_port)));
-    let file_table = Rc::new(RefCell::new(FileTable::new()));
-
-    // Set up parser with current port (tokenizer is now internal to parser)
-    let current_port = Rc::new(RefCell::new(port_stack.borrow().current().clone()));
-    let parser = Rc::new(RefCell::new(Parser::new(heap.clone(), current_port, file_table.clone())));
+    let mut port_stack = PortStack::new(stdin_port);
+    let mut file_table = FileTable::new();
+    let mut parser = Parser::new();
 
     // Set up global environment (for now, just a single HashMap)
     let mut env = HashMap::<String, BuiltinKind>::new();
-    builtin::register_all(&mut heap.borrow_mut(), &mut env);
+    builtin::register_all(&mut heap, &mut env);
 
     // Load core file if it exists
     if cli.core != "core.scm" || std::path::Path::new(&cli.core).exists() {
-        match eval::load_file(&cli.core, &heap, &port_stack, &file_table, &parser, &mut env) {
+        match eval::load_file(&cli.core, &mut heap, &mut port_stack, &mut file_table, &mut parser, &mut env) {
             Ok(()) => println!("Loaded core file: {}", cli.core),
             Err(e) => {
                 eprintln!("Error loading core file '{}': {}", cli.core, e);
@@ -75,7 +72,7 @@ fn main() {
 
     // Load additional files specified with -l
     for filename in &cli.load {
-        match eval::load_file(filename, &heap, &port_stack, &file_table, &parser, &mut env) {
+        match eval::load_file(filename, &mut heap, &mut port_stack, &mut file_table, &mut parser, &mut env) {
             Ok(()) => println!("Loaded file: {}", filename),
             Err(e) => {
                 eprintln!("Error loading file '{}': {}", filename, e);
@@ -88,7 +85,7 @@ fn main() {
 
     // Handle script file if provided
     if let Some(script) = cli.script {
-        match eval::load_file(&script, &heap, &port_stack, &file_table, &parser, &mut env) {
+        match eval::load_file(&script, &mut heap, &mut port_stack, &mut file_table, &mut parser, &mut env) {
             Ok(()) => println!("Executed script: {}", script),
             Err(e) => {
                 eprintln!("Error executing script '{}': {}", script, e);
@@ -103,5 +100,5 @@ fn main() {
     }
 
     // Call the REPL loop in eval.rs
-    eval::repl(heap, port_stack, file_table, parser, env);
+    eval::repl(&mut heap, &mut port_stack, &mut parser, env);
 }

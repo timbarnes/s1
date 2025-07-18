@@ -12,7 +12,7 @@ use crate::printer::scheme_display;
 
 pub enum BuiltinKind {
     SpecialForm(Rc<dyn Fn(&mut crate::gc::GcHeap, &[crate::gc::GcRef], &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String>>),
-    SpecialFormWithEval(Rc<dyn Fn(&std::rc::Rc<std::cell::RefCell<crate::gc::GcHeap>>, &[crate::gc::GcRef], &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String>>),
+    SpecialFormWithEval(Rc<dyn Fn(&mut crate::gc::GcHeap, &[crate::gc::GcRef], &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String>>),
     Normal(Rc<dyn Fn(&mut crate::gc::GcHeap, &[crate::gc::GcRef]) -> Result<crate::gc::GcRef, String>>),
 }
 
@@ -107,7 +107,7 @@ pub fn or_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], _env:
 /// The expression is evaluated and the result is bound to the symbol.
 /// 
 /// This is a special form because the expression is evaluated in the current environment.
-pub fn define_handler_with_eval(heap: &std::rc::Rc<std::cell::RefCell<crate::gc::GcHeap>>, args: &[crate::gc::GcRef], env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
+pub fn define_handler_with_eval(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
     if args.len() != 2 {
         return Err("define: expected exactly 2 arguments (symbol expr)".to_string());
     }
@@ -262,34 +262,30 @@ mod tests {
         use crate::io::{Port, PortKind, PortStack};
         use crate::parser::Parser;
         use crate::eval::lookup_global_binding;
-        use std::rc::Rc;
-        use std::cell::RefCell;
         use std::collections::HashMap;
 
         // Scheme code to test
         let code = "(define x 42) (define y (* 3 5)) (define z '(a b c))";
-        let heap = Rc::new(RefCell::new(GcHeap::new()));
-        let file_table = Rc::new(RefCell::new(crate::io::FileTable::new()));
-        let port = Port {
+        let mut heap = GcHeap::new();
+        let mut file_table = crate::io::FileTable::new();
+        let mut port = Port {
             kind: PortKind::StringPortInput { content: code.to_string(), pos: 0 },
         };
-        let port_stack = Rc::new(RefCell::new(PortStack::new(port.clone())));
-        port_stack.borrow_mut().push(port);
-        let current_port = Rc::new(RefCell::new(port_stack.borrow().current().clone()));
-        let parser = Rc::new(RefCell::new(Parser::new(
-            heap.clone(),
-            current_port,
-            file_table.clone(),
-        )));
+        let mut port_stack = PortStack::new(port.clone());
+        port_stack.push(port);
+        let mut parser = Parser::new();
         let mut env = HashMap::new();
-        crate::builtin::register_all(&mut heap.borrow_mut(), &mut env);
+        crate::builtin::register_all(&mut heap, &mut env);
 
         // Evaluate all expressions in the string port
         loop {
-            let result = parser.borrow_mut().parse();
-            match result {
+            // Only borrow heap mutably for the duration of parse
+            let parse_result = parser.parse(&mut heap, port_stack.current_mut());
+            match parse_result {
                 Ok(expr) => {
-                    let _ = crate::eval::eval_trampoline(expr, &heap, &mut env);
+                    // Only borrow heap mutably for the duration of eval
+                    let eval_result = crate::eval::eval_trampoline(expr, &mut heap, &mut env);
+                    let _ = eval_result;
                 }
                 Err(e) if e.contains("end of input") => break,
                 Err(e) => panic!("Parse error: {}", e),
