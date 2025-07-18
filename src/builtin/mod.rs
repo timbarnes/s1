@@ -12,6 +12,7 @@ use crate::printer::scheme_display;
 
 pub enum BuiltinKind {
     SpecialForm(Rc<dyn Fn(&mut crate::gc::GcHeap, &[crate::gc::GcRef], &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String>>),
+    SpecialFormWithEval(Rc<dyn Fn(&std::rc::Rc<std::cell::RefCell<crate::gc::GcHeap>>, &[crate::gc::GcRef], &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String>>),
     Normal(Rc<dyn Fn(&mut crate::gc::GcHeap, &[crate::gc::GcRef]) -> Result<crate::gc::GcRef, String>>),
 }
 
@@ -19,6 +20,7 @@ impl Clone for BuiltinKind {
     fn clone(&self) -> Self {
         match self {
             BuiltinKind::SpecialForm(f) => BuiltinKind::SpecialForm(Rc::clone(f)),
+            BuiltinKind::SpecialFormWithEval(f) => BuiltinKind::SpecialFormWithEval(Rc::clone(f)),
             BuiltinKind::Normal(f) => BuiltinKind::Normal(Rc::clone(f)),
         }
     }
@@ -105,7 +107,7 @@ pub fn or_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], _env:
 /// The expression is evaluated and the result is bound to the symbol.
 /// 
 /// This is a special form because the expression is evaluated in the current environment.
-pub fn define_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], _env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
+pub fn define_handler_with_eval(heap: &std::rc::Rc<std::cell::RefCell<crate::gc::GcHeap>>, args: &[crate::gc::GcRef], env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
     if args.len() != 2 {
         return Err("define: expected exactly 2 arguments (symbol expr)".to_string());
     }
@@ -120,12 +122,14 @@ pub fn define_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], _
     // Second argument is the expression to evaluate
     let expr = &args[1];
     
-    // For now, just return the expression as-is
-    // TODO: Implement proper environment management
-    println!("define: would store {} = {:?}", symbol_name, expr.borrow().value);
+    // Evaluate the expression using the evaluation service
+    let evaluated_value = crate::eval::evaluate_expression(expr.clone(), heap, env)?;
     
-    // Return the expression
-    Ok(expr.clone())
+    // Store the evaluated value in the global environment
+    crate::eval::insert_global_binding(symbol_name.clone(), evaluated_value.clone());
+    
+    // Return the evaluated value
+    Ok(evaluated_value)
 }
 
 pub fn display_builtin(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef]) -> Result<crate::gc::GcRef, String> {
@@ -175,7 +179,7 @@ pub fn register_all(heap: &mut crate::gc::GcHeap, env: &mut std::collections::Ha
     env.insert("begin".to_string(), BuiltinKind::SpecialForm(Rc::new(begin_handler)));
     env.insert("and".to_string(), BuiltinKind::SpecialForm(Rc::new(and_handler)));
     env.insert("or".to_string(), BuiltinKind::SpecialForm(Rc::new(or_handler)));
-    env.insert("define".to_string(), BuiltinKind::SpecialForm(Rc::new(define_handler)));
+    env.insert("define".to_string(), BuiltinKind::SpecialFormWithEval(Rc::new(define_handler_with_eval)));
     env.insert("type-of".to_string(), BuiltinKind::Normal(Rc::new(predicate::type_of)));
     env.insert("+".to_string(), BuiltinKind::Normal(Rc::new(plus_builtin)));
     env.insert("-".to_string(), BuiltinKind::Normal(Rc::new(minus_builtin)));
@@ -250,5 +254,85 @@ mod tests {
         // Note: With the current immutable port design, we can't modify
         // the port content directly. This test shows the pattern for
         // when we have mutable port support in the future.
+    }
+
+    #[test]
+    fn test_define_with_string_port() {
+        use crate::gc::{GcHeap, SchemeValue};
+        use crate::io::{Port, PortKind, PortStack};
+        use crate::parser::Parser;
+        use crate::eval::lookup_global_binding;
+        use std::rc::Rc;
+        use std::cell::RefCell;
+        use std::collections::HashMap;
+
+        // Scheme code to test
+        let code = "(define x 42) (define y (* 3 5)) (define z '(a b c))";
+        let heap = Rc::new(RefCell::new(GcHeap::new()));
+        let file_table = Rc::new(RefCell::new(crate::io::FileTable::new()));
+        let port = Port {
+            kind: PortKind::StringPortInput { content: code.to_string(), pos: 0 },
+        };
+        let port_stack = Rc::new(RefCell::new(PortStack::new(port.clone())));
+        port_stack.borrow_mut().push(port);
+        let current_port = Rc::new(RefCell::new(port_stack.borrow().current().clone()));
+        let parser = Rc::new(RefCell::new(Parser::new(
+            heap.clone(),
+            current_port,
+            file_table.clone(),
+        )));
+        let mut env = HashMap::new();
+        crate::builtin::register_all(&mut heap.borrow_mut(), &mut env);
+
+        // Evaluate all expressions in the string port
+        loop {
+            let result = parser.borrow_mut().parse();
+            match result {
+                Ok(expr) => {
+                    let _ = crate::eval::eval_trampoline(expr, &heap, &mut env);
+                }
+                Err(e) if e.contains("end of input") => break,
+                Err(e) => panic!("Parse error: {}", e),
+            }
+        }
+
+        // Check that x is defined and equals 42
+        let x_val = lookup_global_binding("x").expect("x should be defined");
+        match &x_val.borrow().value {
+            SchemeValue::Int(n) => assert_eq!(n.to_string(), "42"),
+            v => panic!("x has wrong value: {:?}", v),
+        }
+        // Check that y is defined and equals 15
+        let y_val = lookup_global_binding("y").expect("y should be defined");
+        match &y_val.borrow().value {
+            SchemeValue::Int(n) => assert_eq!(n.to_string(), "15"),
+            v => panic!("y has wrong value: {:?}", v),
+        }
+        // Check that z is defined and is a quoted list (a b c)
+        let z_val = lookup_global_binding("z").expect("z should be defined");
+        match &z_val.borrow().value {
+            SchemeValue::Pair(a, b) => {
+                let a_val = &a.borrow().value;
+                assert!(matches!(a_val, SchemeValue::Symbol(s) if s == "a"));
+                let b_val = &b.borrow().value;
+                match b_val {
+                    SchemeValue::Pair(b2, c) => {
+                        let b2_val = &b2.borrow().value;
+                        assert!(matches!(b2_val, SchemeValue::Symbol(s) if s == "b"));
+                        let c_val = &c.borrow().value;
+                        match c_val {
+                            SchemeValue::Pair(c2, nil) => {
+                                let c2_val = &c2.borrow().value;
+                                assert!(matches!(c2_val, SchemeValue::Symbol(s) if s == "c"));
+                                assert!(matches!(&nil.borrow().value, SchemeValue::Nil));
+                            }
+                            _ => panic!("z cdr is not a proper list: {:?}", c_val),
+                        }
+                    }
+                    _ => panic!("z cdr is not a proper list: {:?}", b_val),
+                }
+            }
+            v => panic!("z has wrong value: {:?}", v),
+        }
     }
 } 
