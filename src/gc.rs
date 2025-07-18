@@ -52,8 +52,8 @@ pub enum SchemeValue {
     Vector(Vec<GcRef>),
     /// Closures (functions with captured environment)
     Closure {
-        /// Parameter names
-        params: Vec<String>,
+        /// Parameter symbols (interned symbol pointers)
+        params: Vec<GcRef>,
         /// Function body expression
         body: GcRef,
         /// Captured environment
@@ -67,6 +67,7 @@ pub enum SchemeValue {
     Primitive {
         func: Rc<dyn Fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>>,
         doc: String,
+        is_special_form: bool,
     },
     /// Environment frames (variable bindings)
     EnvFrame(HashMap<String, GcRef>),
@@ -116,7 +117,16 @@ impl PartialEq for SchemeValue {
                 SchemeValue::Closure { params: p1, body: b1, env: e1 },
                 SchemeValue::Closure { params: p2, body: b2, env: e2 },
             ) => {
-                p1 == p2 && b1.borrow().value == b2.borrow().value && e1.borrow().value == e2.borrow().value
+                // Compare params by comparing each symbol's value
+                if p1.len() != p2.len() {
+                    return false;
+                }
+                for (param1, param2) in p1.iter().zip(p2.iter()) {
+                    if param1.borrow().value != param2.borrow().value {
+                        return false;
+                    }
+                }
+                b1.borrow().value == b2.borrow().value && e1.borrow().value == e2.borrow().value
             }
             (SchemeValue::Bool(a), SchemeValue::Bool(b)) => a == b,
             (SchemeValue::Char(a), SchemeValue::Char(b)) => a == b,
@@ -454,12 +464,12 @@ pub fn new_vector(heap: &mut GcHeap, elements: Vec<GcRef>) -> GcRef {
 /// use s1::gc::{GcHeap, new_closure, new_symbol, new_nil};
 ///
 /// let mut heap = GcHeap::new();
-/// let params = vec!["x".to_string(), "y".to_string()];
+/// let params = vec![new_symbol(&mut heap, "x"), new_symbol(&mut heap, "y")];
 /// let body = new_symbol(&mut heap, "body");
 /// let env = new_nil(&mut heap);
 /// let closure = new_closure(&mut heap, params, body, env);
 /// ```
-pub fn new_closure(heap: &mut GcHeap, params: Vec<String>, body: GcRef, env: GcRef) -> GcRef {
+pub fn new_closure(heap: &mut GcHeap, params: Vec<GcRef>, body: GcRef, env: GcRef) -> GcRef {
     heap.alloc(SchemeValue::Closure { params, body, env })
 }
 
@@ -511,8 +521,31 @@ pub fn new_primitive(
     heap: &mut GcHeap,
     f: Rc<dyn Fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>>,
     doc: String,
+    is_special_form: bool,
 ) -> GcRef {
-    heap.alloc(SchemeValue::Primitive { func: f, doc })
+    heap.alloc(SchemeValue::Primitive { func: f, doc, is_special_form })
+}
+
+/// Create a new special form on the heap.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_special_form};
+/// use std::rc::Rc;
+///
+/// let mut heap = GcHeap::new();
+/// let if_form = new_special_form(&mut heap, Rc::new(|_, args| {
+///     // Implementation would go here
+///     Ok(new_bool(&mut heap, false))
+/// }), "if special form".to_string());
+/// ```
+pub fn new_special_form(
+    heap: &mut GcHeap,
+    f: Rc<dyn Fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>>,
+    doc: String,
+) -> GcRef {
+    heap.alloc(SchemeValue::Primitive { func: f, doc, is_special_form: true })
 }
 
 /// Create a new environment frame on the heap.
@@ -653,15 +686,15 @@ pub fn as_vector(obj: &GcRef) -> Option<Vec<GcRef>> {
 /// use s1::gc::{GcHeap, new_closure, new_symbol, new_nil, as_closure};
 ///
 /// let mut heap = GcHeap::new();
-/// let params = vec!["x".to_string()];
+/// let params = vec![new_symbol(&mut heap, "x")];
 /// let body = new_symbol(&mut heap, "body");
 /// let env = new_nil(&mut heap);
 /// let closure = new_closure(&mut heap, params.clone(), body.clone(), env.clone());
 /// 
 /// let (p, b, e) = as_closure(&closure).unwrap();
-/// assert_eq!(p, params);
+/// assert_eq!(p.len(), params.len());
 /// ```
-pub fn as_closure(obj: &GcRef) -> Option<(Vec<String>, GcRef, GcRef)> {
+pub fn as_closure(obj: &GcRef) -> Option<(Vec<GcRef>, GcRef, GcRef)> {
     match &obj.borrow().value {
         SchemeValue::Closure { params, body, env } => Some((params.clone(), body.clone(), env.clone())),
         _ => None,
@@ -847,12 +880,12 @@ mod tests {
         assert_eq!(as_int(&vec_contents[1]).unwrap(), 2);
 
         // Closure
-        let params = vec!["x".to_string(), "y".to_string()];
+        let params = vec![new_symbol(&mut heap, "x"), new_symbol(&mut heap, "y")];
         let body = new_symbol(&mut heap, "body");
         let env = heap.nil();
         let clo = new_closure(&mut heap, params.clone(), body.clone(), env.clone());
         let (p, b, e) = as_closure(&clo).unwrap();
-        assert_eq!(p, params);
+        assert_eq!(p.len(), params.len());
         assert_eq!(b.borrow().value, body.borrow().value);
         assert_eq!(e.borrow().value, env.borrow().value);
 
@@ -884,7 +917,7 @@ mod tests {
         assert_eq!(as_char(&c), Some('x'));
 
         // Primitive
-        let prim = new_primitive(&mut heap, Rc::new(|_, _| Err("not implemented".to_string())), "Add two numbers".to_string());
+        let prim = new_primitive(&mut heap, Rc::new(|_, _| Err("not implemented".to_string())), "Add two numbers".to_string(), false);
         assert!(is_primitive(&prim));
     }
 

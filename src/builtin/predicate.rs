@@ -47,14 +47,15 @@ mod tests {
         let str_val = new_string(&mut heap, "hi");
         let vec_elem = new_int(&mut heap, BigInt::from(1));
         let vec_val = new_vector(&mut heap, vec![vec_elem]);
-        let clo_body = new_int(&mut heap, BigInt::from(1));
+        let clo_body = new_symbol(&mut heap, "body");
         let clo_env = new_nil(&mut heap);
-        let clo_val = crate::gc::new_closure(&mut heap, vec!["x".to_string()], clo_body, clo_env);
+        let param_x = new_symbol(&mut heap, "x");
+        let clo_val = crate::gc::new_closure(&mut heap, vec![param_x], clo_body, clo_env);
         let bool_val = new_bool(&mut heap, true);
         let char_val = new_char(&mut heap, 'a');
         let env_val = new_env_frame(&mut heap, std::collections::HashMap::new());
         let nil_val = new_nil(&mut heap);
-        let prim_val = new_primitive(&mut heap, Rc::new(|heap, _| Ok(new_nil(heap))), "doc".to_string());
+        let prim_val = new_primitive(&mut heap, Rc::new(|heap, _| Ok(new_nil(heap))), "doc".to_string(), false);
 
         assert_eq!(as_type(&type_of(&mut heap, &[int_val]).unwrap()), "integer");
         assert_eq!(as_type(&type_of(&mut heap, &[float_val]).unwrap()), "float");

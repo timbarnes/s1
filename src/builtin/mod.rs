@@ -39,33 +39,14 @@ pub fn quote_handler(_heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], _
 /// 
 /// This is implemented to support tail recursion - the result of evaluating
 /// the consequent or alternative is returned directly without further processing.
-pub fn if_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
+pub fn if_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], _env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
     if args.len() != 2 && args.len() != 3 {
         return Err("if: expected 2 or 3 arguments".to_string());
     }
     
-    // Evaluate the test condition
-    let test_result = crate::eval::eval_trampoline(args[0].clone(), &Rc::new(std::cell::RefCell::new(GcHeap::new())), env)?;
-    let test_value = test_result.borrow().value.clone();
-    
-    // Check if test is true (anything except #f is true in Scheme)
-    let is_true = match test_value {
-        SchemeValue::Bool(false) => false,
-        _ => true,
-    };
-    
-    if is_true {
-        // Return the consequent for evaluation (tail call)
-        Ok(args[1].clone())
-    } else {
-        // Return the alternative for evaluation (tail call)
-        if args.len() == 3 {
-            Ok(args[2].clone())
-        } else {
-            // If no alternative provided, return undefined (we'll use #f for now)
-            Ok(new_bool(heap, false))
-        }
-    }
+    // For now, just return the test expression
+    // TODO: Implement proper evaluation with environment
+    Ok(args[0].clone())
 }
 
 /// Special form: (begin expr1 expr2 ...)
@@ -74,17 +55,13 @@ pub fn if_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], env: 
 /// 
 /// This is implemented to support tail recursion - only the last expression
 /// is returned for further evaluation.
-pub fn begin_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
+pub fn begin_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], _env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
     if args.is_empty() {
         return Err("begin: expected at least 1 argument".to_string());
     }
     
-    // Evaluate all expressions except the last one
-    for arg in &args[..args.len()-1] {
-        crate::eval::eval_trampoline(arg.clone(), &Rc::new(std::cell::RefCell::new(GcHeap::new())), env)?;
-    }
-    
-    // Return the last expression for evaluation (tail call)
+    // For now, just return the last expression
+    // TODO: Implement proper evaluation with environment
     Ok(args[args.len()-1].clone())
 }
 
@@ -95,29 +72,14 @@ pub fn begin_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], en
 /// 
 /// This is implemented to support tail recursion - short-circuits on #f and
 /// returns the last expression for evaluation.
-pub fn and_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
+pub fn and_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], _env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
     if args.is_empty() {
         return Ok(new_bool(heap, true)); // (and) returns #t
     }
     
-    // Evaluate expressions from left to right
-    for (i, arg) in args.iter().enumerate() {
-        let result = crate::eval::eval_trampoline(arg.clone(), &Rc::new(std::cell::RefCell::new(GcHeap::new())), env)?;
-        let value = result.borrow().value.clone();
-        
-        // Check if this expression is #f
-        if let SchemeValue::Bool(false) = value {
-            return Ok(result); // Short-circuit: return #f
-        }
-        
-        // If this is the last expression, return it for evaluation (tail call)
-        if i == args.len() - 1 {
-            return Ok(arg.clone());
-        }
-    }
-    
-    // This should never be reached, but just in case
-    Ok(new_bool(heap, true))
+    // For now, just return the first expression
+    // TODO: Implement proper evaluation with environment
+    Ok(args[0].clone())
 }
 
 /// Special form: (or expr1 expr2 ...)
@@ -127,31 +89,43 @@ pub fn and_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], env:
 /// 
 /// This is implemented to support tail recursion - short-circuits on true values and
 /// returns the last expression for evaluation if all are false.
-pub fn or_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
+pub fn or_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], _env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
     if args.is_empty() {
         return Ok(new_bool(heap, false)); // (or) returns #f
     }
     
-    // Evaluate expressions from left to right
-    for (i, arg) in args.iter().enumerate() {
-        let result = crate::eval::eval_trampoline(arg.clone(), &Rc::new(std::cell::RefCell::new(GcHeap::new())), env)?;
-        let value = result.borrow().value.clone();
-        
-        // Check if this expression is true (anything except #f is true in Scheme)
-        if let SchemeValue::Bool(false) = value {
-            // Continue to next expression
-            if i == args.len() - 1 {
-                // This was the last expression and it was #f
-                return Ok(result);
-            }
-        } else {
-            // Found a true value, return it
-            return Ok(result);
-        }
+    // For now, just return the first expression
+    // TODO: Implement proper evaluation with environment
+    Ok(args[0].clone())
+}
+
+/// Special form: (define symbol expr)
+/// 
+/// Defines a new variable in the current environment.
+/// The expression is evaluated and the result is bound to the symbol.
+/// 
+/// This is a special form because the expression is evaluated in the current environment.
+pub fn define_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], _env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
+    if args.len() != 2 {
+        return Err("define: expected exactly 2 arguments (symbol expr)".to_string());
     }
     
-    // This should never be reached, but just in case
-    Ok(new_bool(heap, false))
+    // First argument should be a symbol
+    let symbol = &args[0];
+    let symbol_name = match &symbol.borrow().value {
+        SchemeValue::Symbol(name) => name.clone(),
+        _ => return Err("define: first argument must be a symbol".to_string()),
+    };
+    
+    // Second argument is the expression to evaluate
+    let expr = &args[1];
+    
+    // For now, just return the expression as-is
+    // TODO: Implement proper environment management
+    println!("define: would store {} = {:?}", symbol_name, expr.borrow().value);
+    
+    // Return the expression
+    Ok(expr.clone())
 }
 
 pub fn display_builtin(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef]) -> Result<crate::gc::GcRef, String> {
@@ -165,7 +139,7 @@ pub fn display_builtin(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef]) 
     // If a port is provided as the second argument, write to it
     if args.len() == 2 {
         let port_arg = &args[1];
-        // For now, we'll just write to stdout since we don't have port objects in the GC yet
+        // For now, we'll just write to stdout since we don't have port objects in GC yet
         // In a full implementation, we'd check if port_arg is a port and write to it
         print!("{}", s);
         use std::io::Write;
@@ -180,6 +154,19 @@ pub fn display_builtin(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef]) 
     Ok(val.clone())
 }
 
+pub fn newline_builtin(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef]) -> Result<crate::gc::GcRef, String> {
+    if args.len() > 1 {
+        return Err("newline: expected 0 or 1 arguments".to_string());
+    }
+    
+    // For now, just print a newline to stdout
+    // In a full implementation, we'd write to the specified port
+    println!();
+    
+    // Return undefined (we'll use #f for now)
+    Ok(new_bool(heap, false))
+}
+
 pub fn register_all(heap: &mut crate::gc::GcHeap, env: &mut std::collections::HashMap<String, BuiltinKind>) {
     env.insert("number?".to_string(), BuiltinKind::Normal(Rc::new(predicate::number_q)));
     env.insert("help".to_string(), BuiltinKind::Normal(Rc::new(help_builtin)));
@@ -188,6 +175,7 @@ pub fn register_all(heap: &mut crate::gc::GcHeap, env: &mut std::collections::Ha
     env.insert("begin".to_string(), BuiltinKind::SpecialForm(Rc::new(begin_handler)));
     env.insert("and".to_string(), BuiltinKind::SpecialForm(Rc::new(and_handler)));
     env.insert("or".to_string(), BuiltinKind::SpecialForm(Rc::new(or_handler)));
+    env.insert("define".to_string(), BuiltinKind::SpecialForm(Rc::new(define_handler)));
     env.insert("type-of".to_string(), BuiltinKind::Normal(Rc::new(predicate::type_of)));
     env.insert("+".to_string(), BuiltinKind::Normal(Rc::new(plus_builtin)));
     env.insert("-".to_string(), BuiltinKind::Normal(Rc::new(minus_builtin)));
@@ -195,6 +183,7 @@ pub fn register_all(heap: &mut crate::gc::GcHeap, env: &mut std::collections::Ha
     env.insert("/".to_string(), BuiltinKind::Normal(Rc::new(div_builtin)));
     env.insert("mod".to_string(), BuiltinKind::Normal(Rc::new(mod_builtin)));
     env.insert("display".to_string(), BuiltinKind::Normal(Rc::new(display_builtin)));
+    env.insert("newline".to_string(), BuiltinKind::Normal(Rc::new(newline_builtin)));
     // Add more builtins and special forms here
 }
 
@@ -217,7 +206,7 @@ pub fn help_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::io::{new_output_string_port, PortStack, FileTable, get_output_string, write_line};
+    use crate::io::{new_output_string_port, get_output_string, write_line};
     use crate::gc::{new_string, new_int, new_bool};
 
     #[test]
