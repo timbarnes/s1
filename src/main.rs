@@ -6,13 +6,8 @@ mod eval;
 mod printer;
 mod builtin;
 
-use gc::GcHeap;
-use crate::io::{Port, PortKind, PortStack, FileTable};
+use crate::io::{Port, PortKind, PortStack};
 use parser::Parser;
-// use std::rc::Rc;
-//  use std::cell::RefCell;
-use std::collections::HashMap;
-use builtin::BuiltinKind;
 use argh::FromArgs;
 use crate::eval::Evaluator;
 
@@ -50,7 +45,7 @@ fn main() {
     // Set up stdin port, port stack, file table
     let stdin_port = Port { kind: PortKind::Stdin };
     let mut port_stack = PortStack::new(stdin_port);
-    let mut file_table = FileTable::new();
+    // let mut file_table = FileTable::new();
     let mut parser = Parser::new();
 
     // Set up evaluator with builtins registered

@@ -1,12 +1,12 @@
 use crate::gc::{GcHeap, GcRef, SchemeValue, is_nil, as_pair, as_symbol};
 use crate::io::{PortStack, FileTable, Port, PortKind};
 use crate::parser::Parser;
-use crate::printer::scheme_display;
 use crate::builtin::BuiltinKind;
-// use std::rc::Rc;
-use std::cell::RefCell;
+use crate::printer::scheme_display;
 use std::collections::HashMap;
 use std::fs;
+use std::cell::RefCell;
+use std::thread_local;
 
 /// The main evaluator that owns the heap and environment.
 /// This struct encapsulates all evaluation state and provides
@@ -203,12 +203,11 @@ pub fn repl(
                     // Procedure call: (symbol ...)
                     if let SchemeValue::Symbol(ref name) = car.borrow().value {
                         let builtin_kind = match evaluator.env.get(name) {
-                            Some(BuiltinKind::SpecialFormOld(f)) => Some(BuiltinKind::SpecialFormOld(*f)),
                             Some(BuiltinKind::SpecialFormNew(f)) => Some(BuiltinKind::SpecialFormNew(*f)),
                             Some(BuiltinKind::Normal(f)) => Some(BuiltinKind::Normal(*f)),
                             _ => None,
                         };
-                        if let Some(BuiltinKind::SpecialFormOld(f)) = builtin_kind {
+                        if let Some(BuiltinKind::SpecialFormNew(f)) = builtin_kind {
                             // Collect args as a slice
                             let mut args = Vec::new();
                             let mut cur = cdr.clone();
@@ -237,41 +236,6 @@ pub fn repl(
                                 println!("Error: malformed argument list");
                                 continue;
                             }
-                            match f(&args, eval_service) {
-                                Ok(result) => println!("=> {}", scheme_display(&result.borrow().value)),
-                                Err(e) => println!("Error: {}", e),
-                            }
-                            continue;
-                        } else if let Some(BuiltinKind::SpecialFormNew(f)) = builtin_kind {
-                            // Collect args as a slice
-                            let mut args = Vec::new();
-                            let mut cur = cdr.clone();
-                            loop {
-                                let next = {
-                                    let cur_borrow = cur.borrow();
-                                    match &cur_borrow.value {
-                                        SchemeValue::Pair(arg, next) => {
-                                            args.push(arg.clone());
-                                            Some(next.clone())
-                                        }
-                                        SchemeValue::Nil => None,
-                                        _ => {
-                                            println!("Error: malformed argument list");
-                                            return;
-                                        }
-                                    }
-                                };
-                                if let Some(next_cdr) = next {
-                                    cur = next_cdr;
-                                } else {
-                                    break;
-                                }
-                            }
-                            if !matches!(&cur.borrow().value, SchemeValue::Nil) {
-                                println!("Error: malformed argument list");
-                                continue;
-                            }
-                            // For new special forms, pass the actual evaluator
                             match f(evaluator, &args) {
                                 Ok(result) => println!("=> {}", scheme_display(&result.borrow().value)),
                                 Err(e) => println!("Error: {}", e),
@@ -418,41 +382,11 @@ fn eval_step(expr: GcRef, heap: &mut GcHeap, env: &mut HashMap<String, BuiltinKi
     } else if let SchemeValue::Pair(car, cdr) = &value {
         if let SchemeValue::Symbol(ref name) = car.borrow().value {
             let builtin_kind = match env.get(name) {
-                Some(BuiltinKind::SpecialFormOld(f)) => Some(BuiltinKind::SpecialFormOld(*f)),
                 Some(BuiltinKind::SpecialFormNew(f)) => Some(BuiltinKind::SpecialFormNew(*f)),
                 Some(BuiltinKind::Normal(f)) => Some(BuiltinKind::Normal(*f)),
                 _ => None,
             };
-            if let Some(BuiltinKind::SpecialFormOld(f)) = builtin_kind {
-                // Collect args as a slice
-                let mut args = Vec::new();
-                let mut cur = cdr.clone();
-                loop {
-                    let next = {
-                        let cur_borrow = cur.borrow();
-                        match &cur_borrow.value {
-                            SchemeValue::Pair(arg, next) => {
-                                args.push(arg.clone());
-                                Some(next.clone())
-                            }
-                            SchemeValue::Nil => None,
-                            _ => return Err("Malformed argument list".to_string()),
-                        }
-                    };
-                    if let Some(next_cdr) = next {
-                        cur = next_cdr;
-                    } else {
-                        break;
-                    }
-                }
-                if !matches!(&cur.borrow().value, SchemeValue::Nil) {
-                    return Err("Malformed argument list".to_string());
-                }
-                
-                // For old special forms, we evaluate them directly with eval_service
-                let result = f(&args, eval_service)?;
-                Ok(EvalResult::Done(result))
-            } else if let Some(BuiltinKind::SpecialFormNew(f)) = builtin_kind {
+            if let Some(BuiltinKind::SpecialFormNew(f)) = builtin_kind {
                 // Collect args as a slice
                 let mut args = Vec::new();
                 let mut cur = cdr.clone();
@@ -540,41 +474,11 @@ fn eval_step_with_evaluator(expr: GcRef, evaluator: &mut Evaluator) -> Result<Ev
     } else if let SchemeValue::Pair(car, cdr) = &value {
         if let SchemeValue::Symbol(ref name) = car.borrow().value {
             let builtin_kind = match evaluator.env.get(name) {
-                Some(BuiltinKind::SpecialFormOld(f)) => Some(BuiltinKind::SpecialFormOld(*f)),
                 Some(BuiltinKind::SpecialFormNew(f)) => Some(BuiltinKind::SpecialFormNew(*f)),
                 Some(BuiltinKind::Normal(f)) => Some(BuiltinKind::Normal(*f)),
                 _ => None,
             };
-            if let Some(BuiltinKind::SpecialFormOld(f)) = builtin_kind {
-                // Collect args as a slice
-                let mut args = Vec::new();
-                let mut cur = cdr.clone();
-                loop {
-                    let next = {
-                        let cur_borrow = cur.borrow();
-                        match &cur_borrow.value {
-                            SchemeValue::Pair(arg, next) => {
-                                args.push(arg.clone());
-                                Some(next.clone())
-                            }
-                            SchemeValue::Nil => None,
-                            _ => return Err("Malformed argument list".to_string()),
-                        }
-                    };
-                    if let Some(next_cdr) = next {
-                        cur = next_cdr;
-                    } else {
-                        break;
-                    }
-                }
-                if !matches!(&cur.borrow().value, SchemeValue::Nil) {
-                    return Err("Malformed argument list".to_string());
-                }
-                
-                // For old special forms, we evaluate them directly with eval_service
-                let result = f(&args, eval_service)?;
-                Ok(EvalResult::Done(result))
-            } else if let Some(BuiltinKind::SpecialFormNew(f)) = builtin_kind {
+            if let Some(BuiltinKind::SpecialFormNew(f)) = builtin_kind {
                 // Collect args as a slice
                 let mut args = Vec::new();
                 let mut cur = cdr.clone();
@@ -645,13 +549,6 @@ fn eval_step_with_evaluator(expr: GcRef, evaluator: &mut Evaluator) -> Result<Ev
     }
 }
 
-/// Legacy eval_expr function for backward compatibility.
-/// 
-/// This function is kept for compatibility but now uses the trampoline internally.
-fn eval_expr(expr: GcRef, heap: &mut GcHeap, env: &mut HashMap<String, BuiltinKind>) -> Result<GcRef, String> {
-    eval_trampoline(expr, heap, env)
-} 
-
 thread_local! {
     static GLOBAL_ENV: RefCell<HashMap<String, GcRef>> = RefCell::new(HashMap::new());
 }
@@ -666,24 +563,6 @@ pub fn lookup_global_binding(name: &str) -> Option<GcRef> {
     GLOBAL_ENV.with(|env| {
         env.borrow().get(name).cloned()
     })
-}
-
-pub fn evaluate_expression(expr: GcRef, heap: &mut GcHeap, env: &mut HashMap<String, BuiltinKind>) -> Result<GcRef, String> {
-    eval_trampoline(expr, heap, env)
-} 
-
-// WARNING: This is for single-threaded test/demo use only!
-// In production, use proper context passing or thread-local storage.
-pub static mut TEST_HEAP: Option<*mut GcHeap> = None;
-pub static mut TEST_ENV: Option<*mut std::collections::HashMap<String, crate::builtin::BuiltinKind>> = None;
-
-/// Evaluation service for special forms: evaluates an expression in the current static heap/env context
-pub fn eval_service(expr: &GcRef) -> Result<GcRef, String> {
-    unsafe {
-        let heap = TEST_HEAP.expect("TEST_HEAP not set");
-        let env = TEST_ENV.expect("TEST_ENV not set");
-        crate::eval::eval_trampoline(expr.clone(), &mut *heap, &mut *env)
-    }
 }
 
 #[cfg(test)]

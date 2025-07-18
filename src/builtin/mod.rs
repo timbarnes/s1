@@ -1,33 +1,20 @@
 pub mod number;
 pub mod predicate;
 
-use crate::gc::{GcHeap, GcRef, new_primitive, new_string, new_bool, as_bool, as_pair, is_nil};
-use std::collections::HashMap;
-use std::rc::Rc;
+use crate::gc::{GcHeap, GcRef, new_string, new_bool};
 use num_bigint::BigInt;
-use crate::gc::{as_int, as_float, new_int, new_float, SchemeValue};
-use num_traits::ToPrimitive;
+use crate::gc::SchemeValue;
 use number::{plus_builtin, minus_builtin, times_builtin, div_builtin, mod_builtin};
 use crate::printer::scheme_display;
 use crate::eval::Evaluator;
 
 pub enum BuiltinKind {
-    // Old special form signature (for backward compatibility during transition)
-    SpecialFormOld(fn(&[GcRef], fn(&GcRef) -> Result<GcRef, String>) -> Result<GcRef, String>),
     // New special form signature using Evaluator
     SpecialFormNew(fn(&mut Evaluator, &[GcRef]) -> Result<GcRef, String>),
     Normal(fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>),
 }
 
 // No Clone implementation needed for BuiltinKind with function pointers
-
-pub fn quote_handler(args: &[GcRef], _eval: fn(&GcRef) -> Result<GcRef, String>) -> Result<GcRef, String> {
-    if args.len() != 1 {
-        Err("quote: expected exactly 1 argument".to_string())
-    } else {
-        Ok(args[0].clone())
-    }
-}
 
 /// New quote handler using Evaluator interface
 pub fn quote_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
@@ -102,102 +89,6 @@ pub fn begin_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<Gc
     // For now, just return the last expression
     // TODO: Implement proper evaluation with environment
     Ok(args[args.len()-1].clone())
-}
-
-/// Special form: (if test consequent alternative)
-/// 
-/// Evaluates test. If test is true, evaluates and returns consequent.
-/// If test is false, evaluates and returns alternative.
-/// 
-/// This is implemented to support tail recursion - the result of evaluating
-/// the consequent or alternative is returned directly without further processing.
-pub fn if_handler(args: &[GcRef], _eval: fn(&GcRef) -> Result<GcRef, String>) -> Result<GcRef, String> {
-    if args.len() != 2 && args.len() != 3 {
-        return Err("if: expected 2 or 3 arguments".to_string());
-    }
-    
-    // For now, just return the test expression
-    // TODO: Implement proper evaluation with environment
-    Ok(args[0].clone())
-}
-
-/// Special form: (begin expr1 expr2 ...)
-/// 
-/// Evaluates expressions in sequence, returning the value of the last expression.
-/// 
-/// This is implemented to support tail recursion - only the last expression
-/// is returned for further evaluation.
-pub fn begin_handler(args: &[GcRef], _eval: fn(&GcRef) -> Result<GcRef, String>) -> Result<GcRef, String> {
-    if args.is_empty() {
-        return Err("begin: expected at least 1 argument".to_string());
-    }
-    
-    // For now, just return the last expression
-    // TODO: Implement proper evaluation with environment
-    Ok(args[args.len()-1].clone())
-}
-
-/// Special form: (and expr1 expr2 ...)
-/// 
-/// Evaluates expressions from left to right. If any expression evaluates to #f,
-/// returns #f immediately. Otherwise returns the value of the last expression.
-/// 
-/// This is implemented to support tail recursion - short-circuits on #f and
-/// returns the last expression for evaluation.
-pub fn and_handler(args: &[GcRef], _eval: fn(&GcRef) -> Result<GcRef, String>) -> Result<GcRef, String> {
-    if args.is_empty() {
-        // (and) returns #t; for now, return the first argument or a dummy true value
-        // TODO: Replace with canonical true value if available
-        return Ok(args.get(0).cloned().unwrap_or_else(|| args[0].clone()));
-    }
-    Ok(args[0].clone())
-}
-
-/// Special form: (or expr1 expr2 ...)
-/// 
-/// Evaluates expressions from left to right. If any expression evaluates to a true value,
-/// returns that value immediately. If all expressions evaluate to #f, returns #f.
-/// 
-/// This is implemented to support tail recursion - short-circuits on true values and
-/// returns the last expression for evaluation if all are false.
-pub fn or_handler(args: &[GcRef], _eval: fn(&GcRef) -> Result<GcRef, String>) -> Result<GcRef, String> {
-    if args.is_empty() {
-        // (or) returns #f; for now, return the first argument or a dummy false value
-        // TODO: Replace with canonical false value if available
-        return Ok(args.get(0).cloned().unwrap_or_else(|| args[0].clone()));
-    }
-    Ok(args[0].clone())
-}
-
-/// Special form: (define symbol expr)
-/// 
-/// Defines a new variable in the current environment.
-/// The expression is evaluated and the result is bound to the symbol.
-/// 
-/// This is a special form because the expression is evaluated in the current environment.
-pub fn define_handler_with_eval(args: &[GcRef], eval: fn(&GcRef) -> Result<GcRef, String>) -> Result<GcRef, String> {
-    if args.len() != 2 {
-        return Err("define: expected exactly 2 arguments (symbol expr)".to_string());
-    }
-    
-    // First argument should be a symbol
-    let symbol = &args[0];
-    let symbol_name = match &symbol.borrow().value {
-        SchemeValue::Symbol(name) => name.clone(),
-        _ => return Err("define: first argument must be a symbol".to_string()),
-    };
-    
-    // Second argument is the expression to evaluate
-    let expr = &args[1];
-    
-    // Evaluate the expression using the evaluation service
-    let evaluated_value = eval(expr)?;
-    
-    // Store the evaluated value in the global environment
-    crate::eval::insert_global_binding(symbol_name.clone(), evaluated_value.clone());
-    
-    // Return the evaluated value
-    Ok(evaluated_value)
 }
 
 pub fn display_builtin(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef]) -> Result<crate::gc::GcRef, String> {
