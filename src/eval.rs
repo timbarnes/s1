@@ -204,11 +204,12 @@ pub fn repl(
                     // Procedure call: (symbol ...)
                     if let SchemeValue::Symbol(ref name) = car.borrow().value {
                         let builtin_kind = match env.get(name) {
-                            Some(BuiltinKind::SpecialForm(f)) => Some(BuiltinKind::SpecialForm(*f)),
+                            Some(BuiltinKind::SpecialFormOld(f)) => Some(BuiltinKind::SpecialFormOld(*f)),
+                            Some(BuiltinKind::SpecialFormNew(f)) => Some(BuiltinKind::SpecialFormNew(*f)),
                             Some(BuiltinKind::Normal(f)) => Some(BuiltinKind::Normal(*f)),
                             _ => None,
                         };
-                        if let Some(BuiltinKind::SpecialForm(f)) = builtin_kind {
+                        if let Some(BuiltinKind::SpecialFormOld(f)) = builtin_kind {
                             // Collect args as a slice
                             let mut args = Vec::new();
                             let mut cur = cdr.clone();
@@ -242,8 +243,46 @@ pub fn repl(
                                 Err(e) => println!("Error: {}", e),
                             }
                             continue;
-                        }
-                        if let Some(BuiltinKind::Normal(f)) = builtin_kind {
+                        } else if let Some(BuiltinKind::SpecialFormNew(f)) = builtin_kind {
+                            // Collect args as a slice
+                            let mut args = Vec::new();
+                            let mut cur = cdr.clone();
+                            loop {
+                                let next = {
+                                    let cur_borrow = cur.borrow();
+                                    match &cur_borrow.value {
+                                        SchemeValue::Pair(arg, next) => {
+                                            args.push(arg.clone());
+                                            Some(next.clone())
+                                        }
+                                        SchemeValue::Nil => None,
+                                        _ => {
+                                            println!("Error: malformed argument list");
+                                            return;
+                                        }
+                                    }
+                                };
+                                if let Some(next_cdr) = next {
+                                    cur = next_cdr;
+                                } else {
+                                    break;
+                                }
+                            }
+                            if !matches!(&cur.borrow().value, SchemeValue::Nil) {
+                                println!("Error: malformed argument list");
+                                continue;
+                            }
+                            // For new special forms, create a temporary Evaluator
+                            let mut temp_evaluator = Evaluator {
+                                heap: GcHeap::new(), // TODO: Use actual heap
+                                env: HashMap::new(), // TODO: Use actual env
+                            };
+                            match f(&mut temp_evaluator, &args) {
+                                Ok(result) => println!("=> {}", scheme_display(&result.borrow().value)),
+                                Err(e) => println!("Error: {}", e),
+                            }
+                            continue;
+                        } else if let Some(BuiltinKind::Normal(f)) = builtin_kind {
                             // Evaluate arguments recursively using trampoline
                             let mut evaled_args = Vec::new();
                             let mut cur = cdr.clone();
@@ -365,11 +404,12 @@ fn eval_step(expr: GcRef, heap: &mut GcHeap, env: &mut HashMap<String, BuiltinKi
     } else if let SchemeValue::Pair(car, cdr) = &value {
         if let SchemeValue::Symbol(ref name) = car.borrow().value {
             let builtin_kind = match env.get(name) {
-                Some(BuiltinKind::SpecialForm(f)) => Some(BuiltinKind::SpecialForm(*f)),
+                Some(BuiltinKind::SpecialFormOld(f)) => Some(BuiltinKind::SpecialFormOld(*f)),
+                Some(BuiltinKind::SpecialFormNew(f)) => Some(BuiltinKind::SpecialFormNew(*f)),
                 Some(BuiltinKind::Normal(f)) => Some(BuiltinKind::Normal(*f)),
                 _ => None,
             };
-            if let Some(BuiltinKind::SpecialForm(f)) = builtin_kind {
+            if let Some(BuiltinKind::SpecialFormOld(f)) = builtin_kind {
                 // Collect args as a slice
                 let mut args = Vec::new();
                 let mut cur = cdr.clone();
@@ -395,8 +435,43 @@ fn eval_step(expr: GcRef, heap: &mut GcHeap, env: &mut HashMap<String, BuiltinKi
                     return Err("Malformed argument list".to_string());
                 }
                 
-                // For special forms, we evaluate them directly
+                // For old special forms, we evaluate them directly with eval_service
                 let result = f(&args, eval_service)?;
+                Ok(EvalResult::Done(result))
+            } else if let Some(BuiltinKind::SpecialFormNew(f)) = builtin_kind {
+                // Collect args as a slice
+                let mut args = Vec::new();
+                let mut cur = cdr.clone();
+                loop {
+                    let next = {
+                        let cur_borrow = cur.borrow();
+                        match &cur_borrow.value {
+                            SchemeValue::Pair(arg, next) => {
+                                args.push(arg.clone());
+                                Some(next.clone())
+                            }
+                            SchemeValue::Nil => None,
+                            _ => return Err("Malformed argument list".to_string()),
+                        }
+                    };
+                    if let Some(next_cdr) = next {
+                        cur = next_cdr;
+                    } else {
+                        break;
+                    }
+                }
+                if !matches!(&cur.borrow().value, SchemeValue::Nil) {
+                    return Err("Malformed argument list".to_string());
+                }
+                
+                // For new special forms, create a temporary Evaluator and call the handler
+                let mut temp_evaluator = Evaluator {
+                    heap: GcHeap::new(), // This is a limitation - we need the actual heap
+                    env: HashMap::new(), // This is a limitation - we need the actual env
+                };
+                // TODO: Pass the actual heap and env to the evaluator
+                // For now, this will work for quote since it doesn't need evaluation
+                let result = f(&mut temp_evaluator, &args)?;
                 Ok(EvalResult::Done(result))
             } else if let Some(BuiltinKind::Normal(f)) = builtin_kind {
                 // For normal functions, we need to evaluate all arguments first

@@ -9,9 +9,13 @@ use crate::gc::{as_int, as_float, new_int, new_float, SchemeValue};
 use num_traits::ToPrimitive;
 use number::{plus_builtin, minus_builtin, times_builtin, div_builtin, mod_builtin};
 use crate::printer::scheme_display;
+use crate::eval::Evaluator;
 
 pub enum BuiltinKind {
-    SpecialForm(fn(&[GcRef], fn(&GcRef) -> Result<GcRef, String>) -> Result<GcRef, String>),
+    // Old special form signature (for backward compatibility during transition)
+    SpecialFormOld(fn(&[GcRef], fn(&GcRef) -> Result<GcRef, String>) -> Result<GcRef, String>),
+    // New special form signature using Evaluator
+    SpecialFormNew(fn(&mut Evaluator, &[GcRef]) -> Result<GcRef, String>),
     Normal(fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>),
 }
 
@@ -23,6 +27,55 @@ pub fn quote_handler(args: &[GcRef], _eval: fn(&GcRef) -> Result<GcRef, String>)
     } else {
         Ok(args[0].clone())
     }
+}
+
+/// New quote handler using Evaluator interface
+pub fn quote_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 1 {
+        Err("quote: expected exactly 1 argument".to_string())
+    } else {
+        Ok(args[0].clone())
+    }
+}
+
+/// New and handler using Evaluator interface
+pub fn and_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.is_empty() {
+        // (and) returns #t
+        return Ok(new_bool(&mut evaluator.heap, true));
+    }
+    Ok(args[0].clone())
+}
+
+/// New or handler using Evaluator interface
+pub fn or_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.is_empty() {
+        // (or) returns #f
+        return Ok(new_bool(&mut evaluator.heap, false));
+    }
+    Ok(args[0].clone())
+}
+
+/// New if handler using Evaluator interface
+pub fn if_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 2 && args.len() != 3 {
+        return Err("if: expected 2 or 3 arguments".to_string());
+    }
+    
+    // For now, just return the test expression
+    // TODO: Implement proper evaluation with environment
+    Ok(args[0].clone())
+}
+
+/// New begin handler using Evaluator interface
+pub fn begin_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.is_empty() {
+        return Err("begin: expected at least 1 argument".to_string());
+    }
+    
+    // For now, just return the last expression
+    // TODO: Implement proper evaluation with environment
+    Ok(args[args.len()-1].clone())
 }
 
 /// Special form: (if test consequent alternative)
@@ -163,12 +216,12 @@ pub fn newline_builtin(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef]) 
 pub fn register_all(heap: &mut crate::gc::GcHeap, env: &mut std::collections::HashMap<String, BuiltinKind>) {
     env.insert("number?".to_string(), BuiltinKind::Normal(predicate::number_q));
     env.insert("help".to_string(), BuiltinKind::Normal(help_builtin));
-    env.insert("quote".to_string(), BuiltinKind::SpecialForm(quote_handler));
-    env.insert("if".to_string(), BuiltinKind::SpecialForm(if_handler));
-    env.insert("begin".to_string(), BuiltinKind::SpecialForm(begin_handler));
-    env.insert("and".to_string(), BuiltinKind::SpecialForm(and_handler));
-    env.insert("or".to_string(), BuiltinKind::SpecialForm(or_handler));
-    env.insert("define".to_string(), BuiltinKind::SpecialForm(define_handler_with_eval));
+    env.insert("quote".to_string(), BuiltinKind::SpecialFormNew(quote_handler_new));
+    env.insert("if".to_string(), BuiltinKind::SpecialFormNew(if_handler_new));
+    env.insert("begin".to_string(), BuiltinKind::SpecialFormNew(begin_handler_new));
+    env.insert("and".to_string(), BuiltinKind::SpecialFormNew(and_handler_new));
+    env.insert("or".to_string(), BuiltinKind::SpecialFormNew(or_handler_new));
+    env.insert("define".to_string(), BuiltinKind::SpecialFormOld(define_handler_with_eval));
     env.insert("type-of".to_string(), BuiltinKind::Normal(predicate::type_of));
     env.insert("+".to_string(), BuiltinKind::Normal(plus_builtin));
     env.insert("-".to_string(), BuiltinKind::Normal(minus_builtin));
@@ -328,5 +381,179 @@ mod tests {
             }
             v => panic!("z has wrong value: {:?}", v),
         }
+    }
+
+    #[test]
+    fn test_quote_handler_new() {
+        use crate::eval::Evaluator;
+        use crate::gc::{GcHeap, new_symbol, new_int};
+        use num_bigint::BigInt;
+
+        // Create an evaluator and test the new quote handler
+        let mut evaluator = Evaluator::new();
+        
+        // Create test arguments: (quote foo)
+        let symbol = new_symbol(&mut evaluator.heap, "foo");
+        let args = vec![symbol.clone()];
+        
+        // Test the new quote handler
+        let result = quote_handler_new(&mut evaluator, &args);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().borrow().value, symbol.borrow().value);
+        
+        // Test error case: wrong number of arguments
+        let empty_args: Vec<crate::gc::GcRef> = vec![];
+        let result = quote_handler_new(&mut evaluator, &empty_args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expected exactly 1 argument"));
+        
+        let too_many_args = vec![symbol.clone(), new_int(&mut evaluator.heap, BigInt::from(42))];
+        let result = quote_handler_new(&mut evaluator, &too_many_args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expected exactly 1 argument"));
+    }
+
+    #[test]
+    fn test_if_handler_new() {
+        use crate::eval::Evaluator;
+        use crate::gc::{new_symbol, new_int, new_bool};
+        use num_bigint::BigInt;
+
+        // Create an evaluator and test the new if handler
+        let mut evaluator = Evaluator::new();
+        
+        // Create test arguments: (if test consequent)
+        let test_expr = new_bool(&mut evaluator.heap, true);
+        let consequent = new_int(&mut evaluator.heap, BigInt::from(42));
+        let args = vec![test_expr.clone(), consequent.clone()];
+        
+        // Test the new if handler
+        let result = if_handler_new(&mut evaluator, &args);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().borrow().value, test_expr.borrow().value);
+        
+        // Test with 3 arguments: (if test consequent alternative)
+        let alternative = new_int(&mut evaluator.heap, BigInt::from(99));
+        let args_3 = vec![test_expr.clone(), consequent.clone(), alternative.clone()];
+        let result = if_handler_new(&mut evaluator, &args_3);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().borrow().value, test_expr.borrow().value);
+        
+        // Test error case: wrong number of arguments
+        let empty_args: Vec<crate::gc::GcRef> = vec![];
+        let result = if_handler_new(&mut evaluator, &empty_args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expected 2 or 3 arguments"));
+        
+        let one_arg = vec![test_expr.clone()];
+        let result = if_handler_new(&mut evaluator, &one_arg);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expected 2 or 3 arguments"));
+        
+        let four_args = vec![test_expr.clone(), consequent.clone(), alternative.clone(), new_bool(&mut evaluator.heap, false)];
+        let result = if_handler_new(&mut evaluator, &four_args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expected 2 or 3 arguments"));
+    }
+
+    #[test]
+    fn test_begin_handler_new() {
+        use crate::eval::Evaluator;
+        use crate::gc::{new_int, new_bool, new_string};
+        use num_bigint::BigInt;
+
+        // Create an evaluator and test the new begin handler
+        let mut evaluator = Evaluator::new();
+        
+        // Create test arguments: (begin expr1 expr2 expr3)
+        let expr1 = new_int(&mut evaluator.heap, BigInt::from(1));
+        let expr2 = new_bool(&mut evaluator.heap, true);
+        let expr3 = new_string(&mut evaluator.heap, "hello");
+        let args = vec![expr1.clone(), expr2.clone(), expr3.clone()];
+        
+        // Test the new begin handler - should return the last expression
+        let result = begin_handler_new(&mut evaluator, &args);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().borrow().value, expr3.borrow().value);
+        
+        // Test with single argument
+        let single_arg = vec![expr1.clone()];
+        let result = begin_handler_new(&mut evaluator, &single_arg);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().borrow().value, expr1.borrow().value);
+        
+        // Test error case: no arguments
+        let empty_args: Vec<crate::gc::GcRef> = vec![];
+        let result = begin_handler_new(&mut evaluator, &empty_args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expected at least 1 argument"));
+    }
+
+    #[test]
+    fn test_and_handler_new() {
+        use crate::eval::Evaluator;
+        use crate::gc::{new_int, new_bool, new_string};
+        use num_bigint::BigInt;
+
+        // Create an evaluator and test the new and handler
+        let mut evaluator = Evaluator::new();
+        
+        // Create test arguments: (and expr1 expr2 expr3)
+        let expr1 = new_bool(&mut evaluator.heap, true);
+        let expr2 = new_int(&mut evaluator.heap, BigInt::from(42));
+        let expr3 = new_string(&mut evaluator.heap, "hello");
+        let args = vec![expr1.clone(), expr2.clone(), expr3.clone()];
+        
+        // Test the new and handler - should return the first expression for now
+        let result = and_handler_new(&mut evaluator, &args);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().borrow().value, expr1.borrow().value);
+        
+        // Test with single argument
+        let single_arg = vec![expr1.clone()];
+        let result = and_handler_new(&mut evaluator, &single_arg);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().borrow().value, expr1.borrow().value);
+        
+        // Test with no arguments (should return first arg or a default)
+        let empty_args: Vec<crate::gc::GcRef> = vec![];
+        let result = and_handler_new(&mut evaluator, &empty_args);
+        assert!(result.is_ok());
+        // Should return #t for empty and
+        assert!(matches!(&result.unwrap().borrow().value, crate::gc::SchemeValue::Bool(true)));
+    }
+
+    #[test]
+    fn test_or_handler_new() {
+        use crate::eval::Evaluator;
+        use crate::gc::{new_int, new_bool, new_string};
+        use num_bigint::BigInt;
+
+        // Create an evaluator and test the new or handler
+        let mut evaluator = Evaluator::new();
+        
+        // Create test arguments: (or expr1 expr2 expr3)
+        let expr1 = new_bool(&mut evaluator.heap, false);
+        let expr2 = new_int(&mut evaluator.heap, BigInt::from(42));
+        let expr3 = new_string(&mut evaluator.heap, "hello");
+        let args = vec![expr1.clone(), expr2.clone(), expr3.clone()];
+        
+        // Test the new or handler - should return the first expression for now
+        let result = or_handler_new(&mut evaluator, &args);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().borrow().value, expr1.borrow().value);
+        
+        // Test with single argument
+        let single_arg = vec![expr1.clone()];
+        let result = or_handler_new(&mut evaluator, &single_arg);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().borrow().value, expr1.borrow().value);
+        
+        // Test with no arguments (should return #f)
+        let empty_args: Vec<crate::gc::GcRef> = vec![];
+        let result = or_handler_new(&mut evaluator, &empty_args);
+        assert!(result.is_ok());
+        // Should return #f for empty or
+        assert!(matches!(&result.unwrap().borrow().value, crate::gc::SchemeValue::Bool(false)));
     }
 } 
