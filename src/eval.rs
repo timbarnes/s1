@@ -152,123 +152,88 @@ pub fn repl(
                 } else if let SchemeValue::Pair(car, cdr) = &value {
                     // Procedure call: (symbol ...)
                     if let SchemeValue::Symbol(ref name) = car.borrow().value {
-                        if let Some(builtin) = env.get(name).cloned() {
-                            match builtin {
-                                BuiltinKind::SpecialForm(f) => {
-                                    // Pass unevaluated args and env
-                                    // Collect args as a slice
-                                    let mut args = Vec::new();
-                                    let mut cur = cdr.clone();
-                                    loop {
-                                        let next = {
-                                            let cur_borrow = cur.borrow();
-                                            match &cur_borrow.value {
-                                                SchemeValue::Pair(arg, next) => {
-                                                    args.push(arg.clone());
-                                                    Some(next.clone())
-                                                }
-                                                SchemeValue::Nil => None,
-                                                _ => {
-                                                    println!("Error: malformed argument list");
-                                                    return;
-                                                }
-                                            }
-                                        };
-                                        if let Some(next_cdr) = next {
-                                            cur = next_cdr;
-                                        } else {
-                                            break;
+                        let builtin_kind = match env.get(name) {
+                            Some(BuiltinKind::SpecialForm(f)) => Some(BuiltinKind::SpecialForm(*f)),
+                            Some(BuiltinKind::Normal(f)) => Some(BuiltinKind::Normal(*f)),
+                            _ => None,
+                        };
+                        if let Some(BuiltinKind::SpecialForm(f)) = builtin_kind {
+                            // Collect args as a slice
+                            let mut args = Vec::new();
+                            let mut cur = cdr.clone();
+                            loop {
+                                let next = {
+                                    let cur_borrow = cur.borrow();
+                                    match &cur_borrow.value {
+                                        SchemeValue::Pair(arg, next) => {
+                                            args.push(arg.clone());
+                                            Some(next.clone())
+                                        }
+                                        SchemeValue::Nil => None,
+                                        _ => {
+                                            println!("Error: malformed argument list");
+                                            return;
                                         }
                                     }
-                                    if !matches!(&cur.borrow().value, SchemeValue::Nil) {
-                                        println!("Error: malformed argument list");
-                                        continue;
-                                    }
-                                    match f(heap, &args, &mut env) {
-                                        Ok(result) => println!("=> {}", scheme_display(&result.borrow().value)),
-                                        Err(e) => println!("Error: {}", e),
-                                    }
-                                    continue;
-                                }
-                                BuiltinKind::SpecialFormWithEval(f) => {
-                                    // Collect args as a slice
-                                    let mut args = Vec::new();
-                                    let mut cur = cdr.clone();
-                                    loop {
-                                        let next = {
-                                            let cur_borrow = cur.borrow();
-                                            match &cur_borrow.value {
-                                                SchemeValue::Pair(arg, next) => {
-                                                    args.push(arg.clone());
-                                                    Some(next.clone())
-                                                }
-                                                SchemeValue::Nil => None,
-                                                _ => {
-                                                    println!("Error: malformed argument list");
-                                                    return;
-                                                }
-                                            }
-                                        };
-                                        if let Some(next_cdr) = next {
-                                            cur = next_cdr;
-                                        } else {
-                                            break;
-                                        }
-                                    }
-                                    if !matches!(&cur.borrow().value, SchemeValue::Nil) {
-                                        println!("Error: malformed argument list");
-                                        continue;
-                                    }
-                                    match f(heap, &args, &mut env) {
-                                        Ok(result) => println!("=> {}", scheme_display(&result.borrow().value)),
-                                        Err(e) => println!("Error: {}", e),
-                                    }
-                                    continue;
-                                }
-                                BuiltinKind::Normal(f) => {
-                                    // Evaluate arguments recursively using trampoline
-                                    let mut evaled_args = Vec::new();
-                                    let mut cur = cdr.clone();
-                                    loop {
-                                        let next = {
-                                            let cur_borrow = cur.borrow();
-                                            match &cur_borrow.value {
-                                                SchemeValue::Pair(arg, next) => {
-                                                    // Recursively evaluate each argument using trampoline
-                                                    let evaled = eval_trampoline(arg.clone(), heap, &mut env);
-                                                    match evaled {
-                                                        Ok(val) => evaled_args.push(val),
-                                                        Err(e) => {
-                                                            println!("Error: {}", e);
-                                                            return;
-                                                        }
-                                                    }
-                                                    Some(next.clone())
-                                                }
-                                                SchemeValue::Nil => None,
-                                                _ => {
-                                                    println!("Error: malformed argument list");
-                                                    return;
-                                                }
-                                            }
-                                        };
-                                        if let Some(next_cdr) = next {
-                                            cur = next_cdr;
-                                        } else {
-                                            break;
-                                        }
-                                    }
-                                    if !matches!(&cur.borrow().value, SchemeValue::Nil) {
-                                        println!("Error: malformed argument list");
-                                        continue;
-                                    }
-                                    match f(heap, &evaled_args) {
-                                        Ok(result) => println!("=> {}", scheme_display(&result.borrow().value)),
-                                        Err(e) => println!("Error: {}", e),
-                                    }
-                                    continue;
+                                };
+                                if let Some(next_cdr) = next {
+                                    cur = next_cdr;
+                                } else {
+                                    break;
                                 }
                             }
+                            if !matches!(&cur.borrow().value, SchemeValue::Nil) {
+                                println!("Error: malformed argument list");
+                                continue;
+                            }
+                            match f(&args, eval_service) {
+                                Ok(result) => println!("=> {}", scheme_display(&result.borrow().value)),
+                                Err(e) => println!("Error: {}", e),
+                            }
+                            continue;
+                        }
+                        if let Some(BuiltinKind::Normal(f)) = builtin_kind {
+                            // Evaluate arguments recursively using trampoline
+                            let mut evaled_args = Vec::new();
+                            let mut cur = cdr.clone();
+                            loop {
+                                let next = {
+                                    let cur_borrow = cur.borrow();
+                                    match &cur_borrow.value {
+                                        SchemeValue::Pair(arg, next) => {
+                                            // Recursively evaluate each argument using trampoline
+                                            let evaled = eval_trampoline(arg.clone(), heap, &mut env);
+                                            match evaled {
+                                                Ok(val) => evaled_args.push(val),
+                                                Err(e) => {
+                                                    println!("Error: {}", e);
+                                                    return;
+                                                }
+                                            }
+                                            Some(next.clone())
+                                        }
+                                        SchemeValue::Nil => None,
+                                        _ => {
+                                            println!("Error: malformed argument list");
+                                            return;
+                                        }
+                                    }
+                                };
+                                if let Some(next_cdr) = next {
+                                    cur = next_cdr;
+                                } else {
+                                    break;
+                                }
+                            }
+                            if !matches!(&cur.borrow().value, SchemeValue::Nil) {
+                                println!("Error: malformed argument list");
+                                continue;
+                            }
+                            match f(heap, &evaled_args) {
+                                Ok(result) => println!("=> {}", scheme_display(&result.borrow().value)),
+                                Err(e) => println!("Error: {}", e),
+                            }
+                            continue;
                         } else {
                             println!("Error: not a builtin: {}", name);
                         }
@@ -348,99 +313,71 @@ fn eval_step(expr: GcRef, heap: &mut GcHeap, env: &mut HashMap<String, BuiltinKi
         Ok(EvalResult::Done(expr))
     } else if let SchemeValue::Pair(car, cdr) = &value {
         if let SchemeValue::Symbol(ref name) = car.borrow().value {
-            if let Some(builtin) = env.get(name).cloned() {
-                match builtin {
-                    BuiltinKind::SpecialForm(f) => {
-                        // Collect args as a slice
-                        let mut args = Vec::new();
-                        let mut cur = cdr.clone();
-                        loop {
-                            let next = {
-                                let cur_borrow = cur.borrow();
-                                match &cur_borrow.value {
-                                    SchemeValue::Pair(arg, next) => {
-                                        args.push(arg.clone());
-                                        Some(next.clone())
-                                    }
-                                    SchemeValue::Nil => None,
-                                    _ => return Err("Malformed argument list".to_string()),
-                                }
-                            };
-                            if let Some(next_cdr) = next {
-                                cur = next_cdr;
-                            } else {
-                                break;
+            let builtin_kind = match env.get(name) {
+                Some(BuiltinKind::SpecialForm(f)) => Some(BuiltinKind::SpecialForm(*f)),
+                Some(BuiltinKind::Normal(f)) => Some(BuiltinKind::Normal(*f)),
+                _ => None,
+            };
+            if let Some(BuiltinKind::SpecialForm(f)) = builtin_kind {
+                // Collect args as a slice
+                let mut args = Vec::new();
+                let mut cur = cdr.clone();
+                loop {
+                    let next = {
+                        let cur_borrow = cur.borrow();
+                        match &cur_borrow.value {
+                            SchemeValue::Pair(arg, next) => {
+                                args.push(arg.clone());
+                                Some(next.clone())
                             }
+                            SchemeValue::Nil => None,
+                            _ => return Err("Malformed argument list".to_string()),
                         }
-                        if !matches!(&cur.borrow().value, SchemeValue::Nil) {
-                            return Err("Malformed argument list".to_string());
-                        }
-                        
-                        // For special forms, we evaluate them directly
-                        let result = f(heap, &args, env)?;
-                        Ok(EvalResult::Done(result))
-                    }
-                    BuiltinKind::SpecialFormWithEval(f) => {
-                        // Collect args as a slice
-                        let mut args = Vec::new();
-                        let mut cur = cdr.clone();
-                        loop {
-                            let next = {
-                                let cur_borrow = cur.borrow();
-                                match &cur_borrow.value {
-                                    SchemeValue::Pair(arg, next) => {
-                                        args.push(arg.clone());
-                                        Some(next.clone())
-                                    }
-                                    SchemeValue::Nil => None,
-                                    _ => return Err("Malformed argument list".to_string()),
-                                }
-                            };
-                            if let Some(next_cdr) = next {
-                                cur = next_cdr;
-                            } else {
-                                break;
-                            }
-                        }
-                        if !matches!(&cur.borrow().value, SchemeValue::Nil) {
-                            return Err("Malformed argument list".to_string());
-                        }
-                        let result = f(heap, &args, env)?;
-                        Ok(EvalResult::Done(result))
-                    }
-                    BuiltinKind::Normal(f) => {
-                        // For normal functions, we need to evaluate all arguments first
-                        let mut evaled_args = Vec::new();
-                        let mut cur = cdr.clone();
-                        loop {
-                            let next = {
-                                let cur_borrow = cur.borrow();
-                                match &cur_borrow.value {
-                                    SchemeValue::Pair(arg, next) => {
-                                        // Evaluate each argument using the trampoline
-                                        let evaled = eval_trampoline(arg.clone(), heap, env)?;
-                                        evaled_args.push(evaled);
-                                        Some(next.clone())
-                                    }
-                                    SchemeValue::Nil => None,
-                                    _ => return Err("Malformed argument list".to_string()),
-                                }
-                            };
-                            if let Some(next_cdr) = next {
-                                cur = next_cdr;
-                            } else {
-                                break;
-                            }
-                        }
-                        if !matches!(&cur.borrow().value, SchemeValue::Nil) {
-                            return Err("Malformed argument list".to_string());
-                        }
-                        
-                        // Apply the function
-                        let result = f(heap, &evaled_args)?;
-                        Ok(EvalResult::Done(result))
+                    };
+                    if let Some(next_cdr) = next {
+                        cur = next_cdr;
+                    } else {
+                        break;
                     }
                 }
+                if !matches!(&cur.borrow().value, SchemeValue::Nil) {
+                    return Err("Malformed argument list".to_string());
+                }
+                
+                // For special forms, we evaluate them directly
+                let result = f(&args, eval_service)?;
+                Ok(EvalResult::Done(result))
+            } else if let Some(BuiltinKind::Normal(f)) = builtin_kind {
+                // For normal functions, we need to evaluate all arguments first
+                let mut evaled_args = Vec::new();
+                let mut cur = cdr.clone();
+                loop {
+                    let next = {
+                        let cur_borrow = cur.borrow();
+                        match &cur_borrow.value {
+                            SchemeValue::Pair(arg, next) => {
+                                // Evaluate each argument using the trampoline
+                                let evaled = eval_trampoline(arg.clone(), heap, env)?;
+                                evaled_args.push(evaled);
+                                Some(next.clone())
+                            }
+                            SchemeValue::Nil => None,
+                            _ => return Err("Malformed argument list".to_string()),
+                        }
+                    };
+                    if let Some(next_cdr) = next {
+                        cur = next_cdr;
+                    } else {
+                        break;
+                    }
+                }
+                if !matches!(&cur.borrow().value, SchemeValue::Nil) {
+                    return Err("Malformed argument list".to_string());
+                }
+                
+                // Apply the function
+                let result = f(heap, &evaled_args)?;
+                Ok(EvalResult::Done(result))
             } else {
                 Err(format!("not a builtin: {}", name))
             }
@@ -477,4 +414,11 @@ pub fn lookup_global_binding(name: &str) -> Option<GcRef> {
 
 pub fn evaluate_expression(expr: GcRef, heap: &mut GcHeap, env: &mut HashMap<String, BuiltinKind>) -> Result<GcRef, String> {
     eval_trampoline(expr, heap, env)
+} 
+
+// Evaluation service for special forms: evaluates an expression in the current context
+// NOTE: This is a placeholder. In a real interpreter, you would wire this up to the current heap and environment.
+// For now, this function must be set up by the REPL or evaluation loop to point to the correct context.
+pub fn eval_service(_expr: &GcRef) -> Result<GcRef, String> {
+    unimplemented!("eval_service must be set up with the current heap and environment context");
 } 

@@ -1,26 +1,21 @@
 //! Parser for Scheme s-expressions.
 //!
-//! This module provides a parser that consumes tokens from the Tokenizer and
-//! produces unevaluated, interned s-expressions (SchemeValue) using the GC heap.
-//! The parser is designed to be extensible for additional Scheme forms.
+//! This module provides a stateless parser that consumes tokens from a self-contained Tokenizer
+//! and produces unevaluated, interned s-expressions (SchemeValue) using the GC heap.
+//! The parser is designed to be extensible for additional Scheme forms and does not own any state.
 //!
-//! # Examples
+//! # Example
 //!
 //! ```rust
 //! use s1::parser::Parser;
-//! use s1::tokenizer::{Tokenizer, Token};
-//! use s1::{PortStack, FileTable, Port, PortKind};
-//! use s1::gc::{GcHeap, new_int, new_symbol, new_string};
-//! use std::rc::Rc;
-//! use std::cell::RefCell;
+//! use s1::tokenizer::Tokenizer;
+//! use s1::io::{Port, PortKind};
+//! use s1::gc::GcHeap;
 //!
-//! let heap = Rc::new(RefCell::new(GcHeap::new()));
-//! let port = Port { kind: PortKind::StringPortInput { content:42.to_string(), pos: 0 } };
-//! let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
-//! let file_table = Rc::new(RefCell::new(FileTable::new()));
-//! let tokenizer = Tokenizer::new(port_stack, file_table);
-//! let mut parser = Parser::new(heap, tokenizer);
-//! let expr = parser.parse().unwrap();
+//! let mut heap = GcHeap::new();
+//! let mut port = Port { kind: PortKind::StringPortInput { content: "42".to_string(), pos: 0 } };
+//! let mut parser = Parser::new();
+//! let expr = parser.parse(&mut heap, &mut port).unwrap();
 //! ```
 
 use crate::gc::{GcHeap, GcRef, new_int, new_float, new_symbol, new_string, new_pair};
@@ -28,29 +23,27 @@ use crate::tokenizer::{Tokenizer, Token};
 // use std::rc::Rc;
 // use std::cell::RefCell;
 use num_bigint::BigInt;
-use crate::io::{FileTable, Port};
+use crate::io::{Port};
 
 /// Parser for Scheme s-expressions.
 ///
-/// The parser consumes tokens from a Tokenizer and produces interned s-expressions
-/// (SchemeValue) using the GC heap. It is designed to be extensible for additional
-/// Scheme forms.
+/// The parser is stateless and consumes tokens from a Tokenizer, producing interned s-expressions
+/// (SchemeValue) using the GC heap. All state is passed as arguments. The parser is extensible for additional Scheme forms.
 pub struct Parser;
 
 impl Parser {
-    /// Create a new parser.
+    /// Create a new stateless parser.
     pub fn new() -> Self {
         Self
-    }
-
-    /// Update the parser's port (no longer needed)
-    pub fn update_port(&mut self, _port: &mut Port) {
-        // No-op
     }
 
     /// Parse a single s-expression from the token stream.
     ///
     /// Returns Ok(GcRef) for a valid s-expression, or Err(String) for a syntax error.
+    ///
+    /// # Arguments
+    /// * `heap` - The GC heap for allocating Scheme values
+    /// * `port` - The input port to read from
     pub fn parse(&mut self, heap: &mut GcHeap, port: &mut Port) -> Result<GcRef, String> {
         let mut tokenizer = Tokenizer::new(port);
         let token = tokenizer.next_token();
@@ -61,7 +54,7 @@ impl Parser {
         }
     }
 
-    /// Parse a quoted expression (after encountering).
+    /// Parse a quoted expression (after encountering a quote token).
     fn parse_quoted_expression(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<GcRef, String> {
         // Get the next token
         let next_token = tokenizer.next_token();
@@ -127,7 +120,7 @@ impl Parser {
         Ok(crate::gc::new_vector(heap, vec_elems))
     }
 
-    /// Parse an s-expression from a given token (used for list elements).
+    /// Parse an s-expression from a given token (used for list elements and recursive parsing).
     fn parse_from_token(heap: &mut GcHeap, token: Option<Token>, tokenizer: &mut Tokenizer) -> Result<GcRef, String> {
         match token {
             Some(Token::Number(s)) => Self::parse_number_token(heap, &s),
@@ -146,7 +139,7 @@ impl Parser {
         }
     }
 
-    /// Parse a Scheme list (after encountering '(').
+    /// Parse a Scheme list (after encountering a left parenthesis).
     fn parse_list(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<GcRef, String> {
         let mut elements = Vec::new();
         loop {
@@ -187,7 +180,7 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::io::{FileTable, Port, PortKind};
+    use crate::io::{Port, PortKind};
     use crate::gc::{as_int, as_symbol, as_string, is_nil, as_pair, as_bool, as_char, as_vector, SchemeValue};
     use crate::builtin::{register_all, BuiltinKind};
     use std::collections::HashMap;
@@ -223,7 +216,6 @@ mod tests {
     fn parse_nil() {
         let mut heap = GcHeap::new();
         let mut port = Port { kind: PortKind::StringPortInput { content: "nil".to_string(), pos: 0 } };
-        let mut file_table = FileTable::new();
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         assert!(is_nil(&expr));
@@ -264,7 +256,6 @@ mod tests {
     fn parse_character() {
         let mut heap = GcHeap::new();
         let mut port = Port { kind: PortKind::StringPortInput { content: "#\\a #\\space".to_string(), pos: 0 } };
-        let mut file_table = FileTable::new();
         let mut parser = Parser::new();
         
         let expr = parser.parse(&mut heap, &mut port).unwrap();
@@ -293,7 +284,6 @@ mod tests {
     fn parse_dotted_pair() {
         let mut heap = GcHeap::new();
         let mut port = Port { kind: PortKind::StringPortInput { content: "(1 . 2)".to_string(), pos: 0 } };
-        let mut file_table = FileTable::new();
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         
@@ -320,7 +310,6 @@ mod tests {
     fn parse_string_debug() {
         let mut heap = GcHeap::new();
         let mut port = Port { kind: PortKind::StringPortInput { content: "hello world".to_string(), pos: 0 } };
-        let mut file_table = FileTable::new();
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         
@@ -346,7 +335,7 @@ mod tests {
         // Simulate evaluation of (quote foo)
         if let SchemeValue::Pair(car, cdr) = &expr.borrow().value {
             if let SchemeValue::Symbol(ref name) = car.borrow().value {
-                if let Some(builtin) = env.get(name).cloned() {
+                if let Some(builtin) = env.get(name) {
                     if let BuiltinKind::SpecialForm(f) = builtin {
                         let mut args = Vec::new();
                         let mut cur = cdr.clone();
@@ -369,7 +358,7 @@ mod tests {
                             }
                         }
                         assert!(matches!(&cur.borrow().value, SchemeValue::Nil));
-                        let result = f(&mut heap, &args, &mut env).unwrap();
+                        let result = f(&args, crate::eval::eval_service).unwrap();
                         assert_eq!(as_symbol(&result), Some("foo".to_string()));
                     } else {
                         panic!("quote not registered as special form");

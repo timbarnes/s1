@@ -1,5 +1,4 @@
 use crate::gc::{GcHeap, GcRef, SchemeValue, new_bool, new_symbol};
-use num_bigint::BigInt;
 
 pub fn number_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     let arg = args.get(0).ok_or("number?: expected 1 argument")?;
@@ -34,7 +33,8 @@ mod tests {
     use super::*;
     use crate::gc::{GcHeap, new_int, new_float, new_symbol, new_pair, new_string, new_vector, new_bool, new_char, new_primitive, new_env_frame, new_nil};
     use std::rc::Rc;
-
+    use num_bigint::BigInt;
+    
     #[test]
     fn test_type_of() {
         let mut heap = GcHeap::new();

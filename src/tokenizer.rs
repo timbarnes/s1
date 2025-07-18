@@ -24,7 +24,7 @@
 //! assert_eq!(tokenizer.next_token(), None);
 //! ```
 
-use crate::io::{FileTable, read_char, PortKind, Port};
+use crate::io::{PortKind, Port};
 // use std::rc::Rc;
 // use std::cell::RefCell;
 
@@ -62,7 +62,6 @@ pub struct Tokenizer<'a> {
     port: &'a mut Port,
     buffer: Vec<char>,
     vector_depth: usize,
-    string_pos: usize,
 }
 
 impl<'a> Tokenizer<'a> {
@@ -72,7 +71,6 @@ impl<'a> Tokenizer<'a> {
             port,
             buffer: Vec::new(),
             vector_depth: 0,
-            string_pos: 0,
         }
     }
 
@@ -377,15 +375,10 @@ impl<'a> Tokenizer<'a> {
     }
 }
 
-// Helper to collect chars as Vec<char>
-fn collect_chars(content: &str) -> Vec<char> {
-    content.chars().rev().collect::<Vec<char>>()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::io::{FileTable, Port, PortKind};
+    use crate::io::{Port, PortKind};
 
     fn tokenizer_from_str<'a>(port: &'a mut Port, s: &str) -> Tokenizer<'a> {
         // Set up the string port

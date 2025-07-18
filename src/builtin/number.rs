@@ -126,7 +126,7 @@ pub fn div_builtin(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef]) -> R
     if args.len() < 2 {
         return Err("/: expects at least 2 arguments".to_string());
     }
-    let mut is_float = false;
+    // let mut is_float = false;
     let mut result_float;
     let mut iter = args.iter();
     match &iter.next().unwrap().borrow().value {
@@ -134,7 +134,7 @@ pub fn div_builtin(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef]) -> R
             result_float = i.to_f64().unwrap();
         }
         SchemeValue::Float(f) => {
-            is_float = true;
+            // is_float = true;
             result_float = *f;
         }
         _ => return Err("/: all arguments must be numbers".to_string()),

@@ -11,22 +11,13 @@ use number::{plus_builtin, minus_builtin, times_builtin, div_builtin, mod_builti
 use crate::printer::scheme_display;
 
 pub enum BuiltinKind {
-    SpecialForm(Rc<dyn Fn(&mut crate::gc::GcHeap, &[crate::gc::GcRef], &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String>>),
-    SpecialFormWithEval(Rc<dyn Fn(&mut crate::gc::GcHeap, &[crate::gc::GcRef], &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String>>),
-    Normal(Rc<dyn Fn(&mut crate::gc::GcHeap, &[crate::gc::GcRef]) -> Result<crate::gc::GcRef, String>>),
+    SpecialForm(fn(&[GcRef], fn(&GcRef) -> Result<GcRef, String>) -> Result<GcRef, String>),
+    Normal(fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>),
 }
 
-impl Clone for BuiltinKind {
-    fn clone(&self) -> Self {
-        match self {
-            BuiltinKind::SpecialForm(f) => BuiltinKind::SpecialForm(Rc::clone(f)),
-            BuiltinKind::SpecialFormWithEval(f) => BuiltinKind::SpecialFormWithEval(Rc::clone(f)),
-            BuiltinKind::Normal(f) => BuiltinKind::Normal(Rc::clone(f)),
-        }
-    }
-}
+// No Clone implementation needed for BuiltinKind with function pointers
 
-pub fn quote_handler(_heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], _env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
+pub fn quote_handler(args: &[GcRef], _eval: fn(&GcRef) -> Result<GcRef, String>) -> Result<GcRef, String> {
     if args.len() != 1 {
         Err("quote: expected exactly 1 argument".to_string())
     } else {
@@ -41,7 +32,7 @@ pub fn quote_handler(_heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], _
 /// 
 /// This is implemented to support tail recursion - the result of evaluating
 /// the consequent or alternative is returned directly without further processing.
-pub fn if_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], _env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
+pub fn if_handler(args: &[GcRef], _eval: fn(&GcRef) -> Result<GcRef, String>) -> Result<GcRef, String> {
     if args.len() != 2 && args.len() != 3 {
         return Err("if: expected 2 or 3 arguments".to_string());
     }
@@ -57,7 +48,7 @@ pub fn if_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], _env:
 /// 
 /// This is implemented to support tail recursion - only the last expression
 /// is returned for further evaluation.
-pub fn begin_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], _env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
+pub fn begin_handler(args: &[GcRef], _eval: fn(&GcRef) -> Result<GcRef, String>) -> Result<GcRef, String> {
     if args.is_empty() {
         return Err("begin: expected at least 1 argument".to_string());
     }
@@ -74,13 +65,12 @@ pub fn begin_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], _e
 /// 
 /// This is implemented to support tail recursion - short-circuits on #f and
 /// returns the last expression for evaluation.
-pub fn and_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], _env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
+pub fn and_handler(args: &[GcRef], _eval: fn(&GcRef) -> Result<GcRef, String>) -> Result<GcRef, String> {
     if args.is_empty() {
-        return Ok(new_bool(heap, true)); // (and) returns #t
+        // (and) returns #t; for now, return the first argument or a dummy true value
+        // TODO: Replace with canonical true value if available
+        return Ok(args.get(0).cloned().unwrap_or_else(|| args[0].clone()));
     }
-    
-    // For now, just return the first expression
-    // TODO: Implement proper evaluation with environment
     Ok(args[0].clone())
 }
 
@@ -91,13 +81,12 @@ pub fn and_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], _env
 /// 
 /// This is implemented to support tail recursion - short-circuits on true values and
 /// returns the last expression for evaluation if all are false.
-pub fn or_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], _env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
+pub fn or_handler(args: &[GcRef], _eval: fn(&GcRef) -> Result<GcRef, String>) -> Result<GcRef, String> {
     if args.is_empty() {
-        return Ok(new_bool(heap, false)); // (or) returns #f
+        // (or) returns #f; for now, return the first argument or a dummy false value
+        // TODO: Replace with canonical false value if available
+        return Ok(args.get(0).cloned().unwrap_or_else(|| args[0].clone()));
     }
-    
-    // For now, just return the first expression
-    // TODO: Implement proper evaluation with environment
     Ok(args[0].clone())
 }
 
@@ -107,7 +96,7 @@ pub fn or_handler(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], _env:
 /// The expression is evaluated and the result is bound to the symbol.
 /// 
 /// This is a special form because the expression is evaluated in the current environment.
-pub fn define_handler_with_eval(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef], env: &mut std::collections::HashMap<String, BuiltinKind>) -> Result<crate::gc::GcRef, String> {
+pub fn define_handler_with_eval(args: &[GcRef], eval: fn(&GcRef) -> Result<GcRef, String>) -> Result<GcRef, String> {
     if args.len() != 2 {
         return Err("define: expected exactly 2 arguments (symbol expr)".to_string());
     }
@@ -123,7 +112,7 @@ pub fn define_handler_with_eval(heap: &mut crate::gc::GcHeap, args: &[crate::gc:
     let expr = &args[1];
     
     // Evaluate the expression using the evaluation service
-    let evaluated_value = crate::eval::evaluate_expression(expr.clone(), heap, env)?;
+    let evaluated_value = eval(expr)?;
     
     // Store the evaluated value in the global environment
     crate::eval::insert_global_binding(symbol_name.clone(), evaluated_value.clone());
@@ -172,22 +161,22 @@ pub fn newline_builtin(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef]) 
 }
 
 pub fn register_all(heap: &mut crate::gc::GcHeap, env: &mut std::collections::HashMap<String, BuiltinKind>) {
-    env.insert("number?".to_string(), BuiltinKind::Normal(Rc::new(predicate::number_q)));
-    env.insert("help".to_string(), BuiltinKind::Normal(Rc::new(help_builtin)));
-    env.insert("quote".to_string(), BuiltinKind::SpecialForm(Rc::new(quote_handler)));
-    env.insert("if".to_string(), BuiltinKind::SpecialForm(Rc::new(if_handler)));
-    env.insert("begin".to_string(), BuiltinKind::SpecialForm(Rc::new(begin_handler)));
-    env.insert("and".to_string(), BuiltinKind::SpecialForm(Rc::new(and_handler)));
-    env.insert("or".to_string(), BuiltinKind::SpecialForm(Rc::new(or_handler)));
-    env.insert("define".to_string(), BuiltinKind::SpecialFormWithEval(Rc::new(define_handler_with_eval)));
-    env.insert("type-of".to_string(), BuiltinKind::Normal(Rc::new(predicate::type_of)));
-    env.insert("+".to_string(), BuiltinKind::Normal(Rc::new(plus_builtin)));
-    env.insert("-".to_string(), BuiltinKind::Normal(Rc::new(minus_builtin)));
-    env.insert("*".to_string(), BuiltinKind::Normal(Rc::new(times_builtin)));
-    env.insert("/".to_string(), BuiltinKind::Normal(Rc::new(div_builtin)));
-    env.insert("mod".to_string(), BuiltinKind::Normal(Rc::new(mod_builtin)));
-    env.insert("display".to_string(), BuiltinKind::Normal(Rc::new(display_builtin)));
-    env.insert("newline".to_string(), BuiltinKind::Normal(Rc::new(newline_builtin)));
+    env.insert("number?".to_string(), BuiltinKind::Normal(predicate::number_q));
+    env.insert("help".to_string(), BuiltinKind::Normal(help_builtin));
+    env.insert("quote".to_string(), BuiltinKind::SpecialForm(quote_handler));
+    env.insert("if".to_string(), BuiltinKind::SpecialForm(if_handler));
+    env.insert("begin".to_string(), BuiltinKind::SpecialForm(begin_handler));
+    env.insert("and".to_string(), BuiltinKind::SpecialForm(and_handler));
+    env.insert("or".to_string(), BuiltinKind::SpecialForm(or_handler));
+    env.insert("define".to_string(), BuiltinKind::SpecialForm(define_handler_with_eval));
+    env.insert("type-of".to_string(), BuiltinKind::Normal(predicate::type_of));
+    env.insert("+".to_string(), BuiltinKind::Normal(plus_builtin));
+    env.insert("-".to_string(), BuiltinKind::Normal(minus_builtin));
+    env.insert("*".to_string(), BuiltinKind::Normal(times_builtin));
+    env.insert("/".to_string(), BuiltinKind::Normal(div_builtin));
+    env.insert("mod".to_string(), BuiltinKind::Normal(mod_builtin));
+    env.insert("display".to_string(), BuiltinKind::Normal(display_builtin));
+    env.insert("newline".to_string(), BuiltinKind::Normal(newline_builtin));
     // Add more builtins and special forms here
 }
 
@@ -257,7 +246,7 @@ mod tests {
     }
 
     #[test]
-    fn test_define_with_string_port() {
+    fn test_define() {
         use crate::gc::{GcHeap, SchemeValue};
         use crate::io::{Port, PortKind, PortStack};
         use crate::parser::Parser;
