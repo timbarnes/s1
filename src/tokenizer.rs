@@ -433,9 +433,9 @@ impl Tokenizer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::io::{PortStack, FileTable, Port, PortKind};
+    use crate::io::{FileTable, Port, PortKind};
 
-    fn tokenizer_from_str(port_stack: Rc<RefCell<PortStack>>, file_table: Rc<RefCell<FileTable>>, s: &str) -> Tokenizer {
+    fn tokenizer_from_str(file_table: Rc<RefCell<FileTable>>, s: &str) -> Tokenizer {
         // Create a string port
         let port = Port { kind: PortKind::StringPortInput { content: s.to_string(), pos: 0 } };
         let port = Rc::new(RefCell::new(port));
@@ -444,11 +444,9 @@ mod tests {
 
     #[test]
     fn test_basic_tokens() {
-        let port = Port { kind: PortKind::Stdin };
-        let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         
-        let mut tokenizer = tokenizer_from_str(port_stack, file_table, "hello123\"world\"");
+        let mut tokenizer = tokenizer_from_str(file_table, "hello123\"world\"");
         
         assert_eq!(tokenizer.next_token(), Some(Token::Symbol("hello123".to_string())));
         assert_eq!(tokenizer.next_token(), Some(Token::String("world".to_string())));
@@ -457,11 +455,9 @@ mod tests {
 
     #[test]
     fn test_whitespace_and_comments() {
-        let port = Port { kind: PortKind::Stdin };
-        let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         
-        let mut tokenizer = tokenizer_from_str(port_stack, file_table, "  hello  ; comment\n  world");
+        let mut tokenizer = tokenizer_from_str(file_table, "  hello  ; comment\n  world");
         
         assert_eq!(tokenizer.next_token(), Some(Token::Symbol("hello".to_string())));
         assert_eq!(tokenizer.next_token(), Some(Token::Symbol("world".to_string())));
@@ -470,11 +466,9 @@ mod tests {
 
     #[test]
     fn test_parentheses_and_brackets() {
-        let port = Port { kind: PortKind::Stdin };
-        let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         
-        let mut tokenizer = tokenizer_from_str(port_stack, file_table, "()[]");
+        let mut tokenizer = tokenizer_from_str(file_table, "()[]");
         
         assert_eq!(tokenizer.next_token(), Some(Token::LeftParen));
         assert_eq!(tokenizer.next_token(), Some(Token::RightParen));
@@ -485,11 +479,9 @@ mod tests {
 
     #[test]
     fn test_booleans_and_nil() {
-        let port = Port { kind: PortKind::Stdin };
-        let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         
-        let mut tokenizer = tokenizer_from_str(port_stack, file_table, "#t #f");
+        let mut tokenizer = tokenizer_from_str(file_table, "#t #f");
         
         assert_eq!(tokenizer.next_token(), Some(Token::Boolean(true)));
         assert_eq!(tokenizer.next_token(), Some(Token::Boolean(false)));
@@ -498,11 +490,9 @@ mod tests {
 
     #[test]
     fn test_character() {
-        let port = Port { kind: PortKind::Stdin };
-        let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         
-        let mut tokenizer = tokenizer_from_str(port_stack, file_table, "#\\a #\\space");
+        let mut tokenizer = tokenizer_from_str(file_table, "#\\a #\\space");
         
         assert_eq!(tokenizer.next_token(), Some(Token::Character('a')));
         assert_eq!(tokenizer.next_token(), Some(Token::Character(' ')));
@@ -511,11 +501,9 @@ mod tests {
 
     #[test]
     fn test_quote_and_dot() {
-        let port = Port { kind: PortKind::Stdin };
-        let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         
-        let mut tokenizer = tokenizer_from_str(port_stack, file_table, "' .;");
+        let mut tokenizer = tokenizer_from_str(file_table, "' .;");
         
         assert_eq!(tokenizer.next_token(), Some(Token::Quote));
         assert_eq!(tokenizer.next_token(), Some(Token::Dot));
@@ -524,11 +512,9 @@ mod tests {
 
     #[test]
     fn test_multiple_tokens_per_line() {
-        let port = Port { kind: PortKind::Stdin };
-        let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         
-        let mut tokenizer = tokenizer_from_str(port_stack, file_table, "hello world 123");
+        let mut tokenizer = tokenizer_from_str(file_table, "hello world 123");
         
         assert_eq!(tokenizer.next_token(), Some(Token::Symbol("hello".to_string())));
         assert_eq!(tokenizer.next_token(), Some(Token::Symbol("world".to_string())));
@@ -538,11 +524,9 @@ mod tests {
 
     #[test]
     fn test_comments() {
-        let port = Port { kind: PortKind::Stdin };
-        let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         
-        let mut tokenizer = tokenizer_from_str(port_stack, file_table, "hello ; this is a comment\nworld");
+        let mut tokenizer = tokenizer_from_str(file_table, "hello ; this is a comment\nworld");
         
         assert_eq!(tokenizer.next_token(), Some(Token::Symbol("hello".to_string())));
         assert_eq!(tokenizer.next_token(), Some(Token::Symbol("world".to_string())));
@@ -551,12 +535,10 @@ mod tests {
 
     #[test]
     fn test_string_literal_debug() {
-        let port = Port { kind: PortKind::Stdin };
-        let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
         
         // Test the exact input from the parser test
-        let mut tokenizer = tokenizer_from_str(port_stack, file_table, "\"hello world\"");
+        let mut tokenizer = tokenizer_from_str(file_table, "\"hello world\"");
         
         let token1 = tokenizer.next_token();
         let token2 = tokenizer.next_token();
@@ -570,10 +552,8 @@ mod tests {
 
     #[test]
     fn test_vector_token_debug() {
-        let port = Port { kind: PortKind::Stdin };
-        let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
-        let mut tokenizer = tokenizer_from_str(port_stack, file_table, "#(1 2 3)");
+        let mut tokenizer = tokenizer_from_str(file_table, "#(1 2 3)");
         let mut tokens = Vec::new();
         loop {
             let tok = tokenizer.next_token();
@@ -587,10 +567,8 @@ mod tests {
 
     #[test]
     fn test_negative_and_positive_numbers() {
-        let port = Port { kind: PortKind::Stdin };
-        let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
         let file_table = Rc::new(RefCell::new(FileTable::new()));
-        let mut tokenizer = tokenizer_from_str(port_stack, file_table, "-45 +123 -123412341234123412341234");
+        let mut tokenizer = tokenizer_from_str(file_table, "-45 +123 -123412341234123412341234");
         assert_eq!(tokenizer.next_token(), Some(Token::Number("-45".to_string())));
         assert_eq!(tokenizer.next_token(), Some(Token::Number("+123".to_string())));
         assert_eq!(tokenizer.next_token(), Some(Token::Number("-123412341234123412341234".to_string())));

@@ -201,6 +201,41 @@ pub fn repl(
                                     }
                                     continue;
                                 }
+                                BuiltinKind::SpecialFormWithEval(f) => {
+                                    // Collect args as a slice
+                                    let mut args = Vec::new();
+                                    let mut cur = cdr.clone();
+                                    loop {
+                                        let next = {
+                                            let cur_borrow = cur.borrow();
+                                            match &cur_borrow.value {
+                                                SchemeValue::Pair(arg, next) => {
+                                                    args.push(arg.clone());
+                                                    Some(next.clone())
+                                                }
+                                                SchemeValue::Nil => None,
+                                                _ => {
+                                                    println!("Error: malformed argument list");
+                                                    return;
+                                                }
+                                            }
+                                        };
+                                        if let Some(next_cdr) = next {
+                                            cur = next_cdr;
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                    if !matches!(&cur.borrow().value, SchemeValue::Nil) {
+                                        println!("Error: malformed argument list");
+                                        continue;
+                                    }
+                                    match f(&heap, &args, &mut env) {
+                                        Ok(result) => println!("=> {}", scheme_display(&result.borrow().value)),
+                                        Err(e) => println!("Error: {}", e),
+                                    }
+                                    continue;
+                                }
                                 BuiltinKind::Normal(f) => {
                                     // Evaluate arguments recursively using trampoline
                                     let mut evaled_args = Vec::new();
@@ -356,6 +391,34 @@ fn eval_step(expr: GcRef, heap: &Rc<RefCell<GcHeap>>, env: &mut HashMap<String, 
                         let result = f(&mut *heap.borrow_mut(), &args, env)?;
                         Ok(EvalResult::Done(result))
                     }
+                    BuiltinKind::SpecialFormWithEval(f) => {
+                        // Collect args as a slice
+                        let mut args = Vec::new();
+                        let mut cur = cdr.clone();
+                        loop {
+                            let next = {
+                                let cur_borrow = cur.borrow();
+                                match &cur_borrow.value {
+                                    SchemeValue::Pair(arg, next) => {
+                                        args.push(arg.clone());
+                                        Some(next.clone())
+                                    }
+                                    SchemeValue::Nil => None,
+                                    _ => return Err("Malformed argument list".to_string()),
+                                }
+                            };
+                            if let Some(next_cdr) = next {
+                                cur = next_cdr;
+                            } else {
+                                break;
+                            }
+                        }
+                        if !matches!(&cur.borrow().value, SchemeValue::Nil) {
+                            return Err("Malformed argument list".to_string());
+                        }
+                        let result = f(&heap, &args, env)?;
+                        Ok(EvalResult::Done(result))
+                    }
                     BuiltinKind::Normal(f) => {
                         // For normal functions, we need to evaluate all arguments first
                         let mut evaled_args = Vec::new();
@@ -404,5 +467,25 @@ fn eval_step(expr: GcRef, heap: &Rc<RefCell<GcHeap>>, env: &mut HashMap<String, 
 /// 
 /// This function is kept for compatibility but now uses the trampoline internally.
 fn eval_expr(expr: GcRef, heap: &Rc<RefCell<GcHeap>>, env: &mut HashMap<String, BuiltinKind>) -> Result<GcRef, String> {
+    eval_trampoline(expr, heap, env)
+} 
+
+thread_local! {
+    static GLOBAL_ENV: RefCell<HashMap<String, GcRef>> = RefCell::new(HashMap::new());
+}
+
+pub fn insert_global_binding(name: String, value: GcRef) {
+    GLOBAL_ENV.with(|env| {
+        env.borrow_mut().insert(name, value);
+    });
+}
+
+pub fn lookup_global_binding(name: &str) -> Option<GcRef> {
+    GLOBAL_ENV.with(|env| {
+        env.borrow().get(name).cloned()
+    })
+}
+
+pub fn evaluate_expression(expr: GcRef, heap: &Rc<RefCell<GcHeap>>, env: &mut HashMap<String, BuiltinKind>) -> Result<GcRef, String> {
     eval_trampoline(expr, heap, env)
 } 
