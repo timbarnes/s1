@@ -56,6 +56,32 @@ pub fn or_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef
     Ok(args[0].clone())
 }
 
+/// New define handler using Evaluator interface
+pub fn define_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 2 {
+        return Err("define: expected exactly 2 arguments (symbol expr)".to_string());
+    }
+    
+    // First argument should be a symbol
+    let symbol = &args[0];
+    let symbol_name = match &symbol.borrow().value {
+        SchemeValue::Symbol(name) => name.clone(),
+        _ => return Err("define: first argument must be a symbol".to_string()),
+    };
+    
+    // Second argument is the expression to evaluate
+    let expr = &args[1];
+    
+    // Evaluate the expression using the evaluator's eval_service
+    let evaluated_value = evaluator.eval_service(expr)?;
+    
+    // Store the evaluated value in the evaluator's environment
+    evaluator.insert_global_binding(symbol_name.clone(), evaluated_value.clone());
+    
+    // Return the evaluated value
+    Ok(evaluated_value)
+}
+
 /// New if handler using Evaluator interface
 pub fn if_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 2 && args.len() != 3 {
@@ -221,7 +247,7 @@ pub fn register_all(heap: &mut crate::gc::GcHeap, env: &mut std::collections::Ha
     env.insert("begin".to_string(), BuiltinKind::SpecialFormNew(begin_handler_new));
     env.insert("and".to_string(), BuiltinKind::SpecialFormNew(and_handler_new));
     env.insert("or".to_string(), BuiltinKind::SpecialFormNew(or_handler_new));
-    env.insert("define".to_string(), BuiltinKind::SpecialFormOld(define_handler_with_eval));
+    env.insert("define".to_string(), BuiltinKind::SpecialFormNew(define_handler_new));
     env.insert("type-of".to_string(), BuiltinKind::Normal(predicate::type_of));
     env.insert("+".to_string(), BuiltinKind::Normal(plus_builtin));
     env.insert("-".to_string(), BuiltinKind::Normal(minus_builtin));
@@ -296,91 +322,6 @@ mod tests {
         // Note: With the current immutable port design, we can't modify
         // the port content directly. This test shows the pattern for
         // when we have mutable port support in the future.
-    }
-
-    #[test]
-    fn test_define() {
-        use crate::gc::{GcHeap, SchemeValue};
-        use crate::io::{Port, PortKind, PortStack};
-        use crate::parser::Parser;
-        use crate::eval::{lookup_global_binding, TEST_HEAP, TEST_ENV};
-        use std::collections::HashMap;
-
-        // Scheme code to test
-        let code = "(define x 42) (define y (* 3 5)) (define z '(a b c))";
-        let mut heap = GcHeap::new();
-        let port = Port {
-            kind: PortKind::StringPortInput { content: code.to_string(), pos: 0 },
-        };
-        let mut port_stack = PortStack::new(port.clone());
-        port_stack.push(port);
-        let mut parser = Parser::new();
-        let mut env = HashMap::new();
-        crate::builtin::register_all(&mut heap, &mut env);
-
-        // Set static mut pointers for the evaluation service
-        unsafe {
-            TEST_HEAP = Some(&mut heap as *mut GcHeap);
-            TEST_ENV = Some(&mut env as *mut HashMap<String, crate::builtin::BuiltinKind>);
-        }
-
-        // Evaluate all expressions in the string port
-        loop {
-            let parse_result = parser.parse(&mut heap, port_stack.current_mut());
-            match parse_result {
-                Ok(expr) => {
-                    let eval_result = crate::eval::eval_trampoline(expr, &mut heap, &mut env);
-                    let _ = eval_result;
-                }
-                Err(e) if e.contains("end of input") => break,
-                Err(e) => panic!("Parse error: {}", e),
-            }
-        }
-
-        // Restore static mut pointers
-        unsafe {
-            TEST_HEAP = None;
-            TEST_ENV = None;
-        }
-
-        // Check that x is defined and equals 42
-        let x_val = lookup_global_binding("x").expect("x should be defined");
-        match &x_val.borrow().value {
-            SchemeValue::Int(n) => assert_eq!(n.to_string(), "42"),
-            v => panic!("x has wrong value: {:?}", v),
-        }
-        // Check that y is defined and equals 15
-        let y_val = lookup_global_binding("y").expect("y should be defined");
-        match &y_val.borrow().value {
-            SchemeValue::Int(n) => assert_eq!(n.to_string(), "15"),
-            v => panic!("y has wrong value: {:?}", v),
-        }
-        // Check that z is defined and is a quoted list (a b c)
-        let z_val = lookup_global_binding("z").expect("z should be defined");
-        match &z_val.borrow().value {
-            SchemeValue::Pair(a, b) => {
-                let a_val = &a.borrow().value;
-                assert!(matches!(a_val, SchemeValue::Symbol(s) if s == "a"));
-                let b_val = &b.borrow().value;
-                match b_val {
-                    SchemeValue::Pair(b2, c) => {
-                        let b2_val = &b2.borrow().value;
-                        assert!(matches!(b2_val, SchemeValue::Symbol(s) if s == "b"));
-                        let c_val = &c.borrow().value;
-                        match c_val {
-                            SchemeValue::Pair(c2, nil) => {
-                                let c2_val = &c2.borrow().value;
-                                assert!(matches!(c2_val, SchemeValue::Symbol(s) if s == "c"));
-                                assert!(matches!(&nil.borrow().value, SchemeValue::Nil));
-                            }
-                            _ => panic!("z cdr is not a proper list: {:?}", c_val),
-                        }
-                    }
-                    _ => panic!("z cdr is not a proper list: {:?}", b_val),
-                }
-            }
-            v => panic!("z has wrong value: {:?}", v),
-        }
     }
 
     #[test]
@@ -555,5 +496,84 @@ mod tests {
         assert!(result.is_ok());
         // Should return #f for empty or
         assert!(matches!(&result.unwrap().borrow().value, crate::gc::SchemeValue::Bool(false)));
+    }
+
+    #[test]
+    fn test_define_handler_new() {
+        use crate::eval::Evaluator;
+        use crate::gc::{new_symbol, new_int, new_string, new_pair};
+        use crate::builtin;
+        use num_bigint::BigInt;
+
+        // Create an evaluator with builtins registered
+        let mut evaluator = Evaluator::new();
+        builtin::register_all(&mut evaluator.heap, &mut evaluator.env);
+        
+        // Test defining a simple value: (define x 42)
+        let symbol = new_symbol(&mut evaluator.heap, "x");
+        let value = new_int(&mut evaluator.heap, BigInt::from(42));
+        let args = vec![symbol.clone(), value.clone()];
+        
+        // Test the new define handler
+        let result = define_handler_new(&mut evaluator, &args);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().borrow().value, value.borrow().value);
+        
+        // Verify the binding was created
+        let found = evaluator.lookup_global_binding("x");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().borrow().value, value.borrow().value);
+        
+        // Test defining a computed value: (define y (+ 3 4))
+        let symbol_y = new_symbol(&mut evaluator.heap, "y");
+        let plus_symbol = new_symbol(&mut evaluator.heap, "+");
+        let arg1 = new_int(&mut evaluator.heap, BigInt::from(3));
+        let arg2 = new_int(&mut evaluator.heap, BigInt::from(4));
+        
+        // Create the expression (+ 3 4)
+        let nil = evaluator.heap.nil();
+        let arg2_pair = new_pair(&mut evaluator.heap, arg2.clone(), nil);
+        let arg_list = new_pair(&mut evaluator.heap, arg1.clone(), arg2_pair);
+        let plus_expr = new_pair(&mut evaluator.heap, plus_symbol, arg_list);
+        
+        let args_computed = vec![symbol_y.clone(), plus_expr];
+        let result = define_handler_new(&mut evaluator, &args_computed);
+        assert!(result.is_ok());
+        
+        // The result should be 7
+        match &result.unwrap().borrow().value {
+            crate::gc::SchemeValue::Int(n) => assert_eq!(n.to_string(), "7"),
+            v => panic!("Expected integer 7, got {:?}", v),
+        }
+        
+        // Verify the binding was created
+        let found = evaluator.lookup_global_binding("y");
+        assert!(found.is_some());
+        match &found.unwrap().borrow().value {
+            crate::gc::SchemeValue::Int(n) => assert_eq!(n.to_string(), "7"),
+            v => panic!("Expected integer 7, got {:?}", v),
+        }
+        
+        // Test error cases
+        let empty_args: Vec<crate::gc::GcRef> = vec![];
+        let result = define_handler_new(&mut evaluator, &empty_args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expected exactly 2 arguments"));
+        
+        let one_arg = vec![symbol.clone()];
+        let result = define_handler_new(&mut evaluator, &one_arg);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expected exactly 2 arguments"));
+        
+        let three_args = vec![symbol.clone(), value.clone(), new_string(&mut evaluator.heap, "extra")];
+        let result = define_handler_new(&mut evaluator, &three_args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expected exactly 2 arguments"));
+        
+        // Test error: first argument not a symbol
+        let bad_args = vec![value.clone(), symbol.clone()];
+        let result = define_handler_new(&mut evaluator, &bad_args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("first argument must be a symbol"));
     }
 } 

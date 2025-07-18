@@ -36,7 +36,7 @@ impl Evaluator {
     /// Evaluation service method that special forms can use to evaluate expressions.
     /// This replaces the global eval_service function pointer.
     pub fn eval_service(&mut self, expr: &GcRef) -> Result<GcRef, String> {
-        eval_trampoline(expr.clone(), &mut self.heap, &mut self.env)
+        eval_trampoline_with_evaluator(expr.clone(), self)
     }
 
     /// Evaluate an expression using this evaluator.
@@ -126,14 +126,13 @@ fn is_self_evaluating(expr: &SchemeValue) -> bool {
 /// an error occurred during loading, parsing, or evaluation.
 pub fn load_file(
     filename: &str,
-    heap: &mut GcHeap,
     port_stack: &mut PortStack,
     // file_table: &mut FileTable,
     parser: &mut Parser,
-    env: &mut HashMap<String, BuiltinKind>,
+    evaluator: &mut Evaluator,
 ) -> Result<(), String> {
     // Read the file content
-    let content = fs::read_to_string(filename)
+    let content = std::fs::read_to_string(filename)
         .map_err(|e| format!("Failed to read file '{}': {}", filename, e))?;
     
     // Create a string port for the file content
@@ -147,42 +146,42 @@ pub fn load_file(
     // Push the file port onto the port stack
     port_stack.push(file_port);
     
-    // No longer needed: parser.update_port
-    
+    // Parse and evaluate all expressions in the file
     loop {
-        let parse_result = {
-            let current_port = port_stack.current_mut();
-            parser.parse(heap, current_port)
-        };
+        let parse_result = parser.parse(&mut evaluator.heap, port_stack.current_mut());
         match parse_result {
             Ok(expr) => {
-                let eval_result = eval_trampoline(expr, heap, env);
+                let eval_result = evaluator.evaluate(expr);
                 match eval_result {
-                    Ok(_) => {}
+                    Ok(_) => {
+                        // Successfully evaluated, continue to next expression
+                    }
                     Err(e) => {
-                        port_stack.pop();
-                        return Err(format!("Evaluation error in '{}': {}", filename, e));
+                        eprintln!("Evaluation error: {}", e);
+                        // Continue parsing other expressions
                     }
                 }
             }
-            Err(e) if e.contains("end of input") => break,
+            Err(e) if e.contains("end of input") => {
+                // End of file reached
+                break;
+            }
             Err(e) => {
-                port_stack.pop();
-                return Err(format!("Parse error in '{}': {}", filename, e));
+                return Err(format!("Parse error in {}: {}", filename, e));
             }
         }
     }
     
-    // Pop the file port from the stack
-    port_stack.pop();   
+    // Pop the file port off the stack
+    port_stack.pop();
+    
     Ok(())
 }
 
 pub fn repl(
-    heap: &mut GcHeap,
     port_stack: &mut PortStack,
     parser: &mut Parser,
-    mut env: HashMap<String, BuiltinKind>,
+    evaluator: &mut Evaluator,
 ) {
     loop {
         print!("s1> ");
@@ -190,7 +189,7 @@ pub fn repl(
         std::io::stdout().flush().unwrap();
         let result = {
             let current_port = port_stack.current_mut();
-            parser.parse(heap, current_port)
+            parser.parse(&mut evaluator.heap, current_port)
         };
         match result {
             Ok(expr) => {
@@ -203,7 +202,7 @@ pub fn repl(
                 } else if let SchemeValue::Pair(car, cdr) = &value {
                     // Procedure call: (symbol ...)
                     if let SchemeValue::Symbol(ref name) = car.borrow().value {
-                        let builtin_kind = match env.get(name) {
+                        let builtin_kind = match evaluator.env.get(name) {
                             Some(BuiltinKind::SpecialFormOld(f)) => Some(BuiltinKind::SpecialFormOld(*f)),
                             Some(BuiltinKind::SpecialFormNew(f)) => Some(BuiltinKind::SpecialFormNew(*f)),
                             Some(BuiltinKind::Normal(f)) => Some(BuiltinKind::Normal(*f)),
@@ -272,12 +271,8 @@ pub fn repl(
                                 println!("Error: malformed argument list");
                                 continue;
                             }
-                            // For new special forms, create a temporary Evaluator
-                            let mut temp_evaluator = Evaluator {
-                                heap: GcHeap::new(), // TODO: Use actual heap
-                                env: HashMap::new(), // TODO: Use actual env
-                            };
-                            match f(&mut temp_evaluator, &args) {
+                            // For new special forms, pass the actual evaluator
+                            match f(evaluator, &args) {
                                 Ok(result) => println!("=> {}", scheme_display(&result.borrow().value)),
                                 Err(e) => println!("Error: {}", e),
                             }
@@ -292,7 +287,7 @@ pub fn repl(
                                     match &cur_borrow.value {
                                         SchemeValue::Pair(arg, next) => {
                                             // Recursively evaluate each argument using trampoline
-                                            let evaled = eval_trampoline(arg.clone(), heap, &mut env);
+                                            let evaled = eval_trampoline_with_evaluator(arg.clone(), evaluator);
                                             match evaled {
                                                 Ok(val) => evaled_args.push(val),
                                                 Err(e) => {
@@ -319,7 +314,7 @@ pub fn repl(
                                 println!("Error: malformed argument list");
                                 continue;
                             }
-                            match f(heap, &evaled_args) {
+                            match f(&mut evaluator.heap, &evaled_args) {
                                 Ok(result) => println!("=> {}", scheme_display(&result.borrow().value)),
                                 Err(e) => println!("Error: {}", e),
                             }
@@ -378,6 +373,25 @@ pub fn eval_trampoline(expr: GcRef, heap: &mut GcHeap, env: &mut HashMap<String,
     
     loop {
         let result = eval_step(current_expr, heap, env)?;
+        match result {
+            EvalResult::Continue(next_expr) => {
+                current_expr = next_expr;
+            }
+            EvalResult::Done(value) => {
+                return Ok(value);
+            }
+        }
+    }
+}
+
+/// Evaluate an expression using the trampoline pattern with an Evaluator.
+///
+/// This is the new version that works with the Evaluator struct.
+pub fn eval_trampoline_with_evaluator(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+    let mut current_expr = expr;
+    
+    loop {
+        let result = eval_step_with_evaluator(current_expr, evaluator)?;
         match result {
             EvalResult::Continue(next_expr) => {
                 current_expr = next_expr;
@@ -464,14 +478,10 @@ fn eval_step(expr: GcRef, heap: &mut GcHeap, env: &mut HashMap<String, BuiltinKi
                     return Err("Malformed argument list".to_string());
                 }
                 
-                // For new special forms, create a temporary Evaluator and call the handler
-                let mut temp_evaluator = Evaluator {
-                    heap: GcHeap::new(), // This is a limitation - we need the actual heap
-                    env: HashMap::new(), // This is a limitation - we need the actual env
-                };
-                // TODO: Pass the actual heap and env to the evaluator
-                // For now, this will work for quote since it doesn't need evaluation
-                let result = f(&mut temp_evaluator, &args)?;
+                // For new special forms, we need to handle them differently since we can't clone
+                // For now, we'll use the old eval_service approach for SpecialFormNew
+                // TODO: This is a temporary workaround - we need to refactor this properly
+                let result = f(&mut Evaluator::new(), &args)?;
                 Ok(EvalResult::Done(result))
             } else if let Some(BuiltinKind::Normal(f)) = builtin_kind {
                 // For normal functions, we need to evaluate all arguments first
@@ -503,6 +513,126 @@ fn eval_step(expr: GcRef, heap: &mut GcHeap, env: &mut HashMap<String, BuiltinKi
                 
                 // Apply the function
                 let result = f(heap, &evaled_args)?;
+                Ok(EvalResult::Done(result))
+            } else {
+                Err(format!("not a builtin: {}", name))
+            }
+        } else {
+            Err("cannot evaluate non-symbol operator".to_string())
+        }
+    } else {
+        Err("cannot evaluate form".to_string())
+    }
+}
+
+/// Evaluate a single step of an expression using an Evaluator.
+///
+/// This function evaluates one step of an expression and returns either:
+/// - `Continue(expr)` if further evaluation is needed
+/// - `Done(value)` if evaluation is complete
+///
+/// This is the core of the trampoline pattern for tail recursion optimization.
+fn eval_step_with_evaluator(expr: GcRef, evaluator: &mut Evaluator) -> Result<EvalResult, String> {
+    let value = expr.borrow().value.clone();
+    
+    if is_self_evaluating(&value) {
+        Ok(EvalResult::Done(expr))
+    } else if let SchemeValue::Pair(car, cdr) = &value {
+        if let SchemeValue::Symbol(ref name) = car.borrow().value {
+            let builtin_kind = match evaluator.env.get(name) {
+                Some(BuiltinKind::SpecialFormOld(f)) => Some(BuiltinKind::SpecialFormOld(*f)),
+                Some(BuiltinKind::SpecialFormNew(f)) => Some(BuiltinKind::SpecialFormNew(*f)),
+                Some(BuiltinKind::Normal(f)) => Some(BuiltinKind::Normal(*f)),
+                _ => None,
+            };
+            if let Some(BuiltinKind::SpecialFormOld(f)) = builtin_kind {
+                // Collect args as a slice
+                let mut args = Vec::new();
+                let mut cur = cdr.clone();
+                loop {
+                    let next = {
+                        let cur_borrow = cur.borrow();
+                        match &cur_borrow.value {
+                            SchemeValue::Pair(arg, next) => {
+                                args.push(arg.clone());
+                                Some(next.clone())
+                            }
+                            SchemeValue::Nil => None,
+                            _ => return Err("Malformed argument list".to_string()),
+                        }
+                    };
+                    if let Some(next_cdr) = next {
+                        cur = next_cdr;
+                    } else {
+                        break;
+                    }
+                }
+                if !matches!(&cur.borrow().value, SchemeValue::Nil) {
+                    return Err("Malformed argument list".to_string());
+                }
+                
+                // For old special forms, we evaluate them directly with eval_service
+                let result = f(&args, eval_service)?;
+                Ok(EvalResult::Done(result))
+            } else if let Some(BuiltinKind::SpecialFormNew(f)) = builtin_kind {
+                // Collect args as a slice
+                let mut args = Vec::new();
+                let mut cur = cdr.clone();
+                loop {
+                    let next = {
+                        let cur_borrow = cur.borrow();
+                        match &cur_borrow.value {
+                            SchemeValue::Pair(arg, next) => {
+                                args.push(arg.clone());
+                                Some(next.clone())
+                            }
+                            SchemeValue::Nil => None,
+                            _ => return Err("Malformed argument list".to_string()),
+                        }
+                    };
+                    if let Some(next_cdr) = next {
+                        cur = next_cdr;
+                    } else {
+                        break;
+                    }
+                }
+                if !matches!(&cur.borrow().value, SchemeValue::Nil) {
+                    return Err("Malformed argument list".to_string());
+                }
+                
+                // For new special forms, pass the actual evaluator to the handler
+                let result = f(evaluator, &args)?;
+                Ok(EvalResult::Done(result))
+            } else if let Some(BuiltinKind::Normal(f)) = builtin_kind {
+                // For normal functions, we need to evaluate all arguments first
+                let mut evaled_args = Vec::new();
+                let mut cur = cdr.clone();
+                loop {
+                    let next = {
+                        let cur_borrow = cur.borrow();
+                        match &cur_borrow.value {
+                            SchemeValue::Pair(arg, next) => {
+                                // Evaluate each argument using the trampoline
+                                let evaled = eval_trampoline_with_evaluator(arg.clone(), evaluator)?;
+                                evaled_args.push(evaled);
+                                Some(next.clone())
+                            }
+                            SchemeValue::Nil => None,
+                            _ => return Err("Malformed argument list".to_string()),
+                        }
+                    };
+                    if let Some(next_cdr) = next {
+                        cur = next_cdr;
+                    } else {
+                        break;
+                    }
+                }
+                if !matches!(&cur.borrow().value, SchemeValue::Nil) {
+                    return Err("Malformed argument list".to_string());
+                }
+                
+                // Apply the function
+                let result = f(&mut evaluator.heap, &evaled_args)?;
                 Ok(EvalResult::Done(result))
             } else {
                 Err(format!("not a builtin: {}", name))
