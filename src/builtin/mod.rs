@@ -250,14 +250,13 @@ mod tests {
         use crate::gc::{GcHeap, SchemeValue};
         use crate::io::{Port, PortKind, PortStack};
         use crate::parser::Parser;
-        use crate::eval::lookup_global_binding;
+        use crate::eval::{lookup_global_binding, TEST_HEAP, TEST_ENV};
         use std::collections::HashMap;
 
         // Scheme code to test
         let code = "(define x 42) (define y (* 3 5)) (define z '(a b c))";
         let mut heap = GcHeap::new();
-        let mut file_table = crate::io::FileTable::new();
-        let mut port = Port {
+        let port = Port {
             kind: PortKind::StringPortInput { content: code.to_string(), pos: 0 },
         };
         let mut port_stack = PortStack::new(port.clone());
@@ -266,19 +265,29 @@ mod tests {
         let mut env = HashMap::new();
         crate::builtin::register_all(&mut heap, &mut env);
 
+        // Set static mut pointers for the evaluation service
+        unsafe {
+            TEST_HEAP = Some(&mut heap as *mut GcHeap);
+            TEST_ENV = Some(&mut env as *mut HashMap<String, crate::builtin::BuiltinKind>);
+        }
+
         // Evaluate all expressions in the string port
         loop {
-            // Only borrow heap mutably for the duration of parse
             let parse_result = parser.parse(&mut heap, port_stack.current_mut());
             match parse_result {
                 Ok(expr) => {
-                    // Only borrow heap mutably for the duration of eval
                     let eval_result = crate::eval::eval_trampoline(expr, &mut heap, &mut env);
                     let _ = eval_result;
                 }
                 Err(e) if e.contains("end of input") => break,
                 Err(e) => panic!("Parse error: {}", e),
             }
+        }
+
+        // Restore static mut pointers
+        unsafe {
+            TEST_HEAP = None;
+            TEST_ENV = None;
         }
 
         // Check that x is defined and equals 42

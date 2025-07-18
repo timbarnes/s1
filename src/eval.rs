@@ -8,6 +8,57 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs;
 
+/// The main evaluator that owns the heap and environment.
+/// This struct encapsulates all evaluation state and provides
+/// a clean interface for special forms to access evaluation services.
+pub struct Evaluator {
+    pub heap: GcHeap,
+    pub env: HashMap<String, BuiltinKind>,
+}
+
+impl Evaluator {
+    /// Create a new evaluator with an empty heap and environment.
+    pub fn new() -> Self {
+        Self {
+            heap: GcHeap::new(),
+            env: HashMap::new(),
+        }
+    }
+
+    /// Create a new evaluator with a pre-populated environment.
+    pub fn with_env(env: HashMap<String, BuiltinKind>) -> Self {
+        Self {
+            heap: GcHeap::new(),
+            env,
+        }
+    }
+
+    /// Evaluation service method that special forms can use to evaluate expressions.
+    /// This replaces the global eval_service function pointer.
+    pub fn eval_service(&mut self, expr: &GcRef) -> Result<GcRef, String> {
+        eval_trampoline(expr.clone(), &mut self.heap, &mut self.env)
+    }
+
+    /// Evaluate an expression using this evaluator.
+    pub fn evaluate(&mut self, expr: GcRef) -> Result<GcRef, String> {
+        eval_trampoline(expr, &mut self.heap, &mut self.env)
+    }
+
+    /// Insert a global binding into the environment.
+    pub fn insert_global_binding(&mut self, name: String, value: GcRef) {
+        // For now, we'll use the existing global binding mechanism
+        // TODO: Replace with proper environment management
+        insert_global_binding(name, value);
+    }
+
+    /// Look up a global binding in the environment.
+    pub fn lookup_global_binding(&self, name: &str) -> Option<GcRef> {
+        // For now, we'll use the existing global binding mechanism
+        // TODO: Replace with proper environment management
+        lookup_global_binding(name)
+    }
+}
+
 /// Represents the result of evaluation - either continue with another expression
 /// or return a final value.
 #[derive(Debug)]
@@ -77,7 +128,7 @@ pub fn load_file(
     filename: &str,
     heap: &mut GcHeap,
     port_stack: &mut PortStack,
-    file_table: &mut FileTable,
+    // file_table: &mut FileTable,
     parser: &mut Parser,
     env: &mut HashMap<String, BuiltinKind>,
 ) -> Result<(), String> {
@@ -416,9 +467,121 @@ pub fn evaluate_expression(expr: GcRef, heap: &mut GcHeap, env: &mut HashMap<Str
     eval_trampoline(expr, heap, env)
 } 
 
-// Evaluation service for special forms: evaluates an expression in the current context
-// NOTE: This is a placeholder. In a real interpreter, you would wire this up to the current heap and environment.
-// For now, this function must be set up by the REPL or evaluation loop to point to the correct context.
-pub fn eval_service(_expr: &GcRef) -> Result<GcRef, String> {
-    unimplemented!("eval_service must be set up with the current heap and environment context");
+// WARNING: This is for single-threaded test/demo use only!
+// In production, use proper context passing or thread-local storage.
+pub static mut TEST_HEAP: Option<*mut GcHeap> = None;
+pub static mut TEST_ENV: Option<*mut std::collections::HashMap<String, crate::builtin::BuiltinKind>> = None;
+
+/// Evaluation service for special forms: evaluates an expression in the current static heap/env context
+pub fn eval_service(expr: &GcRef) -> Result<GcRef, String> {
+    unsafe {
+        let heap = TEST_HEAP.expect("TEST_HEAP not set");
+        let env = TEST_ENV.expect("TEST_ENV not set");
+        crate::eval::eval_trampoline(expr.clone(), &mut *heap, &mut *env)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gc::{new_int, new_string, new_bool, new_symbol, new_pair};
+    use crate::builtin;
+    use num_bigint::BigInt;
+
+    #[test]
+    fn test_evaluator_new() {
+        let mut evaluator = Evaluator::new();
+        
+        // Test that we can create values in the evaluator's heap
+        let int_val = new_int(&mut evaluator.heap, BigInt::from(42));
+        let string_val = new_string(&mut evaluator.heap, "hello");
+        let bool_val = new_bool(&mut evaluator.heap, true);
+        
+        // Test that we can evaluate self-evaluating expressions
+        let result = evaluator.evaluate(int_val.clone());
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().borrow().value, int_val.borrow().value);
+        
+        let result = evaluator.evaluate(string_val.clone());
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().borrow().value, string_val.borrow().value);
+        
+        let result = evaluator.evaluate(bool_val.clone());
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().borrow().value, bool_val.borrow().value);
+    }
+
+    #[test]
+    fn test_evaluator_with_env() {
+        // Create an environment with some builtins
+        let mut env = HashMap::new();
+        builtin::register_all(&mut GcHeap::new(), &mut env);
+        
+        let mut evaluator = Evaluator::with_env(env);
+        
+        // Test that we can call builtins
+        let plus_args = vec![
+            new_int(&mut evaluator.heap, BigInt::from(3)),
+            new_int(&mut evaluator.heap, BigInt::from(4)),
+        ];
+        
+        // Create a function call: (+ 3 4)
+        // We need to build the list properly: (3 . (4 . nil))
+        let nil = evaluator.heap.nil();
+        let arg2 = new_pair(&mut evaluator.heap, plus_args[1].clone(), nil);
+        let arg_list = new_pair(&mut evaluator.heap, plus_args[0].clone(), arg2);
+        
+        let plus_symbol = new_symbol(&mut evaluator.heap, "+");
+        let func_call = new_pair(&mut evaluator.heap, plus_symbol, arg_list);
+        
+        let result = evaluator.evaluate(func_call);
+        match &result {
+            Ok(value) => {
+                println!("Evaluation succeeded: {:?}", value.borrow().value);
+            }
+            Err(e) => {
+                println!("Evaluation failed: {}", e);
+                panic!("Evaluation failed: {}", e);
+            }
+        }
+        assert!(result.is_ok());
+        
+        // The result should be 7
+        match &result.unwrap().borrow().value {
+            SchemeValue::Int(n) => assert_eq!(n.to_string(), "7"),
+            v => panic!("Expected integer 7, got {:?}", v),
+        }
+    }
+
+    #[test]
+    fn test_evaluator_eval_service() {
+        let mut evaluator = Evaluator::new();
+        
+        // Test that eval_service works for self-evaluating expressions
+        let int_val = new_int(&mut evaluator.heap, BigInt::from(123));
+        let result = evaluator.eval_service(&int_val);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().borrow().value, int_val.borrow().value);
+        
+        // Test that eval_service works for symbols (though they'll fail evaluation)
+        let symbol_val = new_symbol(&mut evaluator.heap, "undefined");
+        let result = evaluator.eval_service(&symbol_val);
+        assert!(result.is_err()); // Should fail because symbol is not defined
+    }
+
+    #[test]
+    fn test_evaluator_global_bindings() {
+        let mut evaluator = Evaluator::new();
+        
+        // Test inserting and looking up global bindings
+        let value = new_int(&mut evaluator.heap, BigInt::from(42));
+        evaluator.insert_global_binding("x".to_string(), value.clone());
+        
+        let found = evaluator.lookup_global_binding("x");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().borrow().value, value.borrow().value);
+        
+        let not_found = evaluator.lookup_global_binding("y");
+        assert!(not_found.is_none());
+    }
 } 

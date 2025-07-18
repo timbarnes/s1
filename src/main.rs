@@ -14,6 +14,7 @@ use parser::Parser;
 use std::collections::HashMap;
 use builtin::BuiltinKind;
 use argh::FromArgs;
+use crate::eval::{TEST_HEAP, TEST_ENV};
 
 /// Scheme interpreter command-line options
 #[derive(FromArgs, Debug)]
@@ -57,9 +58,15 @@ fn main() {
     let mut env = HashMap::<String, BuiltinKind>::new();
     builtin::register_all(&mut heap, &mut env);
 
+    // Set static mut pointers for the evaluation service
+    unsafe {
+        TEST_HEAP = Some(&mut heap as *mut GcHeap);
+        TEST_ENV = Some(&mut env as *mut HashMap<String, BuiltinKind>);
+    }
+
     // Load core file if it exists
     if cli.core != "core.scm" || std::path::Path::new(&cli.core).exists() {
-        match eval::load_file(&cli.core, &mut heap, &mut port_stack, &mut file_table, &mut parser, &mut env) {
+        match eval::load_file(&cli.core, &mut heap, &mut port_stack, &mut parser, &mut env) {
             Ok(()) => println!("Loaded core file: {}", cli.core),
             Err(e) => {
                 eprintln!("Error loading core file '{}': {}", cli.core, e);
@@ -72,7 +79,7 @@ fn main() {
 
     // Load additional files specified with -l
     for filename in &cli.load {
-        match eval::load_file(filename, &mut heap, &mut port_stack, &mut file_table, &mut parser, &mut env) {
+        match eval::load_file(filename, &mut heap, &mut port_stack, &mut parser, &mut env) {
             Ok(()) => println!("Loaded file: {}", filename),
             Err(e) => {
                 eprintln!("Error loading file '{}': {}", filename, e);
@@ -85,7 +92,7 @@ fn main() {
 
     // Handle script file if provided
     if let Some(script) = cli.script {
-        match eval::load_file(&script, &mut heap, &mut port_stack, &mut file_table, &mut parser, &mut env) {
+        match eval::load_file(&script, &mut heap, &mut port_stack, &mut parser, &mut env) {
             Ok(()) => println!("Executed script: {}", script),
             Err(e) => {
                 eprintln!("Error executing script '{}': {}", script, e);
@@ -101,4 +108,10 @@ fn main() {
 
     // Call the REPL loop in eval.rs
     eval::repl(&mut heap, &mut port_stack, &mut parser, env);
+
+    // Restore static mut pointers
+    unsafe {
+        TEST_HEAP = None;
+        TEST_ENV = None;
+    }
 }
