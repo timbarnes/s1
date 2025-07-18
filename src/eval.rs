@@ -62,6 +62,10 @@ pub fn load_file(
     // Push the file port onto the port stack
     port_stack.borrow_mut().push(file_port);
     
+    // Update the parser's port to use the new current port
+    let current_port = Rc::new(RefCell::new(port_stack.borrow().current().clone()));
+    parser.borrow_mut().update_port(current_port);
+    
     // Parse and evaluate all expressions in the file using the existing parser
     loop {
         let parse_result = parser.borrow_mut().parse();
@@ -94,6 +98,10 @@ pub fn load_file(
     
     // Pop the file port from the stack
     port_stack.borrow_mut().pop();
+    
+    // Update the parser's port to use the new current port
+    let current_port = Rc::new(RefCell::new(port_stack.borrow().current().clone()));
+    parser.borrow_mut().update_port(current_port);
     
     Ok(())
 }

@@ -24,7 +24,7 @@
 //! assert_eq!(tokenizer.next_token(), None);
 //! ```
 
-use crate::io::{PortStack, FileTable, read_char};
+use crate::io::{FileTable, read_char, PortKind, Port};
 use std::rc::Rc;
 use std::cell::RefCell;
 
@@ -59,46 +59,49 @@ pub enum Token {
 
 /// Tokenizer that reads characters from a port and produces tokens.
 pub struct Tokenizer {
-    /// Reference to the port stack for reading input
-    pub port_stack: Rc<RefCell<PortStack>>,
+    /// Reference to the current port for reading input
+    pub port: Rc<RefCell<Port>>,
     /// Reference to the file table for file port operations
     pub file_table: Rc<RefCell<FileTable>>,
     /// Character buffer for unreading characters
     buffer: Vec<char>,
     /// Track nested vectors
     vector_depth: usize,
+    /// Current position for string ports (managed internally)
+    string_pos: usize,
 }
 
 impl Tokenizer {
-    /// Create a new tokenizer that reads from the given port stack.
+    /// Create a new tokenizer that reads from the given port.
     ///
-    /// The tokenizer will read characters from the current port in the
-    /// port stack and produce tokens according to Scheme lexical rules.
+    /// The tokenizer will read characters from the port and produce tokens
+    /// according to Scheme lexical rules.
     ///
     /// # Arguments
     ///
-    /// * `port_stack` - The port stack to read characters from
+    /// * `port` - The port to read characters from
     /// * `file_table` - The file table for file port operations
     ///
     /// # Examples
     ///
     /// ```rust
     /// use s1::tokenizer::Tokenizer;
-    /// use s1::{PortStack, FileTable, Port, PortKind};
+    /// use s1::{FileTable, Port, PortKind};
     /// use std::rc::Rc;
     /// use std::cell::RefCell;
     ///
-    /// let port = Port { kind: PortKind::StringPort { content: "hello world.to_string(), pos: 0 } };
-    /// let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
+    /// let port = Port { kind: PortKind::StringPortInput { content: "hello world".to_string(), pos: 0 } };
+    /// let port = Rc::new(RefCell::new(port));
     /// let file_table = Rc::new(RefCell::new(FileTable::new()));
-    /// let tokenizer = Tokenizer::new(port_stack, file_table);
+    /// let tokenizer = Tokenizer::new(port, file_table);
     /// ```
-    pub fn new(port_stack: Rc<RefCell<PortStack>>, file_table: Rc<RefCell<FileTable>>) -> Self {
+    pub fn new(port: Rc<RefCell<Port>>, file_table: Rc<RefCell<FileTable>>) -> Self {
         Self {
-            port_stack,
+            port,
             file_table,
             buffer: Vec::new(),
             vector_depth: 0,
+            string_pos: 0,
         }
     }
 
@@ -110,7 +113,22 @@ impl Tokenizer {
         if let Some(c) = self.buffer.pop() {
             Some(c)
         } else {
-            read_char(&mut *self.port_stack.borrow_mut(), &mut *self.file_table.borrow_mut())
+            let port = self.port.borrow();
+            
+            // Handle string ports specially to manage position internally
+            if let PortKind::StringPortInput { content, .. } = &port.kind {
+                if self.string_pos < content.len() {
+                    let ch = content.chars().nth(self.string_pos).unwrap();
+                    self.string_pos += 1;
+                    Some(ch)
+                } else {
+                    None
+                }
+            } else {
+                // For other port types, use the I/O functions
+                let mut file_table = self.file_table.borrow_mut();
+                read_char(&port, &mut *file_table)
+            }
         }
     }
 
@@ -419,10 +437,9 @@ mod tests {
 
     fn tokenizer_from_str(port_stack: Rc<RefCell<PortStack>>, file_table: Rc<RefCell<FileTable>>, s: &str) -> Tokenizer {
         // Create a string port
-        let port = Port { kind: PortKind::StringPortInput { content: s.to_string(), pos:0 } };
-        // Replace the port stack's current port with our string port
-        port_stack.borrow_mut().push(port);
-        Tokenizer::new(port_stack, file_table)
+        let port = Port { kind: PortKind::StringPortInput { content: s.to_string(), pos: 0 } };
+        let port = Rc::new(RefCell::new(port));
+        Tokenizer::new(port, file_table)
     }
 
     #[test]

@@ -52,8 +52,9 @@ fn main() {
     let port_stack = Rc::new(RefCell::new(PortStack::new(stdin_port)));
     let file_table = Rc::new(RefCell::new(FileTable::new()));
 
-    // Set up parser (tokenizer is now internal to parser)
-    let parser = Rc::new(RefCell::new(Parser::new(heap.clone(), port_stack.clone(), file_table.clone())));
+    // Set up parser with current port (tokenizer is now internal to parser)
+    let current_port = Rc::new(RefCell::new(port_stack.borrow().current().clone()));
+    let parser = Rc::new(RefCell::new(Parser::new(heap.clone(), current_port, file_table.clone())));
 
     // Set up global environment (for now, just a single HashMap)
     let mut env = HashMap::<String, BuiltinKind>::new();
