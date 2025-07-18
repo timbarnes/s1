@@ -25,6 +25,7 @@
 //! ```
 
 use crate::io::{PortKind, Port};
+use std::io::Read;
 // use std::rc::Rc;
 // use std::cell::RefCell;
 
@@ -89,7 +90,14 @@ impl<'a> Tokenizer<'a> {
                         None
                     }
                 }
-                _ => None, // Only support string ports for now
+                PortKind::Stdin => {
+                    let mut buf = [0u8; 1];
+                    match std::io::stdin().read_exact(&mut buf) {
+                        Ok(_) => Some(buf[0] as char),
+                        Err(_) => None,
+                    }
+                }
+                _ => None, // Only support string ports and stdin for now
             }
         }
     }

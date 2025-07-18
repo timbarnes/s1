@@ -19,7 +19,7 @@ struct Cli {
     no_repl: bool,
 
     /// path to core Scheme file to load at startup
-    #[argh(option, short = 'c', default = "String::from(\"core.scm\")")]
+    #[argh(option, short = 'c', default = "String::from(\"scheme/s1-core.scm\")")]
     core: String,
 
     /// additional Scheme files to load (can be repeated)
@@ -53,15 +53,15 @@ fn main() {
     builtin::register_all(&mut evaluator.heap, &mut evaluator.env);
 
     // Load core file if it exists
-    if cli.core != "core.scm" || std::path::Path::new(&cli.core).exists() {
-        match eval::load_file(&cli.core, &mut port_stack, &mut parser, &mut evaluator) {
-            Ok(()) => println!("Loaded core file: {}", cli.core),
-            Err(e) => {
-                eprintln!("Error loading core file '{}': {}", cli.core, e);
-                if cli.no_repl {
-                    std::process::exit(1);
-                }
+    // Always try to load the core file, then fall through to REPL
+    match eval::load_file(&cli.core, &mut port_stack, &mut parser, &mut evaluator) {
+        Ok(()) => println!("Loaded core file: {}", cli.core),
+        Err(e) => {
+            eprintln!("Error loading core file '{}': {}", cli.core, e);
+            if cli.no_repl {
+                std::process::exit(1);
             }
+            // If --no-repl is not specified, continue to REPL even if core file fails
         }
     }
 

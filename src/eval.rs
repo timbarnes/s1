@@ -187,6 +187,7 @@ pub fn repl(
         print!("s1> ");
         use std::io::Write;
         std::io::stdout().flush().unwrap();
+        
         let result = {
             let current_port = port_stack.current_mut();
             parser.parse(&mut evaluator.heap, current_port)
@@ -222,7 +223,7 @@ pub fn repl(
                                         SchemeValue::Nil => None,
                                         _ => {
                                             println!("Error: malformed argument list");
-                                            return;
+                                            continue;
                                         }
                                     }
                                 };
@@ -256,7 +257,7 @@ pub fn repl(
                                                 Ok(val) => evaled_args.push(val),
                                                 Err(e) => {
                                                     println!("Error: {}", e);
-                                                    return;
+                                                    continue;
                                                 }
                                             }
                                             Some(next.clone())
@@ -264,7 +265,7 @@ pub fn repl(
                                         SchemeValue::Nil => None,
                                         _ => {
                                             println!("Error: malformed argument list");
-                                            return;
+                                            continue;
                                         }
                                     }
                                 };
@@ -293,8 +294,12 @@ pub fn repl(
                     println!("Error: cannot evaluate form: {}", scheme_display(&value));
                 }
             }
-            Err(e) if e.contains("end of input") => break, // EOF: exit
-            Err(e) => println!("Error: {}", e),
+            Err(e) if e.contains("end of input") => {
+                break; // EOF: exit
+            }
+            Err(e) => {
+                println!("Error: {}", e);
+            }
         }
     }
 }
