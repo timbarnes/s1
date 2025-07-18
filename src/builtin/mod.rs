@@ -130,6 +130,19 @@ pub fn newline_builtin(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef]) 
     Ok(new_bool(heap, false))
 }
 
+/// Builtin function: (quit)
+/// 
+/// Exits the Scheme interpreter with exit code 0.
+/// This works in both programs and the REPL.
+pub fn quit_builtin(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef]) -> Result<crate::gc::GcRef, String> {
+    if !args.is_empty() {
+        return Err("quit: expected 0 arguments".to_string());
+    }
+    
+    // Exit the system cleanly
+    std::process::exit(0);
+}
+
 pub fn register_all(heap: &mut crate::gc::GcHeap, env: &mut std::collections::HashMap<String, BuiltinKind>) {
     env.insert("number?".to_string(), BuiltinKind::Normal(predicate::number_q));
     env.insert("help".to_string(), BuiltinKind::Normal(help_builtin));
@@ -147,6 +160,7 @@ pub fn register_all(heap: &mut crate::gc::GcHeap, env: &mut std::collections::Ha
     env.insert("mod".to_string(), BuiltinKind::Normal(mod_builtin));
     env.insert("display".to_string(), BuiltinKind::Normal(display_builtin));
     env.insert("newline".to_string(), BuiltinKind::Normal(newline_builtin));
+    env.insert("quit".to_string(), BuiltinKind::Normal(quit_builtin));
     // Add more builtins and special forms here
 }
 
@@ -466,5 +480,25 @@ mod tests {
         let result = define_handler_new(&mut evaluator, &bad_args);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("first argument must be a symbol"));
+    }
+
+    #[test]
+    fn test_quit_builtin() {
+        use crate::gc::GcHeap;
+        use crate::gc::new_int;
+        use num_bigint::BigInt;
+
+        // Create a heap and test the quit builtin
+        let mut heap = GcHeap::new();
+        
+        // Test quit with arguments (should return error)
+        let test_arg = new_int(&mut heap, BigInt::from(42));
+        let args = vec![test_arg];
+        let result = quit_builtin(&mut heap, &args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expected 0 arguments"));
+        
+        // Note: We can't test the success case (no arguments) because quit_builtin calls std::process::exit(0)
+        // which would terminate the test process. In a real environment, this would work correctly.
     }
 } 
