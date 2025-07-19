@@ -32,6 +32,56 @@ use std::collections::HashMap;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 
+/// Simple Scheme values that use GcRefSimple references.
+/// This is the new system that eliminates Rc<RefCell<T>> overhead.
+#[derive(Debug)]
+pub enum SchemeValueSimple {
+    /// Integer values (arbitrary precision)
+    Int(BigInt),
+    /// Floating-point values (f64)
+    Float(f64),
+    /// Symbols (interned identifiers)
+    Symbol(String),
+    /// Cons cells for building lists and pairs
+    Pair(GcRefSimple, GcRefSimple),
+    /// String literals
+    Str(String),
+    /// Vectors (fixed-size arrays)
+    Vector(Vec<GcRefSimple>),
+    /// Boolean values (#t and #f)
+    Bool(bool),
+    /// Character literals
+    Char(char),
+    /// Empty list (nil)
+    Nil,
+    // Extend with more types as needed.
+}
+
+impl PartialEq for SchemeValueSimple {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (SchemeValueSimple::Int(a), SchemeValueSimple::Int(b)) => a == b,
+            (SchemeValueSimple::Float(a), SchemeValueSimple::Float(b)) => a == b,
+            (SchemeValueSimple::Symbol(a), SchemeValueSimple::Symbol(b)) => a == b,
+            (SchemeValueSimple::Pair(a1, d1), SchemeValueSimple::Pair(a2, d2)) => {
+                a1.value == a2.value && d1.value == d2.value
+            }
+            (SchemeValueSimple::Str(a), SchemeValueSimple::Str(b)) => a == b,
+            (SchemeValueSimple::Vector(a), SchemeValueSimple::Vector(b)) => {
+                if a.len() != b.len() { return false; }
+                for (x, y) in a.iter().zip(b.iter()) {
+                    if x.value != y.value { return false; }
+                }
+                true
+            }
+            (SchemeValueSimple::Bool(a), SchemeValueSimple::Bool(b)) => a == b,
+            (SchemeValueSimple::Char(a), SchemeValueSimple::Char(b)) => a == b,
+            (SchemeValueSimple::Nil, SchemeValueSimple::Nil) => true,
+            _ => false,
+        }
+    }
+}
+
 /// The core type representing a Scheme value in the heap.
 ///
 /// All Scheme values are allocated on the garbage-collected heap and referenced
@@ -70,10 +120,10 @@ pub enum SchemeValue {
         is_special_form: bool,
     },
     /// Special forms that need access to the evaluator
-    SpecialForm {
-        func: Rc<dyn Fn(&mut crate::eval::Evaluator, &[GcRef]) -> Result<GcRef, String> + 'static>,
-        doc: String,
-    },
+    // SpecialForm {
+    //     func: Rc<dyn Fn(&mut crate::eval::Evaluator, &[GcRef]) -> Result<GcRef, String> + 'static>,
+    //     doc: String,
+    // },
     /// Environment frames (variable bindings)
     EnvFrame(HashMap<String, GcRef>),
     /// Empty list (nil)
@@ -94,9 +144,9 @@ impl std::fmt::Debug for SchemeValue {
             SchemeValue::Closure { params, body, env } => f.debug_struct("Closure").field("params", params).field("body", &body.borrow().value).field("env", &env.borrow().value).finish(),
             SchemeValue::Bool(b) => write!(f, "Bool({})", b),
             SchemeValue::Char(c) => write!(f, "Char({:?})", c),
-            SchemeValue::Primitive { .. } => write!(f, "Primitive(<builtin>)"),
-            SchemeValue::SpecialForm { .. } => write!(f, "SpecialForm(<builtin>)"),
-            SchemeValue::EnvFrame(map) => f.debug_map().entries(map.iter()).finish(),
+            SchemeValue::Primitive { doc, .. } => write!(f, "Primitive({})", doc),
+            // SchemeValue::SpecialForm { doc, .. } => write!(f, "SpecialForm({})", doc),
+            SchemeValue::EnvFrame(map) => write!(f, "EnvFrame({} bindings)", map.len()),
             SchemeValue::Nil => write!(f, "Nil"),
         }
     }
@@ -138,7 +188,7 @@ impl PartialEq for SchemeValue {
             (SchemeValue::Char(a), SchemeValue::Char(b)) => a == b,
             // For Primitive and Port, just compare type (not function pointer or port identity)
             (SchemeValue::Primitive { .. }, SchemeValue::Primitive { .. }) => true,
-            (SchemeValue::SpecialForm { .. }, SchemeValue::SpecialForm { .. }) => true,
+            // (SchemeValue::SpecialForm { .. }, SchemeValue::SpecialForm { .. }) => true,
             (SchemeValue::EnvFrame(a), SchemeValue::EnvFrame(b)) => {
                 if a.len() != b.len() { return false; }
                 for (k, va) in a.iter() {
@@ -167,9 +217,9 @@ pub type GcRef = Rc<RefCell<GcObject>>;
 /// we can safely use &GcObject references throughout the system.
 /// This eliminates the overhead of Rc<RefCell<T>> by using direct references.
 /// # Migration Path
-/// We're gradually migrating from GcRef (Rc<RefCell<GcObject>>) to GcRefSimple (&'static GcObject).
+/// We're gradually migrating from GcRef (Rc<RefCell<GcObject>>) to GcRefSimple (&'static GcObjectSimple).
 /// This provides better performance and simpler code.
-pub type GcRefSimple = &'static GcObject;
+pub type GcRefSimple = &'static GcObjectSimple;
 
 /// Wrapper for heap storage; includes a mark bit for garbage collection.
 ///
@@ -179,6 +229,15 @@ pub type GcRefSimple = &'static GcObject;
 pub struct GcObject {
     /// The actual Scheme value stored in this object
     pub value: SchemeValue,
+    /// Mark bit used during garbage collection
+    marked: bool,
+}
+
+/// Simple wrapper for heap storage using the new GC system.
+#[derive(Debug)]
+pub struct GcObjectSimple {
+    /// The actual Scheme value stored in this object
+    pub value: SchemeValueSimple,
     /// Mark bit used during garbage collection
     marked: bool,
 }
@@ -378,22 +437,20 @@ impl GcHeap {
         self.nil.as_ref().unwrap().clone()
     }
 
-    /// Allocate a new GcObject on the heap using the reference-based system.
-    /// Returns a static reference to the allocated object.
-    pub fn alloc_simple(&mut self, obj: GcObject) -> GcRefSimple {
-        // Allocate the object on the heap
-        let boxed_obj = Box::new(obj);
-        let ptr = Box::into_raw(boxed_obj);
-        
-        // Convert to static reference
-        unsafe { &*ptr }
+    /// Allocate a new GcObjectSimple on the heap and return a GcRefSimple.
+    pub fn alloc_simple(&mut self, obj: GcObjectSimple) -> GcRefSimple {
+        // For now, we'll use a static allocation strategy
+        // This is a simplified version for testing
+        let boxed = Box::new(obj);
+        let leaked = Box::leak(boxed);
+        leaked
     }
 
     /// Get the nil value using the reference-based system.
     pub fn nil_simple(&mut self) -> GcRefSimple {
         // For now, create a new nil object each time
         // In a real implementation, we'd cache this
-        let nil_obj = GcObject { value: SchemeValue::Nil, marked: false };
+        let nil_obj = GcObjectSimple { value: SchemeValueSimple::Nil, marked: false };
         self.alloc_simple(nil_obj)
     }
 }
@@ -561,52 +618,21 @@ pub fn new_primitive(
     heap.alloc(SchemeValue::Primitive { func: f, doc, is_special_form })
 }
 
-/// Create a new special form on the heap.
-///
-/// # Examples
-///
-/// ```rust
-/// use s1::gc::{GcHeap, new_special_form};
-/// use std::rc::Rc;
-///
-/// let mut heap = GcHeap::new();
-/// let if_form = new_special_form(&mut heap, Rc::new(|_, args| {
-///     // Implementation would go here
-///     Ok(new_bool(&mut heap, false))
-/// }), "if special form".to_string());
-/// ```
-pub fn new_special_form(
-    heap: &mut GcHeap,
-    f: Rc<dyn Fn(&mut crate::eval::Evaluator, &[GcRef]) -> Result<GcRef, String>>,
-    doc: String,
-) -> GcRef {
-    heap.alloc(SchemeValue::SpecialForm { func: f, doc })
-}
+// pub fn new_special_form(
+//     heap: &mut GcHeap,
+//     f: Rc<dyn Fn(&mut crate::eval::Evaluator, &[GcRef]) -> Result<GcRef, String>>,
+//     doc: String,
+// ) -> GcRef {
+//     heap.alloc(SchemeValue::SpecialForm { func: f, doc })
+// }
 
-/// Create a new special form with evaluator access on the heap.
-///
-/// This function creates special forms that can access the evaluator directly,
-/// allowing them to use the same heap and environment as all other evaluations.
-///
-/// # Examples
-///
-/// ```rust
-/// use s1::gc::{GcHeap, new_special_form_with_evaluator};
-/// use std::rc::Rc;
-///
-/// let mut heap = GcHeap::new();
-/// let define_form = new_special_form_with_evaluator(&mut heap, Rc::new(|evaluator, args| {
-///     // Implementation that can access evaluator.heap and evaluator.env
-///     Ok(new_bool(&mut evaluator.heap, true))
-/// }), "define special form".to_string());
-/// ```
-pub fn new_special_form_with_evaluator(
-    heap: &mut GcHeap,
-    f: Rc<dyn Fn(&mut crate::eval::Evaluator, &[GcRef]) -> Result<GcRef, String> + 'static>,
-    doc: String,
-) -> GcRef {
-    heap.alloc(SchemeValue::SpecialForm { func: f, doc })
-}
+// pub fn new_special_form_with_evaluator(
+//     heap: &mut GcHeap,
+//     f: Rc<dyn Fn(&mut crate::eval::Evaluator, &[GcRef]) -> Result<GcRef, String> + 'static>,
+//     doc: String,
+// ) -> GcRef {
+//     heap.alloc(SchemeValue::SpecialForm { func: f, doc })
+// }
 
 /// Create a new environment frame on the heap.
 ///
@@ -643,36 +669,42 @@ pub fn new_nil(heap: &mut GcHeap) -> GcRef {
 // ============================================================================
 // NEW REFERENCE-BASED ALLOCATION FUNCTIONS (Migration Path)
 // ============================================================================
-// These functions return GcRefSimple (&'static GcObject) instead of GcRef (Rc<RefCell<GcObject>>)
+// These functions return GcRefSimple (&'static GcObjectSimple) instead of GcRef (Rc<RefCell<GcObject>>)
 // for better performance and simpler code.
 
 /// Allocate a new integer on the heap using the reference-based system.
 pub fn new_int_simple(heap: &mut GcHeap, val: BigInt) -> GcRefSimple {
-    let obj = GcObject { value: SchemeValue::Int(val), marked: false };
+    let obj = GcObjectSimple { value: SchemeValueSimple::Int(val), marked: false };
     heap.alloc_simple(obj)
 }
 
 /// Allocate a new float on the heap using the reference-based system.
 pub fn new_float_simple(heap: &mut GcHeap, val: f64) -> GcRefSimple {
-    let obj = GcObject { value: SchemeValue::Float(val), marked: false };
+    let obj = GcObjectSimple { value: SchemeValueSimple::Float(val), marked: false };
     heap.alloc_simple(obj)
 }
 
 /// Allocate a new boolean on the heap using the reference-based system.
 pub fn new_bool_simple(heap: &mut GcHeap, val: bool) -> GcRefSimple {
-    let obj = GcObject { value: SchemeValue::Bool(val), marked: false };
+    let obj = GcObjectSimple { value: SchemeValueSimple::Bool(val), marked: false };
+    heap.alloc_simple(obj)
+}
+
+/// Allocate a new character on the heap using the reference-based system.
+pub fn new_char_simple(heap: &mut GcHeap, val: char) -> GcRefSimple {
+    let obj = GcObjectSimple { value: SchemeValueSimple::Char(val), marked: false };
     heap.alloc_simple(obj)
 }
 
 /// Allocate a new symbol on the heap using the reference-based system.
 pub fn new_symbol_simple(heap: &mut GcHeap, name: &str) -> GcRefSimple {
-    let obj = GcObject { value: SchemeValue::Symbol(name.to_string()), marked: false };
+    let obj = GcObjectSimple { value: SchemeValueSimple::Symbol(name.to_string()), marked: false };
     heap.alloc_simple(obj)
 }
 
 /// Allocate a new string on the heap using the reference-based system.
 pub fn new_string_simple(heap: &mut GcHeap, s: &str) -> GcRefSimple {
-    let obj = GcObject { value: SchemeValue::Str(s.to_string()), marked: false };
+    let obj = GcObjectSimple { value: SchemeValueSimple::Str(s.to_string()), marked: false };
     heap.alloc_simple(obj)
 }
 
@@ -681,43 +713,30 @@ pub fn new_nil_simple(heap: &mut GcHeap) -> GcRefSimple {
     heap.nil_simple()
 }
 
-// ============================================================================
-// CONVERSION FUNCTIONS (For testing and gradual migration)
-// ============================================================================
-
-/// Convert GcRefSimple to GcRef for testing and compatibility.
-/// This is a temporary function for the migration period.
-pub fn convert_simple_to_ref(simple: GcRefSimple) -> GcRef {
-    // For now, we'll create a new GcRef with the same value
-    // This is inefficient but allows testing
-    let value = &simple.value;
-    match value {
-        SchemeValue::Int(i) => new_int(&mut GcHeap::new(), i.clone()),
-        SchemeValue::Float(f) => new_float(&mut GcHeap::new(), *f),
-        SchemeValue::Symbol(s) => new_symbol(&mut GcHeap::new(), s.clone()),
-        SchemeValue::Str(s) => new_string(&mut GcHeap::new(), s.clone()),
-        SchemeValue::Bool(b) => new_bool(&mut GcHeap::new(), *b),
-        SchemeValue::Nil => new_nil(&mut GcHeap::new()),
-        _ => panic!("Conversion not implemented for this type"),
-    }
+/// Create a new pair using GcRefSimple references.
+pub fn new_pair_simple(heap: &mut GcHeap, car: GcRefSimple, cdr: GcRefSimple) -> GcRefSimple {
+    let obj = GcObjectSimple { 
+        value: SchemeValueSimple::Pair(car, cdr), 
+        marked: false 
+    };
+    heap.alloc_simple(obj)
 }
 
-/// Convert GcRef to GcRefSimple for testing and compatibility.
-/// This is a temporary function for the migration period.
-pub fn convert_ref_to_simple(gcref: &GcRef) -> GcRefSimple {
-    // For now, we'll create a new GcRefSimple with the same value
-    // This is inefficient but allows testing
-    let value = &gcref.borrow().value;
-    match value {
-        SchemeValue::Int(i) => new_int_simple(&mut GcHeap::new(), i.clone()),
-        SchemeValue::Float(f) => new_float_simple(&mut GcHeap::new(), *f),
-        SchemeValue::Symbol(s) => new_symbol_simple(&mut GcHeap::new(), s),
-        SchemeValue::Str(s) => new_string_simple(&mut GcHeap::new(), s),
-        SchemeValue::Bool(b) => new_bool_simple(&mut GcHeap::new(), *b),
-        SchemeValue::Nil => new_nil_simple(&mut GcHeap::new()),
-        _ => panic!("Conversion not implemented for this type"),
-    }
+/// Create a new vector using GcRefSimple references.
+pub fn new_vector_simple(heap: &mut GcHeap, elements: Vec<GcRefSimple>) -> GcRefSimple {
+    let obj = GcObjectSimple { 
+        value: SchemeValueSimple::Vector(elements), 
+        marked: false 
+    };
+    heap.alloc_simple(obj)
 }
+
+// ============================================================================
+// CONVERSION FUNCTIONS (Temporary - for migration period)
+// ============================================================================
+
+// These functions are being removed as we migrate to using the new system directly.
+// The parser should use GcRefSimple functions directly without conversion.
 
 /// Accessor helpers (returns some inner data or None):
 
@@ -876,7 +895,7 @@ pub fn as_char(obj: &GcRef) -> Option<char> {
     }
 }
 
-/// Check if a GcRef contains a primitive procedure.
+/// Check if a GcRef contains a primitive function.
 ///
 /// # Examples
 ///
@@ -885,28 +904,16 @@ pub fn as_char(obj: &GcRef) -> Option<char> {
 /// use std::rc::Rc;
 ///
 /// let mut heap = GcHeap::new();
-/// let prim = new_primitive(&mut heap, Rc::new(|_, _| Ok(new_nil(&mut heap))), "Add two numbers".to_string());
+/// let prim = new_primitive(&mut heap, Rc::new(|_, _| Err("not implemented".to_string())), "Add two numbers".to_string(), false);
 /// assert!(is_primitive(&prim));
 /// ```
 pub fn is_primitive(obj: &GcRef) -> bool {
     matches!(&obj.borrow().value, SchemeValue::Primitive { .. })
 }
 
-/// Check if a GcRef contains a special form.
-///
-/// # Examples
-///
-/// ```rust
-/// use s1::gc::{GcHeap, new_special_form, is_special_form};
-/// use std::rc::Rc;
-///
-/// let mut heap = GcHeap::new();
-/// let special_form = new_special_form(&mut heap, Rc::new(|_, _| Ok(new_nil(&mut heap))), "if special form".to_string());
-/// assert!(is_special_form(&special_form));
-/// ```
-pub fn is_special_form(obj: &GcRef) -> bool {
-    matches!(&obj.borrow().value, SchemeValue::SpecialForm { .. })
-}
+// pub fn is_special_form(obj: &GcRef) -> bool {
+//     matches!(&obj.borrow().value, SchemeValue::SpecialForm { .. })
+// }
 
 /// Extract an environment frame from a GcRef, if it contains one.
 ///
