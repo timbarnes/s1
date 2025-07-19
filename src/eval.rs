@@ -1,9 +1,9 @@
-use crate::gc::{GcHeap, GcRef, SchemeValue, is_nil, as_pair, as_symbol};
-use crate::gc::{GcRefSimple, convert_simple_to_ref, convert_ref_to_simple};
+use crate::gc::{GcHeap, GcRef, SchemeValue};
+use crate::gc::{GcRefSimple, SchemeValueSimple};
 use crate::io::{PortStack, Port, PortKind};
 use crate::parser::Parser;
 use crate::parser::ParserSimple;
-use crate::printer::scheme_display;
+// use crate::printer::scheme_display;
 use std::collections::HashMap;
 // use std::fs;
 use std::cell::RefCell;
@@ -215,22 +215,35 @@ pub fn eval_trampoline_simple(expr: GcRefSimple, evaluator: &mut EvaluatorSimple
 fn eval_step_simple(expr: GcRefSimple, evaluator: &mut EvaluatorSimple) -> Result<EvalResultSimple, String> {
     let value = &expr.value;
     
-    if is_self_evaluating(value) {
+    if is_self_evaluating_simple(value) {
         Ok(EvalResultSimple::Done(expr))
-    } else if let SchemeValue::Symbol(name) = value {
+    } else if let SchemeValueSimple::Symbol(name) = value {
         // Handle bare symbols - look them up in the environment
         if let Some(bound_value) = evaluator.env.get(name) {
             Ok(EvalResultSimple::Done(*bound_value))
         } else {
             Err(format!("unbound variable: {}", name))
         }
-    } else if let SchemeValue::Pair(car, cdr) = value {
-        // For now, we'll return an error since SchemeValue::Pair expects GcRef
-        // TODO: Create a parallel SchemeValueSimple enum for reference-based evaluation
+    } else if let SchemeValueSimple::Pair(car, cdr) = value {
+        // For now, we'll return an error since we need to handle pairs properly
+        // TODO: Implement pair evaluation for function calls and special forms
         Err("Pairs not yet supported in reference-based evaluation".to_string())
     } else {
         Err("cannot evaluate form".to_string())
     }
+}
+
+/// Check if a SchemeValueSimple is self-evaluating (doesn't need evaluation).
+fn is_self_evaluating_simple(expr: &SchemeValueSimple) -> bool {
+    matches!(expr, 
+        SchemeValueSimple::Int(_) | 
+        SchemeValueSimple::Float(_) | 
+        SchemeValueSimple::Str(_) | 
+        SchemeValueSimple::Bool(_) | 
+        SchemeValueSimple::Char(_) | 
+        SchemeValueSimple::Vector(_) |
+        SchemeValueSimple::Nil
+    )
 }
 
 /// Represents the result of evaluation - either continue with another expression
@@ -320,114 +333,13 @@ pub fn load_file(
     evaluator.run_loop(port_stack, parser)
 }
 
-pub fn repl(
-    port_stack: &mut PortStack,
-    parser: &mut Parser,
-    evaluator: &mut Evaluator,
-) {
-    loop {
-        print!("s1> ");
-        use std::io::Write;
-        std::io::stdout().flush().unwrap();
-        
-        let result = {
-            let current_port = port_stack.current_mut();
-            parser.parse(&mut evaluator.heap, current_port)
-        };
-        match result {
-            Ok(expr) => {
-                let expr_borrow = expr.borrow();
-                let value = &expr_borrow.value;
-                if is_self_evaluating(value) {
-                    println!("=> {}", scheme_display(value));
-                } else if let SchemeValue::Symbol(name) = value {
-                    // Variable lookup
-                    match evaluator.lookup_global_binding(name) {
-                        Some(value) => println!("=> {}", scheme_display(&value.borrow().value)),
-                        None => println!("Error: unbound variable: {}", name),
-                    }
-                } else if let SchemeValue::Pair(car, cdr) = &value {
-                    // Procedure call: (symbol ...)
-                    if let SchemeValue::Symbol(ref name) = car.borrow().value {
-                        // Look up the symbol in the unified environment
-                        if let Some(bound_value) = evaluator.env.get(name) {
-                            // Check if it's a primitive (builtin function)
-                            if let SchemeValue::Primitive { func, is_special_form, .. } = &bound_value.borrow().value {
-                                // Collect arguments first to avoid borrowing conflicts
-                                let mut args = Vec::new();
-                                let mut cur = cdr.clone();
-                                loop {
-                                    let next = {
-                                        let cur_borrow = cur.borrow();
-                                        match &cur_borrow.value {
-                                            SchemeValue::Pair(arg, next) => {
-                                                args.push(arg.clone());
-                                                Some(next.clone())
-                                            }
-                                            SchemeValue::Nil => None,
-                                            _ => {
-                                                println!("Error: malformed argument list");
-                                                continue;
-                                            }
-                                        }
-                                    };
-                                    if let Some(next_cdr) = next {
-                                        cur = next_cdr;
-                                    } else {
-                                        break;
-                                    }
-                                }
-                                if !matches!(&cur.borrow().value, SchemeValue::Nil) {
-                                    println!("Error: malformed argument list");
-                                    continue;
-                                }
-                                
-                                // Now we can call the function without borrowing conflicts
-                                if *is_special_form {
-                                    // Special form - pass arguments as-is
-                                    match func(&mut evaluator.heap, &args) {
-                                        Ok(result) => println!("=> {}", scheme_display(&result.borrow().value)),
-                                        Err(e) => println!("Error: {}", e),
-                                    }
-                                } else {
-                                    // Normal function - evaluate arguments first
-                                    let mut evaled_args = Vec::new();
-                                    // For now, we'll just pass the arguments as-is to avoid borrowing conflicts
-                                    // TODO: Implement proper argument evaluation
-                                    evaled_args = args;
-                                    
-                                    // Call the normal function
-                                    match func(&mut evaluator.heap, &evaled_args) {
-                                        Ok(result) => println!("=> {}", scheme_display(&result.borrow().value)),
-                                        Err(e) => println!("Error: {}", e),
-                                    }
-                                    continue;
-                                }
-                            } else {
-                                // User variable - just return the value
-                                println!("=> {}", scheme_display(&bound_value.borrow().value));
-                                continue;
-                            }
-                        } else {
-                            println!("Error: unbound variable: {}", name);
-                            continue;
-                        }
-                    } else {
-                        println!("Error: cannot evaluate non-symbol operator");
-                    }
-                } else {
-                    println!("Error: cannot evaluate form: {}", scheme_display(value));
-                }
-            }
-            Err(e) if e.contains("end of input") => {
-                break; // EOF: exit
-            }
-            Err(e) => {
-                println!("Error: {}", e);
-            }
-        }
-    }
-}
+// pub fn repl(
+//     port_stack: &mut PortStack,
+//     parser: &mut Parser,
+//     evaluator: &mut Evaluator,
+// ) {
+//     // Commented out for now to focus on basic evaluation testing
+// }
 
 /// Evaluate an expression using the trampoline pattern for tail recursion optimization.
 ///
@@ -546,11 +458,11 @@ fn eval_step_with_evaluator(expr: GcRef, evaluator: &mut Evaluator) -> Result<Ev
                             Ok(EvalResult::Done(result))
                         }
                     }
-                    SchemeValue::SpecialForm { func, .. } => {
-                        // For now, return an error since we can't handle special forms with evaluator access yet
-                        // TODO: Implement proper handling of special forms with evaluator access
-                        Err("Special forms with evaluator access not yet implemented".to_string())
-                    }
+                    // SchemeValue::SpecialForm { func, .. } => {
+                    //     // For now, return an error since we can't handle special forms with evaluator access yet
+                    //     // TODO: Implement proper handling of special forms with evaluator access
+                    //     Err("Special forms with evaluator access not yet implemented".to_string())
+                    // }
                     _ => {
                         // User variable - just return the value
                         Ok(EvalResult::Done(bound_value.clone()))
@@ -670,7 +582,7 @@ pub fn lookup_global_binding(name: &str) -> Option<GcRef> {
 mod tests {
     use super::*;
     use crate::gc::{new_int, new_string, new_bool, new_symbol, new_pair};
-    use crate::builtin;
+    // use crate::builtin;
     use num_bigint::BigInt;
 
     #[test]
@@ -780,7 +692,7 @@ mod tests {
         // Test looking up the binding
         let found = evaluator.lookup_global_binding("x");
         assert!(found.is_some());
-        assert_eq!(&found.unwrap().value, &crate::gc::SchemeValue::Int(BigInt::from(42)));
+        assert_eq!(&found.unwrap().value, &crate::gc::SchemeValueSimple::Int(BigInt::from(42)));
         
         // Test looking up a non-existent binding
         let not_found = evaluator.lookup_global_binding("y");
@@ -798,7 +710,7 @@ mod tests {
         let expr = new_int_simple(&mut evaluator.heap, BigInt::from(42));
         let result = evaluator.eval_service(&expr);
         assert!(result.is_ok());
-        assert_eq!(&result.unwrap().value, &crate::gc::SchemeValue::Int(BigInt::from(42)));
+        assert_eq!(&result.unwrap().value, &crate::gc::SchemeValueSimple::Int(BigInt::from(42)));
         
         // Test evaluating a symbol that's bound in the environment
         let symbol = new_symbol_simple(&mut evaluator.heap, "x");
@@ -807,7 +719,7 @@ mod tests {
         
         let result = evaluator.eval_service(&symbol);
         assert!(result.is_ok());
-        assert_eq!(&result.unwrap().value, &crate::gc::SchemeValue::Int(BigInt::from(99)));
+        assert_eq!(&result.unwrap().value, &crate::gc::SchemeValueSimple::Int(BigInt::from(99)));
         
         // Test evaluating an unbound symbol
         let unbound_symbol = new_symbol_simple(&mut evaluator.heap, "y");
@@ -827,6 +739,6 @@ mod tests {
         let expr = new_string_simple(&mut evaluator.heap, "hello");
         let result = evaluator.evaluate(expr);
         assert!(result.is_ok());
-        assert_eq!(&result.unwrap().value, &crate::gc::SchemeValue::Str("hello".to_string()));
+        assert_eq!(&result.unwrap().value, &crate::gc::SchemeValueSimple::Str("hello".to_string()));
     }
 } 

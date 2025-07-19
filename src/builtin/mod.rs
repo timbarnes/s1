@@ -2,14 +2,13 @@ pub mod number;
 pub mod predicate;
 
 use crate::gc::{GcHeap, GcRef, new_string, new_bool};
-use crate::gc::{GcRefSimple, new_string_simple, new_bool_simple, new_int_simple, new_float_simple, new_symbol_simple};
+use crate::gc::{GcRefSimple, new_string_simple, new_bool_simple, new_int_simple, new_float_simple, new_symbol_simple, convert_simple_to_ref, convert_ref_to_simple};
 use std::rc::Rc;
 use num_bigint::BigInt;
 use crate::gc::SchemeValue;
 use number::{plus_builtin, minus_builtin, times_builtin, div_builtin, mod_builtin};
 use crate::printer::scheme_display;
 use crate::eval::Evaluator;
-use crate::eval::EvaluatorSimple;
 
 /// New quote handler using Evaluator interface
 pub fn quote_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
@@ -184,7 +183,7 @@ pub fn help_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> 
 // ============================================================================
 
 /// Simple quote handler using EvaluatorSimple interface
-pub fn quote_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+pub fn quote_handler_simple(evaluator: &mut Evaluator, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if args.len() != 1 {
         Err("quote: expected exactly 1 argument".to_string())
     } else {
@@ -193,7 +192,7 @@ pub fn quote_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple
 }
 
 /// Simple and handler using EvaluatorSimple interface
-pub fn and_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+pub fn and_handler_simple(evaluator: &mut Evaluator, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if args.is_empty() {
         // (and) returns #t
         return Ok(new_bool_simple(&mut evaluator.heap, true));
@@ -202,7 +201,7 @@ pub fn and_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple])
 }
 
 /// Simple or handler using EvaluatorSimple interface
-pub fn or_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+pub fn or_handler_simple(evaluator: &mut Evaluator, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if args.is_empty() {
         // (or) returns #f
         return Ok(new_bool_simple(&mut evaluator.heap, false));
@@ -211,7 +210,7 @@ pub fn or_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) 
 }
 
 /// Simple define handler using EvaluatorSimple interface
-pub fn define_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+pub fn define_handler_simple(evaluator: &mut Evaluator, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if args.len() != 2 {
         return Err("define: expected exactly 2 arguments (symbol expr)".to_string());
     }
@@ -226,18 +225,24 @@ pub fn define_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimpl
     // Second argument is the expression to evaluate
     let expr = &args[1];
     
+    // Convert GcRefSimple to GcRef for evaluation
+    let expr_ref = convert_simple_to_ref(&mut evaluator.heap, expr);
+    
     // Evaluate the expression using the evaluator's eval_service
-    let evaluated_value = evaluator.eval_service(expr)?;
+    let evaluated_value = evaluator.eval_service(&expr_ref)?;
+    
+    // Convert back to GcRefSimple for storage
+    let evaluated_simple = convert_ref_to_simple(&mut evaluator.heap, &evaluated_value);
     
     // Store the evaluated value in the evaluator's environment
     evaluator.insert_global_binding(symbol_name.clone(), evaluated_value);
     
     // Return the evaluated value
-    Ok(evaluated_value)
+    Ok(evaluated_simple)
 }
 
 /// Simple if handler using EvaluatorSimple interface
-pub fn if_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+pub fn if_handler_simple(evaluator: &mut Evaluator, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if args.len() != 2 && args.len() != 3 {
         return Err("if: expected 2 or 3 arguments".to_string());
     }
@@ -248,7 +253,7 @@ pub fn if_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) 
 }
 
 /// Simple begin handler using EvaluatorSimple interface
-pub fn begin_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+pub fn begin_handler_simple(evaluator: &mut Evaluator, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if args.is_empty() {
         return Err("begin: expected at least 1 argument".to_string());
     }
@@ -670,12 +675,12 @@ mod tests {
 
     #[test]
     fn test_quote_handler_simple() {
-        use crate::eval::EvaluatorSimple;
+        use crate::eval::Evaluator;
         use crate::gc::{new_symbol_simple, new_int_simple};
         use num_bigint::BigInt;
 
         // Create an evaluator and test the simple quote handler
-        let mut evaluator = EvaluatorSimple::new();
+        let mut evaluator = Evaluator::new();
         
         // Create test arguments: (quote foo)
         let symbol = new_symbol_simple(&mut evaluator.heap, "foo");
@@ -694,12 +699,12 @@ mod tests {
 
     #[test]
     fn test_and_handler_simple() {
-        use crate::eval::EvaluatorSimple;
+        use crate::eval::Evaluator;
         use crate::gc::{new_int_simple, new_bool_simple};
         use num_bigint::BigInt;
 
         // Create an evaluator and test the simple and handler
-        let mut evaluator = EvaluatorSimple::new();
+        let mut evaluator = Evaluator::new();
         
         // Test with no arguments (should return #t)
         let empty_args: Vec<crate::gc::GcRefSimple> = vec![];
@@ -717,12 +722,12 @@ mod tests {
 
     #[test]
     fn test_or_handler_simple() {
-        use crate::eval::EvaluatorSimple;
+        use crate::eval::Evaluator;
         use crate::gc::{new_int_simple, new_bool_simple};
         use num_bigint::BigInt;
 
         // Create an evaluator and test the simple or handler
-        let mut evaluator = EvaluatorSimple::new();
+        let mut evaluator = Evaluator::new();
         
         // Test with no arguments (should return #f)
         let empty_args: Vec<crate::gc::GcRefSimple> = vec![];
