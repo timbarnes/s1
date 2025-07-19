@@ -1,6 +1,8 @@
 use crate::gc::{GcHeap, GcRef, SchemeValue, is_nil, as_pair, as_symbol};
+use crate::gc::{GcRefSimple, convert_simple_to_ref, convert_ref_to_simple};
 use crate::io::{PortStack, Port, PortKind};
 use crate::parser::Parser;
+use crate::parser::ParserSimple;
 use crate::printer::scheme_display;
 use std::collections::HashMap;
 // use std::fs;
@@ -14,6 +16,14 @@ use std::rc::Rc;
 pub struct Evaluator {
     pub heap: GcHeap,
     pub env: HashMap<String, GcRef>,
+}
+
+/// The main evaluator that uses the reference-based GC system.
+/// This struct uses GcRefSimple (&'static GcObject) instead of GcRef (Rc<RefCell<GcObject>>)
+/// for better performance and simpler code.
+pub struct EvaluatorSimple {
+    pub heap: GcHeap,
+    pub env: HashMap<String, GcRefSimple>,
 }
 
 impl Evaluator {
@@ -79,6 +89,147 @@ impl Evaluator {
             }
         }
         Ok(())
+    }
+}
+
+impl EvaluatorSimple {
+    /// Create a new evaluator with an empty heap and environment.
+    pub fn new() -> Self {
+        Self {
+            heap: GcHeap::new(),
+            env: HashMap::new(),
+        }
+    }
+
+    /// Evaluation service method that special forms can use to evaluate expressions.
+    /// This uses the reference-based GC system.
+    pub fn eval_service(&mut self, expr: &GcRefSimple) -> Result<GcRefSimple, String> {
+        eval_trampoline_simple(expr, self)
+    }
+
+    /// Evaluate an expression using this evaluator.
+    pub fn evaluate(&mut self, expr: GcRefSimple) -> Result<GcRefSimple, String> {
+        eval_trampoline_simple(expr, self)
+    }
+
+    /// Insert a global binding into the environment.
+    pub fn insert_global_binding(&mut self, name: String, value: GcRefSimple) {
+        self.env.insert(name, value);
+    }
+
+    /// Look up a global binding in the environment.
+    pub fn lookup_global_binding(&self, name: &str) -> Option<GcRefSimple> {
+        self.env.get(name).copied()
+    }
+
+    /// Run the evaluation loop on the current port until EOF
+    /// This handles parsing and evaluating expressions from the current port
+    pub fn run_loop(&mut self, port_stack: &mut PortStack, parser: &mut ParserSimple) -> Result<(), String> {
+        loop {
+            let parse_result = parser.parse(&mut self.heap, port_stack.current_mut());
+            match parse_result {
+                Ok(expr) => {
+                    let eval_result = self.evaluate(expr);
+                    match eval_result {
+                        Ok(_) => {
+                            // Successfully evaluated, continue to next expression
+                        }
+                        Err(e) => {
+                            eprintln!("Evaluation error: {}", e);
+                            // Continue parsing other expressions
+                        }
+                    }
+                }
+                Err(e) if e.contains("end of input") => {
+                    // End of input reached - pop the port and return
+                    port_stack.pop();
+                    break;
+                }
+                Err(e) => {
+                    return Err(format!("Parse error: {}", e));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Represents the result of evaluation using the reference-based GC system.
+#[derive(Debug)]
+pub enum EvalResultSimple {
+    /// Continue evaluation with the given expression
+    Continue(GcRefSimple),
+    /// Evaluation is complete with the given value
+    Done(GcRefSimple),
+}
+
+/// Evaluate an expression using the trampoline pattern with the reference-based GC system.
+///
+/// This function evaluates an expression using tail recursion optimization.
+/// It repeatedly calls eval_step_simple until evaluation is complete.
+///
+/// # Arguments
+///
+/// * `expr` - The expression to evaluate
+/// * `evaluator` - The evaluator containing heap and environment
+///
+/// # Returns
+///
+/// Returns `Ok(GcRefSimple)` for the evaluated result, or `Err(String)` if
+/// an error occurred during evaluation.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::eval::{EvaluatorSimple, eval_trampoline_simple};
+/// use s1::gc::{GcHeap, new_int_simple};
+///
+/// let mut evaluator = EvaluatorSimple::new();
+/// let expr = new_int_simple(&mut evaluator.heap, 42);
+/// let result = eval_trampoline_simple(expr, &mut evaluator);
+/// assert!(result.is_ok());
+/// ```
+pub fn eval_trampoline_simple(expr: GcRefSimple, evaluator: &mut EvaluatorSimple) -> Result<GcRefSimple, String> {
+    let mut current_expr = expr;
+    
+    loop {
+        let result = eval_step_simple(current_expr, evaluator)?;
+        match result {
+            EvalResultSimple::Continue(next_expr) => {
+                current_expr = next_expr;
+            }
+            EvalResultSimple::Done(value) => {
+                return Ok(value);
+            }
+        }
+    }
+}
+
+/// Evaluate a single step of an expression using the reference-based GC system.
+///
+/// This function evaluates one step of an expression and returns either:
+/// - `Continue(expr)` if further evaluation is needed
+/// - `Done(value)` if evaluation is complete
+///
+/// This is the core of the trampoline pattern for tail recursion optimization.
+fn eval_step_simple(expr: GcRefSimple, evaluator: &mut EvaluatorSimple) -> Result<EvalResultSimple, String> {
+    let value = &expr.value;
+    
+    if is_self_evaluating(value) {
+        Ok(EvalResultSimple::Done(expr))
+    } else if let SchemeValue::Symbol(name) = value {
+        // Handle bare symbols - look them up in the environment
+        if let Some(bound_value) = evaluator.env.get(name) {
+            Ok(EvalResultSimple::Done(*bound_value))
+        } else {
+            Err(format!("unbound variable: {}", name))
+        }
+    } else if let SchemeValue::Pair(car, cdr) = value {
+        // For now, we'll return an error since SchemeValue::Pair expects GcRef
+        // TODO: Create a parallel SchemeValueSimple enum for reference-based evaluation
+        Err("Pairs not yet supported in reference-based evaluation".to_string())
+    } else {
+        Err("cannot evaluate form".to_string())
     }
 }
 
@@ -602,5 +753,80 @@ mod tests {
         
         let not_found = evaluator.lookup_global_binding("y");
         assert!(not_found.is_none());
+    }
+
+    // ============================================================================
+    // TESTS FOR EVALUATOR SIMPLE (Reference-based GC system)
+    // ============================================================================
+
+    #[test]
+    fn test_evaluator_simple_new() {
+        let evaluator = EvaluatorSimple::new();
+        assert_eq!(evaluator.env.len(), 0);
+        assert_eq!(evaluator.heap.heap_size(), 1); // nil object
+    }
+
+    #[test]
+    fn test_evaluator_simple_global_bindings() {
+        use crate::gc::{new_int_simple, new_string_simple};
+        use num_bigint::BigInt;
+
+        let mut evaluator = EvaluatorSimple::new();
+        
+        // Test inserting a binding
+        let value = new_int_simple(&mut evaluator.heap, BigInt::from(42));
+        evaluator.insert_global_binding("x".to_string(), value);
+        
+        // Test looking up the binding
+        let found = evaluator.lookup_global_binding("x");
+        assert!(found.is_some());
+        assert_eq!(&found.unwrap().value, &crate::gc::SchemeValue::Int(BigInt::from(42)));
+        
+        // Test looking up a non-existent binding
+        let not_found = evaluator.lookup_global_binding("y");
+        assert!(not_found.is_none());
+    }
+
+    #[test]
+    fn test_evaluator_simple_eval_service() {
+        use crate::gc::{new_int_simple, new_symbol_simple};
+        use num_bigint::BigInt;
+
+        let mut evaluator = EvaluatorSimple::new();
+        
+        // Test evaluating a self-evaluating expression (integer)
+        let expr = new_int_simple(&mut evaluator.heap, BigInt::from(42));
+        let result = evaluator.eval_service(&expr);
+        assert!(result.is_ok());
+        assert_eq!(&result.unwrap().value, &crate::gc::SchemeValue::Int(BigInt::from(42)));
+        
+        // Test evaluating a symbol that's bound in the environment
+        let symbol = new_symbol_simple(&mut evaluator.heap, "x");
+        let value = new_int_simple(&mut evaluator.heap, BigInt::from(99));
+        evaluator.insert_global_binding("x".to_string(), value);
+        
+        let result = evaluator.eval_service(&symbol);
+        assert!(result.is_ok());
+        assert_eq!(&result.unwrap().value, &crate::gc::SchemeValue::Int(BigInt::from(99)));
+        
+        // Test evaluating an unbound symbol
+        let unbound_symbol = new_symbol_simple(&mut evaluator.heap, "y");
+        let result = evaluator.eval_service(&unbound_symbol);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unbound variable"));
+    }
+
+    #[test]
+    fn test_evaluator_simple_evaluate() {
+        use crate::gc::{new_int_simple, new_string_simple};
+        use num_bigint::BigInt;
+
+        let mut evaluator = EvaluatorSimple::new();
+        
+        // Test evaluating a self-evaluating expression (string)
+        let expr = new_string_simple(&mut evaluator.heap, "hello");
+        let result = evaluator.evaluate(expr);
+        assert!(result.is_ok());
+        assert_eq!(&result.unwrap().value, &crate::gc::SchemeValue::Str("hello".to_string()));
     }
 } 
