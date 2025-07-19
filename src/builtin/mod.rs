@@ -260,8 +260,113 @@ pub fn display_builtin_simple(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result
     }
     
     let val = &args[0];
-    // let s = scheme_display(&val.value);
-    let s = format!("{:?}", &val.value);
+    
+    // Format the value for display (without quotes, with escape sequences)
+    let s = match &val.value {
+        SchemeValueSimple::Str(s) => {
+            // For strings, we need to handle escape sequences
+            let mut result = String::new();
+            let mut chars = s.chars().peekable();
+            while let Some(ch) = chars.next() {
+                if ch == '\\' {
+                    if let Some(next_ch) = chars.peek() {
+                        match next_ch {
+                            'n' => { result.push('\n'); chars.next(); }
+                            't' => { result.push('\t'); chars.next(); }
+                            'r' => { result.push('\r'); chars.next(); }
+                            '\\' => { result.push('\\'); chars.next(); }
+                            '"' => { result.push('"'); chars.next(); }
+                            _ => result.push(ch),
+                        }
+                    } else {
+                        result.push(ch);
+                    }
+                } else {
+                    result.push(ch);
+                }
+            }
+            result
+        }
+        SchemeValueSimple::Symbol(s) => s.clone(),
+        SchemeValueSimple::Int(i) => i.to_string(),
+        SchemeValueSimple::Float(f) => f.to_string(),
+        SchemeValueSimple::Bool(true) => "#t".to_string(),
+        SchemeValueSimple::Bool(false) => "#f".to_string(),
+        SchemeValueSimple::Char(c) => c.to_string(),
+        SchemeValueSimple::Nil => "()".to_string(),
+        SchemeValueSimple::Pair(_, _) => {
+            // For pairs, we need to format them properly
+            let mut s = String::from("(");
+            let mut first = true;
+            let mut current = val;
+            loop {
+                match &current.value {
+                    SchemeValueSimple::Pair(car, cdr) => {
+                        if !first { s.push(' '); }
+                        // Recursively format the car
+                        match &car.value {
+                            SchemeValueSimple::Str(s_str) => {
+                                // Handle string escape sequences in car
+                                let mut car_str = String::new();
+                                let mut chars = s_str.chars().peekable();
+                                while let Some(ch) = chars.next() {
+                                    if ch == '\\' {
+                                        if let Some(next_ch) = chars.peek() {
+                                            match next_ch {
+                                                'n' => { car_str.push('\n'); chars.next(); }
+                                                't' => { car_str.push('\t'); chars.next(); }
+                                                'r' => { car_str.push('\r'); chars.next(); }
+                                                '\\' => { car_str.push('\\'); chars.next(); }
+                                                '"' => { car_str.push('"'); chars.next(); }
+                                                _ => car_str.push(ch),
+                                            }
+                                        } else {
+                                            car_str.push(ch);
+                                        }
+                                    } else {
+                                        car_str.push(ch);
+                                    }
+                                }
+                                s.push_str(&car_str);
+                            }
+                            SchemeValueSimple::Symbol(sym) => s.push_str(sym),
+                            SchemeValueSimple::Int(i) => s.push_str(&i.to_string()),
+                            SchemeValueSimple::Float(f) => s.push_str(&f.to_string()),
+                            SchemeValueSimple::Bool(true) => s.push_str("#t"),
+                            SchemeValueSimple::Bool(false) => s.push_str("#f"),
+                            SchemeValueSimple::Char(c) => s.push_str(&c.to_string()),
+                            SchemeValueSimple::Nil => s.push_str("()"),
+                            _ => s.push_str(&format!("{:?}", &car.value)),
+                        }
+                        current = cdr;
+                        first = false;
+                    }
+                    SchemeValueSimple::Nil => {
+                        s.push(')');
+                        break;
+                    }
+                    _ => {
+                        s.push_str(" . ");
+                        match &current.value {
+                            SchemeValueSimple::Str(s_str) => s.push_str(s_str),
+                            SchemeValueSimple::Symbol(sym) => s.push_str(sym),
+                            SchemeValueSimple::Int(i) => s.push_str(&i.to_string()),
+                            SchemeValueSimple::Float(f) => s.push_str(&f.to_string()),
+                            SchemeValueSimple::Bool(true) => s.push_str("#t"),
+                            SchemeValueSimple::Bool(false) => s.push_str("#f"),
+                            SchemeValueSimple::Char(c) => s.push_str(&c.to_string()),
+                            SchemeValueSimple::Nil => s.push_str("()"),
+                            _ => s.push_str(&format!("{:?}", &current.value)),
+                        }
+                        s.push(')');
+                        break;
+                    }
+                }
+            }
+            s
+        }
+        _ => format!("{:?}", &val.value),
+    };
     
     // If a port is provided as the second argument, write to it
     if args.len() == 2 {
@@ -278,7 +383,8 @@ pub fn display_builtin_simple(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result
         std::io::stdout().flush().unwrap();
     }
     
-    Ok(*val)
+    // Return an unspecified value (use #f for now)
+    Ok(heap.false_simple())
 }
 
 /// Simple newline builtin using reference-based GC system
