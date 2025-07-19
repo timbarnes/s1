@@ -5,6 +5,7 @@ mod parser;
 mod eval;
 mod evalsimple;
 mod builtin;
+mod env;
 
 use crate::gc::GcHeap;
 use crate::parser::ParserSimple;
@@ -12,6 +13,7 @@ use crate::eval::EvaluatorSimple;
 use crate::builtin::register_all_simple;
 use crate::io::{Port, PortKind};
 use crate::evalsimple::{Evaluator, eval_logic};
+use crate::env::Environment;
 use argh::FromArgs;
 use num_bigint::BigInt;
 use std::io as stdio;

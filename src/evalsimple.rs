@@ -7,32 +7,8 @@
 use crate::gc::{GcHeap, GcRefSimple, SchemeValueSimple};
 use crate::parser::ParserSimple;
 use crate::io::Port;
+use crate::env::Environment;
 use std::collections::HashMap;
-
-/// Simple environment for variable bindings
-pub struct Environment {
-    bindings: HashMap<String, GcRefSimple>,
-}
-
-impl Environment {
-    pub fn new() -> Self {
-        Self {
-            bindings: HashMap::new(),
-        }
-    }
-
-    pub fn get(&self, name: &str) -> Option<GcRefSimple> {
-        self.bindings.get(name).copied()
-    }
-
-    pub fn set(&mut self, name: String, value: GcRefSimple) {
-        self.bindings.insert(name, value);
-    }
-
-    pub fn bindings_mut(&mut self) -> &mut HashMap<String, GcRefSimple> {
-        &mut self.bindings
-    }
-}
 
 /// Evaluator that owns both heap and environment
 pub struct Evaluator {
