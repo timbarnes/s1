@@ -244,7 +244,7 @@ impl ParserSimple {
 
     fn parse_symbol_token(heap: &mut GcHeap, s: &str) -> Result<GcRefSimple, String> {
         if s == "nil" || s == "()" {
-            Ok(new_nil_simple(heap))
+            Ok(heap.nil_simple())
         } else if s.starts_with("#\\") {
             let ch = match &s[2..] {
                 "space" => Some(' '),
@@ -283,7 +283,13 @@ impl ParserSimple {
         match token {
             Some(Token::Number(s)) => Self::parse_number_token(heap, &s),
             Some(Token::String(s)) => Ok(new_string_simple(heap, &s)),
-            Some(Token::Boolean(b)) => Ok(new_bool_simple(heap, b)),
+            Some(Token::Boolean(b)) => {
+                if b {
+                    Ok(heap.true_simple())
+                } else {
+                    Ok(heap.false_simple())
+                }
+            },
             Some(Token::Character(c)) => Ok(new_char_simple(heap, c)),
             Some(Token::Symbol(s)) => Self::parse_symbol_token(heap, &s),
             Some(Token::LeftParen) => Self::parse_list(heap, tokenizer),
