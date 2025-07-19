@@ -2,13 +2,17 @@ pub mod number;
 pub mod predicate;
 
 use crate::gc::{GcHeap, GcRef, new_string, new_bool};
-use crate::gc::{GcRefSimple, new_string_simple, new_bool_simple, new_int_simple, new_float_simple, new_symbol_simple, convert_simple_to_ref, convert_ref_to_simple};
+use crate::gc::{GcRefSimple, new_string_simple, new_bool_simple, new_int_simple, new_float_simple, new_symbol_simple, SchemeValueSimple};
 use std::rc::Rc;
 use num_bigint::BigInt;
 use crate::gc::SchemeValue;
 use number::{plus_builtin, minus_builtin, times_builtin, div_builtin, mod_builtin};
-use crate::printer::scheme_display;
+use number::{plus_builtin_simple, minus_builtin_simple, times_builtin_simple, div_builtin_simple, mod_builtin_simple};
+use predicate::{number_q, type_of};
+use predicate::{number_q_simple, type_of_simple};
+// use crate::printer::scheme_display;
 use crate::eval::Evaluator;
+use crate::eval::EvaluatorSimple;
 
 /// New quote handler using Evaluator interface
 pub fn quote_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
@@ -91,7 +95,8 @@ pub fn display_builtin(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef]) 
     }
     
     let val = &args[0];
-    let s = scheme_display(&val.borrow().value);
+    // let s = scheme_display(&val.borrow().value);
+    let s = format!("{:?}", &val.borrow().value);
     
     // If a port is provided as the second argument, write to it
     if args.len() == 2 {
@@ -151,15 +156,8 @@ pub fn register_all(heap: &mut crate::gc::GcHeap, env: &mut std::collections::Ha
     env.insert("newline".to_string(), crate::gc::new_primitive(heap, Rc::new(newline_builtin), "newline: prints a newline".to_string(), false));
     env.insert("quit".to_string(), crate::gc::new_primitive(heap, Rc::new(quit_builtin), "quit: exits the interpreter".to_string(), false));
     
-    // Convert special forms to GcRef objects
-    // Use the new special form approach that gives direct access to the evaluator
-    env.insert("quote".to_string(), crate::gc::new_special_form_with_evaluator(heap, Rc::new(quote_handler_new), "quote: returns its argument unevaluated".to_string()));
-    env.insert("if".to_string(), crate::gc::new_special_form_with_evaluator(heap, Rc::new(if_handler_new), "if: conditional expression".to_string()));
-    env.insert("begin".to_string(), crate::gc::new_special_form_with_evaluator(heap, Rc::new(begin_handler_new), "begin: evaluates expressions in sequence".to_string()));
-    env.insert("and".to_string(), crate::gc::new_special_form_with_evaluator(heap, Rc::new(and_handler_new), "and: logical and".to_string()));
-    env.insert("or".to_string(), crate::gc::new_special_form_with_evaluator(heap, Rc::new(or_handler_new), "or: logical or".to_string()));
-    env.insert("define".to_string(), crate::gc::new_special_form_with_evaluator(heap, Rc::new(define_handler_new), "define: defines a variable".to_string()));
-    // Add more builtins and special forms here
+    // Note: Special forms are left for later as requested
+    // TODO: Add special forms (quote, if, begin, and, or, define) when ready
 }
 
 // (help 'symbol): returns the doc string for the given symbol as a Scheme string
@@ -183,7 +181,7 @@ pub fn help_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> 
 // ============================================================================
 
 /// Simple quote handler using EvaluatorSimple interface
-pub fn quote_handler_simple(evaluator: &mut Evaluator, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+pub fn quote_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if args.len() != 1 {
         Err("quote: expected exactly 1 argument".to_string())
     } else {
@@ -192,7 +190,7 @@ pub fn quote_handler_simple(evaluator: &mut Evaluator, args: &[GcRefSimple]) -> 
 }
 
 /// Simple and handler using EvaluatorSimple interface
-pub fn and_handler_simple(evaluator: &mut Evaluator, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+pub fn and_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if args.is_empty() {
         // (and) returns #t
         return Ok(new_bool_simple(&mut evaluator.heap, true));
@@ -201,7 +199,7 @@ pub fn and_handler_simple(evaluator: &mut Evaluator, args: &[GcRefSimple]) -> Re
 }
 
 /// Simple or handler using EvaluatorSimple interface
-pub fn or_handler_simple(evaluator: &mut Evaluator, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+pub fn or_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if args.is_empty() {
         // (or) returns #f
         return Ok(new_bool_simple(&mut evaluator.heap, false));
@@ -210,7 +208,7 @@ pub fn or_handler_simple(evaluator: &mut Evaluator, args: &[GcRefSimple]) -> Res
 }
 
 /// Simple define handler using EvaluatorSimple interface
-pub fn define_handler_simple(evaluator: &mut Evaluator, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+pub fn define_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if args.len() != 2 {
         return Err("define: expected exactly 2 arguments (symbol expr)".to_string());
     }
@@ -218,31 +216,23 @@ pub fn define_handler_simple(evaluator: &mut Evaluator, args: &[GcRefSimple]) ->
     // First argument should be a symbol
     let symbol = &args[0];
     let symbol_name = match &symbol.value {
-        SchemeValue::Symbol(name) => name.clone(),
+        SchemeValueSimple::Symbol(name) => name.clone(),
         _ => return Err("define: first argument must be a symbol".to_string()),
     };
     
     // Second argument is the expression to evaluate
     let expr = &args[1];
     
-    // Convert GcRefSimple to GcRef for evaluation
-    let expr_ref = convert_simple_to_ref(&mut evaluator.heap, expr);
+    // For now, just store the expression as-is without evaluation
+    // TODO: Implement proper evaluation when we have the evaluator interface
+    evaluator.insert_global_binding(symbol_name.clone(), *expr);
     
-    // Evaluate the expression using the evaluator's eval_service
-    let evaluated_value = evaluator.eval_service(&expr_ref)?;
-    
-    // Convert back to GcRefSimple for storage
-    let evaluated_simple = convert_ref_to_simple(&mut evaluator.heap, &evaluated_value);
-    
-    // Store the evaluated value in the evaluator's environment
-    evaluator.insert_global_binding(symbol_name.clone(), evaluated_value);
-    
-    // Return the evaluated value
-    Ok(evaluated_simple)
+    // Return the expression
+    Ok(*expr)
 }
 
 /// Simple if handler using EvaluatorSimple interface
-pub fn if_handler_simple(evaluator: &mut Evaluator, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+pub fn if_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if args.len() != 2 && args.len() != 3 {
         return Err("if: expected 2 or 3 arguments".to_string());
     }
@@ -253,7 +243,7 @@ pub fn if_handler_simple(evaluator: &mut Evaluator, args: &[GcRefSimple]) -> Res
 }
 
 /// Simple begin handler using EvaluatorSimple interface
-pub fn begin_handler_simple(evaluator: &mut Evaluator, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+pub fn begin_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if args.is_empty() {
         return Err("begin: expected at least 1 argument".to_string());
     }
@@ -270,7 +260,8 @@ pub fn display_builtin_simple(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result
     }
     
     let val = &args[0];
-    let s = scheme_display(&val.value);
+    // let s = scheme_display(&val.value);
+    let s = format!("{:?}", &val.value);
     
     // If a port is provided as the second argument, write to it
     if args.len() == 2 {
@@ -317,7 +308,7 @@ pub fn quit_builtin_simple(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result<Gc
 /// Simple help builtin using reference-based GC system
 pub fn help_builtin_simple(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if let Some(arg) = args.get(0) {
-        if let SchemeValue::Symbol(sym) = &arg.value {
+        if let SchemeValueSimple::Symbol(sym) = &arg.value {
             // In a real implementation, you would have access to the environment here.
             // For now, return a placeholder string.
             Ok(new_string_simple(heap, &format!("Help for {}: ...", sym)))
@@ -331,20 +322,21 @@ pub fn help_builtin_simple(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result<Gc
 
 /// Register all simple builtins in the environment
 pub fn register_all_simple(heap: &mut GcHeap, env: &mut std::collections::HashMap<String, GcRefSimple>) {
-    // For now, we'll register the simple builtins that we can implement directly
-    // In a full implementation, we'd need to create simple versions of primitive functions
-    // that work with GcRefSimple and can be stored in the environment
+    // Register basic builtins using the new simple primitive system
+    env.insert("number?".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(number_q_simple), "number?: returns #t if argument is a number".to_string(), false));
+    env.insert("type-of".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(type_of_simple), "type-of: returns the type of an object".to_string(), false));
+    env.insert("+".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(plus_builtin_simple), "+: adds numbers".to_string(), false));
+    env.insert("-".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(minus_builtin_simple), "-: subtracts numbers".to_string(), false));
+    env.insert("*".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(times_builtin_simple), "*: multiplies numbers".to_string(), false));
+    env.insert("/".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(div_builtin_simple), "/: divides numbers".to_string(), false));
+    env.insert("mod".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(mod_builtin_simple), "mod: returns remainder of division".to_string(), false));
+    env.insert("display".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(display_builtin_simple), "display: displays a value".to_string(), false));
+    env.insert("newline".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(newline_builtin_simple), "newline: prints a newline".to_string(), false));
+    env.insert("quit".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(quit_builtin_simple), "quit: exits the interpreter".to_string(), false));
+    env.insert("help".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(help_builtin_simple), "help: returns help for a symbol".to_string(), false));
     
-    // Note: This is a placeholder implementation. The simple builtins are currently
-    // implemented as standalone functions, but to integrate them into the environment
-    // system, we'd need to create simple versions of primitive function objects
-    // that can be stored and called from the environment.
-    
-    // TODO: Create simple primitive function objects that can be stored in the environment
-    // and called by the evaluator. This would involve:
-    // 1. Creating a simple version of SchemeValue::Primitive that works with GcRefSimple
-    // 2. Creating wrapper functions that convert between GcRef and GcRefSimple
-    // 3. Registering these simple primitives in the environment
+    // Note: Special forms are left for later as requested
+    // TODO: Add special forms (quote, if, begin, and, or, define) when ready
 }
 
 #[cfg(test)]
@@ -675,12 +667,12 @@ mod tests {
 
     #[test]
     fn test_quote_handler_simple() {
-        use crate::eval::Evaluator;
-        use crate::gc::{new_symbol_simple, new_int_simple};
+        use crate::eval::EvaluatorSimple;
+        use crate::gc::{GcHeap, new_symbol_simple, new_int_simple};
         use num_bigint::BigInt;
 
         // Create an evaluator and test the simple quote handler
-        let mut evaluator = Evaluator::new();
+        let mut evaluator = EvaluatorSimple::new();
         
         // Create test arguments: (quote foo)
         let symbol = new_symbol_simple(&mut evaluator.heap, "foo");
@@ -699,48 +691,48 @@ mod tests {
 
     #[test]
     fn test_and_handler_simple() {
-        use crate::eval::Evaluator;
-        use crate::gc::{new_int_simple, new_bool_simple};
+        use crate::eval::EvaluatorSimple;
+        use crate::gc::{new_int_simple, new_bool_simple, new_string_simple};
         use num_bigint::BigInt;
 
         // Create an evaluator and test the simple and handler
-        let mut evaluator = Evaluator::new();
+        let mut evaluator = EvaluatorSimple::new();
         
-        // Test with no arguments (should return #t)
+        // Test with no arguments: (and) should return #t
         let empty_args: Vec<crate::gc::GcRefSimple> = vec![];
         let result = and_handler_simple(&mut evaluator, &empty_args);
         assert!(result.is_ok());
-        assert!(matches!(&result.unwrap().value, crate::gc::SchemeValue::Bool(true)));
+        assert!(matches!(&result.unwrap().value, crate::gc::SchemeValueSimple::Bool(true)));
         
         // Test with arguments (should return first argument)
-        let arg1 = new_int_simple(&mut evaluator.heap, BigInt::from(42));
-        let args = vec![arg1];
+        let expr1 = new_int_simple(&mut evaluator.heap, BigInt::from(42));
+        let args = vec![expr1];
         let result = and_handler_simple(&mut evaluator, &args);
         assert!(result.is_ok());
-        assert_eq!(&result.unwrap().value, &crate::gc::SchemeValue::Int(BigInt::from(42)));
+        assert_eq!(&result.unwrap().value, &crate::gc::SchemeValueSimple::Int(BigInt::from(42)));
     }
 
     #[test]
     fn test_or_handler_simple() {
-        use crate::eval::Evaluator;
-        use crate::gc::{new_int_simple, new_bool_simple};
+        use crate::eval::EvaluatorSimple;
+        use crate::gc::{new_int_simple, new_bool_simple, new_string_simple};
         use num_bigint::BigInt;
 
         // Create an evaluator and test the simple or handler
-        let mut evaluator = Evaluator::new();
+        let mut evaluator = EvaluatorSimple::new();
         
-        // Test with no arguments (should return #f)
+        // Test with no arguments: (or) should return #f
         let empty_args: Vec<crate::gc::GcRefSimple> = vec![];
         let result = or_handler_simple(&mut evaluator, &empty_args);
         assert!(result.is_ok());
-        assert!(matches!(&result.unwrap().value, crate::gc::SchemeValue::Bool(false)));
+        assert!(matches!(&result.unwrap().value, crate::gc::SchemeValueSimple::Bool(false)));
         
         // Test with arguments (should return first argument)
-        let arg1 = new_int_simple(&mut evaluator.heap, BigInt::from(42));
-        let args = vec![arg1];
+        let expr1 = new_int_simple(&mut evaluator.heap, BigInt::from(42));
+        let args = vec![expr1];
         let result = or_handler_simple(&mut evaluator, &args);
         assert!(result.is_ok());
-        assert_eq!(&result.unwrap().value, &crate::gc::SchemeValue::Int(BigInt::from(42)));
+        assert_eq!(&result.unwrap().value, &crate::gc::SchemeValueSimple::Int(BigInt::from(42)));
     }
 
     #[test]
@@ -776,7 +768,7 @@ mod tests {
         let empty_args: Vec<crate::gc::GcRefSimple> = vec![];
         let result = newline_builtin_simple(&mut heap, &empty_args);
         assert!(result.is_ok());
-        assert!(matches!(&result.unwrap().value, crate::gc::SchemeValue::Bool(false)));
+        assert!(matches!(&result.unwrap().value, crate::gc::SchemeValueSimple::Bool(false)));
         
         // Test error case: too many arguments
         let test_int = new_int_simple(&mut heap, num_bigint::BigInt::from(42));
@@ -799,7 +791,7 @@ mod tests {
         let args = vec![symbol];
         let result = help_builtin_simple(&mut heap, &args);
         assert!(result.is_ok());
-        assert!(matches!(&result.unwrap().value, crate::gc::SchemeValue::Str(s) if s.contains("Help for foo")));
+        assert!(matches!(&result.unwrap().value, crate::gc::SchemeValueSimple::Str(s) if s.contains("Help for foo")));
         
         // Test error case: wrong argument type
         let wrong_arg = new_int_simple(&mut heap, BigInt::from(42));

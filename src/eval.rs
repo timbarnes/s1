@@ -225,12 +225,59 @@ fn eval_step_simple(expr: GcRefSimple, evaluator: &mut EvaluatorSimple) -> Resul
             Err(format!("unbound variable: {}", name))
         }
     } else if let SchemeValueSimple::Pair(car, cdr) = value {
-        // For now, we'll return an error since we need to handle pairs properly
-        // TODO: Implement pair evaluation for function calls and special forms
-        Err("Pairs not yet supported in reference-based evaluation".to_string())
+        // Handle function calls: (function args...)
+        // For now, we'll handle basic primitive function calls
+        // TODO: Implement proper argument evaluation and special forms
+        
+        // Check if the car is a symbol (function name)
+        if let SchemeValueSimple::Symbol(func_name) = &car.value {
+            // Look up the function in the environment
+            if let Some(func_value) = evaluator.env.get(func_name) {
+                if let SchemeValueSimple::Primitive { func, is_special_form, .. } = &func_value.value {
+                    if *is_special_form {
+                        // Special forms not yet implemented
+                        Err("Special forms not yet supported".to_string())
+                    } else {
+                        // For now, just pass the arguments as-is without evaluation
+                        // TODO: Implement proper argument evaluation
+                        let args = collect_list_simple(cdr)?;
+                        match func(&mut evaluator.heap, &args) {
+                            Ok(result) => Ok(EvalResultSimple::Done(result)),
+                            Err(e) => Err(e),
+                        }
+                    }
+                } else {
+                    Err("Not a function".to_string())
+                }
+            } else {
+                Err(format!("unbound variable: {}", func_name))
+            }
+        } else {
+            Err("Cannot evaluate non-symbol operator".to_string())
+        }
     } else {
         Err("cannot evaluate form".to_string())
     }
+}
+
+/// Helper function to collect a list of arguments from a pair chain
+fn collect_list_simple(mut current: GcRefSimple) -> Result<Vec<GcRefSimple>, String> {
+    let mut args = Vec::new();
+    loop {
+        match &current.value {
+            SchemeValueSimple::Pair(car, cdr) => {
+                args.push(*car);
+                current = *cdr;
+            }
+            SchemeValueSimple::Nil => {
+                break;
+            }
+            _ => {
+                return Err("Malformed argument list".to_string());
+            }
+        }
+    }
+    Ok(args)
 }
 
 /// Check if a SchemeValueSimple is self-evaluating (doesn't need evaluation).

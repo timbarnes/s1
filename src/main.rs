@@ -3,12 +3,12 @@ mod io;
 mod tokenizer;
 mod parser;
 mod eval;
-// mod printer;
-// mod builtin;
+mod builtin;
 
 use crate::gc::GcHeap;
 use crate::parser::ParserSimple;
 use crate::eval::EvaluatorSimple;
+use crate::builtin::register_all_simple;
 use crate::io::{Port, PortKind};
 use argh::FromArgs;
 use num_bigint::BigInt;
@@ -27,6 +27,9 @@ fn main() {
     let mut heap = GcHeap::new();
     let mut evaluator = EvaluatorSimple::new();
 
+    // Register builtins
+    register_all_simple(&mut heap, &mut evaluator.env);
+
     // Test cases for self-evaluating forms and symbol lookup
     let test_cases = vec![
         ("42", "Number"),
@@ -37,6 +40,10 @@ fn main() {
         ("#\\a", "Character"),
         ("nil", "Nil"),
         ("x", "Symbol (unbound)"),
+        ("(+ 1 2)", "Basic addition"),
+        ("(* 3 4)", "Basic multiplication"),
+        ("(number? 42)", "Number predicate"),
+        ("(type-of 42)", "Type of function"),
     ];
 
     // Add a binding for symbol lookup test

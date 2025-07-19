@@ -1,7 +1,7 @@
 use num_bigint::BigInt;
 use num_traits::{ToPrimitive, Zero, One};
 use crate::gc::{SchemeValue, new_int, new_float};
-use crate::gc::{GcRefSimple, new_int_simple, new_float_simple};
+use crate::gc::{GcRefSimple, new_int_simple, new_float_simple, SchemeValueSimple};
 
 pub fn plus_builtin(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef]) -> Result<crate::gc::GcRef, String> {
     if args.len() < 2 {
@@ -187,14 +187,14 @@ pub fn plus_builtin_simple(heap: &mut crate::gc::GcHeap, args: &[GcRefSimple]) -
     let mut sum_float = 0.0;
     for arg in args {
         match &arg.value {
-            SchemeValue::Int(i) => {
+            SchemeValueSimple::Int(i) => {
                 if is_float {
                     sum_float += i.to_f64().unwrap();
                 } else {
                     sum_int += i;
                 }
             }
-            SchemeValue::Float(f) => {
+            SchemeValueSimple::Float(f) => {
                 if !is_float {
                     sum_float = sum_int.to_f64().unwrap();
                     is_float = true;
@@ -220,11 +220,11 @@ pub fn minus_builtin_simple(heap: &mut crate::gc::GcHeap, args: &[GcRefSimple]) 
     let mut result_float;
     let mut iter = args.iter();
     match &iter.next().unwrap().value {
-        SchemeValue::Int(i) => {
+        SchemeValueSimple::Int(i) => {
             result_int = i.clone();
             result_float = i.to_f64().unwrap();
         }
-        SchemeValue::Float(f) => {
+        SchemeValueSimple::Float(f) => {
             is_float = true;
             result_int = BigInt::zero();
             result_float = *f;
@@ -241,14 +241,14 @@ pub fn minus_builtin_simple(heap: &mut crate::gc::GcHeap, args: &[GcRefSimple]) 
     }
     for arg in iter {
         match &arg.value {
-            SchemeValue::Int(i) => {
+            SchemeValueSimple::Int(i) => {
                 if is_float {
                     result_float -= i.to_f64().unwrap();
                 } else {
                     result_int -= i;
                 }
             }
-            SchemeValue::Float(f) => {
+            SchemeValueSimple::Float(f) => {
                 if !is_float {
                     result_float = result_int.to_f64().unwrap();
                     is_float = true;
@@ -274,14 +274,14 @@ pub fn times_builtin_simple(heap: &mut crate::gc::GcHeap, args: &[GcRefSimple]) 
     let mut prod_float = 1.0;
     for arg in args {
         match &arg.value {
-            SchemeValue::Int(i) => {
+            SchemeValueSimple::Int(i) => {
                 if is_float {
                     prod_float *= i.to_f64().unwrap();
                 } else {
                     prod_int *= i;
                 }
             }
-            SchemeValue::Float(f) => {
+            SchemeValueSimple::Float(f) => {
                 if !is_float {
                     prod_float = prod_int.to_f64().unwrap();
                     is_float = true;
@@ -305,20 +305,20 @@ pub fn div_builtin_simple(heap: &mut crate::gc::GcHeap, args: &[GcRefSimple]) ->
     let mut result_float;
     let mut iter = args.iter();
     match &iter.next().unwrap().value {
-        SchemeValue::Int(i) => {
+        SchemeValueSimple::Int(i) => {
             result_float = i.to_f64().unwrap();
         }
-        SchemeValue::Float(f) => {
+        SchemeValueSimple::Float(f) => {
             result_float = *f;
         }
         _ => return Err("/: all arguments must be numbers".to_string()),
     }
     for arg in iter {
         match &arg.value {
-            SchemeValue::Int(i) => {
+            SchemeValueSimple::Int(i) => {
                 result_float /= i.to_f64().unwrap();
             }
-            SchemeValue::Float(f) => {
+            SchemeValueSimple::Float(f) => {
                 result_float /= f;
             }
             _ => return Err("/: all arguments must be numbers".to_string()),
@@ -332,11 +332,11 @@ pub fn mod_builtin_simple(heap: &mut crate::gc::GcHeap, args: &[GcRefSimple]) ->
         return Err("mod: expects exactly 2 arguments".to_string());
     }
     let a = match &args[0].value {
-        SchemeValue::Int(i) => i,
+        SchemeValueSimple::Int(i) => i,
         _ => return Err("mod: arguments must be integers".to_string()),
     };
     let b = match &args[1].value {
-        SchemeValue::Int(i) => i,
+        SchemeValueSimple::Int(i) => i,
         _ => return Err("mod: arguments must be integers".to_string()),
     };
     if b.is_zero() {
@@ -361,7 +361,7 @@ mod tests {
         let args = vec![arg1, arg2];
         let result = plus_builtin_simple(&mut heap, &args);
         assert!(result.is_ok());
-        assert_eq!(&result.unwrap().value, &SchemeValue::Int(BigInt::from(7)));
+        assert_eq!(&result.unwrap().value, &SchemeValueSimple::Int(BigInt::from(7)));
         
         // Test adding floats
         let arg1 = new_float_simple(&mut heap, 3.5);
@@ -369,7 +369,7 @@ mod tests {
         let args = vec![arg1, arg2];
         let result = plus_builtin_simple(&mut heap, &args);
         assert!(result.is_ok());
-        assert_eq!(&result.unwrap().value, &SchemeValue::Float(8.0));
+        assert_eq!(&result.unwrap().value, &SchemeValueSimple::Float(8.0));
         
         // Test error case: too few arguments
         let args = vec![new_int_simple(&mut heap, BigInt::from(42))];
@@ -388,14 +388,14 @@ mod tests {
         let args = vec![arg1, arg2];
         let result = minus_builtin_simple(&mut heap, &args);
         assert!(result.is_ok());
-        assert_eq!(&result.unwrap().value, &SchemeValue::Int(BigInt::from(7)));
+        assert_eq!(&result.unwrap().value, &SchemeValueSimple::Int(BigInt::from(7)));
         
         // Test unary minus
         let arg = new_int_simple(&mut heap, BigInt::from(42));
         let args = vec![arg];
         let result = minus_builtin_simple(&mut heap, &args);
         assert!(result.is_ok());
-        assert_eq!(&result.unwrap().value, &SchemeValue::Int(BigInt::from(-42)));
+        assert_eq!(&result.unwrap().value, &SchemeValueSimple::Int(BigInt::from(-42)));
         
         // Test error case: no arguments
         let args: Vec<GcRefSimple> = vec![];
@@ -414,7 +414,7 @@ mod tests {
         let args = vec![arg1, arg2];
         let result = times_builtin_simple(&mut heap, &args);
         assert!(result.is_ok());
-        assert_eq!(&result.unwrap().value, &SchemeValue::Int(BigInt::from(12)));
+        assert_eq!(&result.unwrap().value, &SchemeValueSimple::Int(BigInt::from(12)));
         
         // Test error case: too few arguments
         let args = vec![new_int_simple(&mut heap, BigInt::from(42))];
@@ -433,7 +433,7 @@ mod tests {
         let args = vec![arg1, arg2];
         let result = div_builtin_simple(&mut heap, &args);
         assert!(result.is_ok());
-        assert_eq!(&result.unwrap().value, &SchemeValue::Float(5.0));
+        assert_eq!(&result.unwrap().value, &SchemeValueSimple::Float(5.0));
         
         // Test error case: too few arguments
         let args = vec![new_int_simple(&mut heap, BigInt::from(42))];
@@ -452,7 +452,7 @@ mod tests {
         let args = vec![arg1, arg2];
         let result = mod_builtin_simple(&mut heap, &args);
         assert!(result.is_ok());
-        assert_eq!(&result.unwrap().value, &SchemeValue::Int(BigInt::from(1)));
+        assert_eq!(&result.unwrap().value, &SchemeValueSimple::Int(BigInt::from(1)));
         
         // Test error case: wrong number of arguments
         let args = vec![new_int_simple(&mut heap, BigInt::from(42))];

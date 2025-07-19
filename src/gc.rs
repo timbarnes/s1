@@ -34,7 +34,6 @@ use num_traits::ToPrimitive;
 
 /// Simple Scheme values that use GcRefSimple references.
 /// This is the new system that eliminates Rc<RefCell<T>> overhead.
-#[derive(Debug)]
 pub enum SchemeValueSimple {
     /// Integer values (arbitrary precision)
     Int(BigInt),
@@ -52,6 +51,12 @@ pub enum SchemeValueSimple {
     Bool(bool),
     /// Character literals
     Char(char),
+    /// Built-in procedures (native Rust functions) with doc string
+    Primitive {
+        func: Rc<dyn Fn(&mut GcHeap, &[GcRefSimple]) -> Result<GcRefSimple, String>>,
+        doc: String,
+        is_special_form: bool,
+    },
     /// Empty list (nil)
     Nil,
     // Extend with more types as needed.
@@ -76,8 +81,28 @@ impl PartialEq for SchemeValueSimple {
             }
             (SchemeValueSimple::Bool(a), SchemeValueSimple::Bool(b)) => a == b,
             (SchemeValueSimple::Char(a), SchemeValueSimple::Char(b)) => a == b,
+            // For Primitive, just compare type (not function pointer)
+            (SchemeValueSimple::Primitive { .. }, SchemeValueSimple::Primitive { .. }) => true,
             (SchemeValueSimple::Nil, SchemeValueSimple::Nil) => true,
             _ => false,
+        }
+    }
+}
+
+// Manual Debug implementation for SchemeValueSimple
+impl std::fmt::Debug for SchemeValueSimple {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SchemeValueSimple::Int(i) => write!(f, "Int({})", i),
+            SchemeValueSimple::Float(fl) => write!(f, "Float({})", fl),
+            SchemeValueSimple::Symbol(s) => write!(f, "Symbol({:?})", s),
+            SchemeValueSimple::Pair(car, cdr) => f.debug_tuple("Pair").field(&car.value).field(&cdr.value).finish(),
+            SchemeValueSimple::Str(s) => write!(f, "Str({:?})", s),
+            SchemeValueSimple::Vector(v) => f.debug_tuple("Vector").field(v).finish(),
+            SchemeValueSimple::Bool(b) => write!(f, "Bool({})", b),
+            SchemeValueSimple::Char(c) => write!(f, "Char({:?})", c),
+            SchemeValueSimple::Primitive { doc, .. } => write!(f, "Primitive({})", doc),
+            SchemeValueSimple::Nil => write!(f, "Nil"),
         }
     }
 }
@@ -726,6 +751,20 @@ pub fn new_pair_simple(heap: &mut GcHeap, car: GcRefSimple, cdr: GcRefSimple) ->
 pub fn new_vector_simple(heap: &mut GcHeap, elements: Vec<GcRefSimple>) -> GcRefSimple {
     let obj = GcObjectSimple { 
         value: SchemeValueSimple::Vector(elements), 
+        marked: false 
+    };
+    heap.alloc_simple(obj)
+}
+
+/// Create a new primitive function using GcRefSimple references.
+pub fn new_primitive_simple(
+    heap: &mut GcHeap,
+    f: Rc<dyn Fn(&mut GcHeap, &[GcRefSimple]) -> Result<GcRefSimple, String>>,
+    doc: String,
+    is_special_form: bool,
+) -> GcRefSimple {
+    let obj = GcObjectSimple { 
+        value: SchemeValueSimple::Primitive { func: f, doc, is_special_form }, 
         marked: false 
     };
     heap.alloc_simple(obj)

@@ -1,5 +1,5 @@
 use crate::gc::{GcHeap, GcRef, SchemeValue, new_bool, new_symbol};
-use crate::gc::{GcRefSimple, new_bool_simple, new_symbol_simple};
+use crate::gc::{GcRefSimple, new_bool_simple, new_symbol_simple, SchemeValueSimple};
 
 pub fn number_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     let arg = args.get(0).ok_or("number?: expected 1 argument")?;
@@ -25,7 +25,6 @@ pub fn type_of(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
         SchemeValue::Primitive { .. } => "primitive",
         SchemeValue::EnvFrame(_) => "env-frame",
         SchemeValue::Nil => "nil",
-        SchemeValue::SpecialForm { .. } => "special-form",
         _ => "unknown",
     };
     Ok(new_symbol(heap, type_name))
@@ -38,7 +37,7 @@ pub fn type_of(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
 pub fn number_q_simple(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     let arg = args.get(0).ok_or("number?: expected 1 argument")?;
     let is_number = match &arg.value {
-        SchemeValue::Int(_) | SchemeValue::Float(_) => true,
+        SchemeValueSimple::Int(_) | SchemeValueSimple::Float(_) => true,
         _ => false,
     };
     Ok(new_bool_simple(heap, is_number))
@@ -47,19 +46,16 @@ pub fn number_q_simple(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result<GcRefS
 pub fn type_of_simple(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     let arg = args.get(0).ok_or("type-of: expected 1 argument")?;
     let type_name = match &arg.value {
-        SchemeValue::Int(_) => "integer",
-        SchemeValue::Float(_) => "float",
-        SchemeValue::Symbol(_) => "symbol",
-        SchemeValue::Pair(_, _) => "pair",
-        SchemeValue::Str(_) => "string",
-        SchemeValue::Vector(_) => "vector",
-        SchemeValue::Closure { .. } => "closure",
-        SchemeValue::Bool(_) => "boolean",
-        SchemeValue::Char(_) => "char",
-        SchemeValue::Primitive { .. } => "primitive",
-        SchemeValue::EnvFrame(_) => "env-frame",
-        SchemeValue::Nil => "nil",
-        SchemeValue::SpecialForm { .. } => "special-form",
+        SchemeValueSimple::Int(_) => "integer",
+        SchemeValueSimple::Float(_) => "float",
+        SchemeValueSimple::Symbol(_) => "symbol",
+        SchemeValueSimple::Pair(_, _) => "pair",
+        SchemeValueSimple::Str(_) => "string",
+        SchemeValueSimple::Vector(_) => "vector",
+        SchemeValueSimple::Bool(_) => "boolean",
+        SchemeValueSimple::Char(_) => "char",
+        SchemeValueSimple::Primitive { .. } => "primitive",
+        SchemeValueSimple::Nil => "nil",
         _ => "unknown",
     };
     Ok(new_symbol_simple(heap, type_name))
@@ -142,19 +138,19 @@ mod tests {
         let int_val = new_int_simple(&mut heap, BigInt::from(42));
         let result = number_q_simple(&mut heap, &[int_val]);
         assert!(result.is_ok());
-        assert!(matches!(&result.unwrap().value, SchemeValue::Bool(true)));
+        assert!(matches!(&result.unwrap().value, SchemeValueSimple::Bool(true)));
         
         // Test with float
         let float_val = new_float_simple(&mut heap, 3.14);
         let result = number_q_simple(&mut heap, &[float_val]);
         assert!(result.is_ok());
-        assert!(matches!(&result.unwrap().value, SchemeValue::Bool(true)));
+        assert!(matches!(&result.unwrap().value, SchemeValueSimple::Bool(true)));
         
         // Test with non-number
         let sym_val = new_symbol_simple(&mut heap, "foo");
         let result = number_q_simple(&mut heap, &[sym_val]);
         assert!(result.is_ok());
-        assert!(matches!(&result.unwrap().value, SchemeValue::Bool(false)));
+        assert!(matches!(&result.unwrap().value, SchemeValueSimple::Bool(false)));
         
         // Test error case: no arguments
         let result = number_q_simple(&mut heap, &[]);
@@ -192,7 +188,7 @@ mod tests {
 
     fn as_type_simple(val: &GcRefSimple) -> &'static str {
         match &val.value {
-            SchemeValue::Symbol(s) => match s.as_str() {
+            SchemeValueSimple::Symbol(s) => match s.as_str() {
                 "integer" => "integer",
                 "float" => "float",
                 "symbol" => "symbol",
