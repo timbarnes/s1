@@ -70,6 +70,13 @@ fn main() {
         ("(or #f #f)", "Or with all false (should return #f)"),
         ("(or #f 1 2)", "Or with first true value (should return 1)"),
         ("(or #f #f 3)", "Or with last true value (should return 3)"),
+        // Set! special form
+        ("(define x 10)", "Define x to 10"),
+        ("(set! x 42)", "Set! x to 42"),
+        ("x", "Lookup x after set! to 42"),
+        ("(set! x 'foo)", "Set! x to symbol foo"),
+        ("x", "Lookup x after set! to foo"),
+        ("(set! yy 99)", "Set! on unbound variable yy (should error)"),
     ];
 
     // Add a binding for symbol lookup test

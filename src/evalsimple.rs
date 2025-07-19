@@ -106,6 +106,7 @@ pub fn eval_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefS
                     "if" => return if_logic(expr, evaluator),
                     "and" => return and_logic(expr, evaluator),
                     "or" => return or_logic(expr, evaluator),
+                    "set!" => return set_logic(expr, evaluator),
                     _ => {}
                 },
                 _ => {}
@@ -242,11 +243,92 @@ pub fn if_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSim
         _ => Err("if: not a pair".to_string()),
     }
 }
-pub fn and_logic(_expr: GcRefSimple, _evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
-    Err("and not implemented yet".to_string())
+pub fn and_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
+    // (and expr1 expr2 ... exprN)
+    match &expr.value {
+        SchemeValueSimple::Pair(_, cdr) => {
+            let mut current = *cdr;
+            let mut last = evaluator.heap.true_simple();
+            loop {
+                match &current.value {
+                    SchemeValueSimple::Nil => break,
+                    SchemeValueSimple::Pair(car, next) => {
+                        let val = eval_logic(*car, evaluator)?;
+                        match &val.value {
+                            SchemeValueSimple::Bool(false) => return Ok(val),
+                            _ => last = val,
+                        }
+                        current = *next;
+                    }
+                    _ => return Err("and: improper list".to_string()),
+                }
+            }
+            Ok(last)
+        }
+        _ => Err("and: not a pair".to_string()),
+    }
 }
-pub fn or_logic(_expr: GcRefSimple, _evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
-    Err("or not implemented yet".to_string())
+
+pub fn or_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
+    // (or expr1 expr2 ... exprN)
+    match &expr.value {
+        SchemeValueSimple::Pair(_, cdr) => {
+            let mut current = *cdr;
+            loop {
+                match &current.value {
+                    SchemeValueSimple::Nil => break,
+                    SchemeValueSimple::Pair(car, next) => {
+                        let val = eval_logic(*car, evaluator)?;
+                        match &val.value {
+                            SchemeValueSimple::Bool(false) => current = *next,
+                            _ => return Ok(val),
+                        }
+                    }
+                    _ => return Err("or: improper list".to_string()),
+                }
+            }
+            Ok(evaluator.heap.false_simple())
+        }
+        _ => Err("or: not a pair".to_string()),
+    }
+}
+
+pub fn set_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
+    // (set! symbol expr)
+    match &expr.value {
+        SchemeValueSimple::Pair(_, cdr) => {
+            // cdr should be (symbol . rest)
+            match &cdr.value {
+                SchemeValueSimple::Pair(sym, rest) => {
+                    // sym should be a symbol
+                    let name = match &sym.value {
+                        SchemeValueSimple::Symbol(s) => s.clone(),
+                        _ => return Err("set!: first argument must be a symbol".to_string()),
+                    };
+                    // rest should be (expr . nil)
+                    match &rest.value {
+                        SchemeValueSimple::Pair(expr_val, tail) => {
+                            match &tail.value {
+                                SchemeValueSimple::Nil => {
+                                    let value = eval_logic(*expr_val, evaluator)?;
+                                    if evaluator.env().get(&name).is_some() {
+                                        evaluator.env_mut().set(name, value);
+                                        Ok(value)
+                                    } else {
+                                        Err("set!: unbound variable".to_string())
+                                    }
+                                }
+                                _ => Err("set!: too many arguments".to_string()),
+                            }
+                        }
+                        _ => Err("set!: missing value expression".to_string()),
+                    }
+                }
+                _ => Err("set!: missing symbol argument".to_string()),
+            }
+        }
+        _ => Err("set!: not a pair".to_string()),
+    }
 }
 
 // ============================================================================
@@ -285,7 +367,7 @@ pub fn is_special_form(func: GcRefSimple) -> Option<&'static str> {
     match &func.value {
         SchemeValueSimple::Symbol(name) => {
             match name.as_str() {
-                "quote" | "if" | "define" | "begin" | "and" | "or" => Some(name),
+                "quote" | "if" | "define" | "begin" | "and" | "or" | "set!" => Some(name),
                 _ => None,
             }
         }
@@ -769,5 +851,138 @@ mod tests {
             SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "2"),
             _ => panic!("Expected integer result for false branch"),
         }
+    }
+
+    #[test]
+    fn test_eval_logic_and_or() {
+        // (and)
+        {
+            let mut evaluator = Evaluator::new();
+            let heap = evaluator.heap_mut();
+            let and_sym = new_symbol_simple(heap, "and");
+            let nil = heap.nil_simple();
+            let and_empty = new_pair_simple(heap, and_sym, nil);
+            let result = eval_logic(and_empty, &mut evaluator).unwrap();
+            assert!(matches!(&result.value, SchemeValueSimple::Bool(true)));
+        }
+        // (and #t 1 2)
+        {
+            let mut evaluator = Evaluator::new();
+            let heap = evaluator.heap_mut();
+            let and_sym = new_symbol_simple(heap, "and");
+            let t = heap.true_simple();
+            let one = new_int_simple(heap, num_bigint::BigInt::from(1));
+            let two = new_int_simple(heap, num_bigint::BigInt::from(2));
+            let nil = heap.nil_simple();
+            let two_pair = new_pair_simple(heap, two, nil);
+            let one_pair = new_pair_simple(heap, one, two_pair);
+            let t_pair = new_pair_simple(heap, t, one_pair);
+            let and_expr = new_pair_simple(heap, and_sym, t_pair);
+            let result = eval_logic(and_expr, &mut evaluator).unwrap();
+            match &result.value {
+                SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "2"),
+                _ => panic!("Expected integer result for and"),
+            }
+        }
+        // (and #t #f 2)
+        {
+            let mut evaluator = Evaluator::new();
+            let heap = evaluator.heap_mut();
+            let and_sym = new_symbol_simple(heap, "and");
+            let t = heap.true_simple();
+            let f = heap.false_simple();
+            let two = new_int_simple(heap, num_bigint::BigInt::from(2));
+            let nil = heap.nil_simple();
+            let two_pair = new_pair_simple(heap, two, nil);
+            let f_pair = new_pair_simple(heap, f, two_pair);
+            let t_pair2 = new_pair_simple(heap, t, f_pair);
+            let and_expr2 = new_pair_simple(heap, and_sym, t_pair2);
+            let result = eval_logic(and_expr2, &mut evaluator).unwrap();
+            assert!(matches!(&result.value, SchemeValueSimple::Bool(false)));
+        }
+        // (or)
+        {
+            let mut evaluator = Evaluator::new();
+            let heap = evaluator.heap_mut();
+            let or_sym = new_symbol_simple(heap, "or");
+            let nil = heap.nil_simple();
+            let or_empty = new_pair_simple(heap, or_sym, nil);
+            let result = eval_logic(or_empty, &mut evaluator).unwrap();
+            assert!(matches!(&result.value, SchemeValueSimple::Bool(false)));
+        }
+        // (or #f 1 2)
+        {
+            let mut evaluator = Evaluator::new();
+            let heap = evaluator.heap_mut();
+            let or_sym = new_symbol_simple(heap, "or");
+            let f = heap.false_simple();
+            let one = new_int_simple(heap, num_bigint::BigInt::from(1));
+            let two = new_int_simple(heap, num_bigint::BigInt::from(2));
+            let nil = heap.nil_simple();
+            let two_pair = new_pair_simple(heap, two, nil);
+            let one_pair = new_pair_simple(heap, one, two_pair);
+            let f_pair = new_pair_simple(heap, f, one_pair);
+            let or_expr = new_pair_simple(heap, or_sym, f_pair);
+            let result = eval_logic(or_expr, &mut evaluator).unwrap();
+            match &result.value {
+                SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "1"),
+                _ => panic!("Expected integer result for or"),
+            }
+        }
+        // (or #f #f 2)
+        {
+            let mut evaluator = Evaluator::new();
+            let heap = evaluator.heap_mut();
+            let or_sym = new_symbol_simple(heap, "or");
+            let f = heap.false_simple();
+            let two = new_int_simple(heap, num_bigint::BigInt::from(2));
+            let nil = heap.nil_simple();
+            let two_pair = new_pair_simple(heap, two, nil);
+            let f_pair2 = new_pair_simple(heap, f, two_pair);
+            let f_pair3 = new_pair_simple(heap, f, f_pair2);
+            let or_expr2 = new_pair_simple(heap, or_sym, f_pair3);
+            let result = eval_logic(or_expr2, &mut evaluator).unwrap();
+            match &result.value {
+                SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "2"),
+                _ => panic!("Expected integer result for or"),
+            }
+        }
+        // (or #f #f #f)
+        {
+            let mut evaluator = Evaluator::new();
+            let heap = evaluator.heap_mut();
+            let or_sym = new_symbol_simple(heap, "or");
+            let f = heap.false_simple();
+            let nil = heap.nil_simple();
+            let f_pair = new_pair_simple(heap, f, nil);
+            let f_pair2 = new_pair_simple(heap, f, f_pair);
+            let f_pair3 = new_pair_simple(heap, f, f_pair2);
+            let or_expr3 = new_pair_simple(heap, or_sym, f_pair3);
+            let result = eval_logic(or_expr3, &mut evaluator).unwrap();
+            assert!(matches!(&result.value, SchemeValueSimple::Bool(false)));
+        }
+    }
+
+    #[test]
+    fn test_eval_logic_set() {
+        let mut evaluator = Evaluator::new();
+        let (symbol, value, set_sym, x_sym, val_123, arg_pair, args, set_expr);
+        {
+            let heap = evaluator.heap_mut();
+            symbol = new_symbol_simple(heap, "x");
+            value = new_int_simple(heap, num_bigint::BigInt::from(22));
+            set_sym = new_symbol_simple(heap, "set!");
+            x_sym = new_symbol_simple(heap, "x");
+            val_123 = new_int_simple(heap, num_bigint::BigInt::from(123));
+            arg_pair = new_pair_simple(heap, val_123, heap.nil_simple());
+            args = new_pair_simple(heap, x_sym, arg_pair);
+            set_expr = new_pair_simple(heap, set_sym, args);
+        }
+        evaluator.env_mut().set("x".to_string(), value);
+        let result = eval_logic(set_expr, &mut evaluator).unwrap();
+        assert_eq!(result.value, SchemeValueSimple::Int(num_bigint::BigInt::from(123)));
+        // Check that the environment was updated
+        let updated = evaluator.env().get("x").unwrap();
+        assert_eq!(updated.value, SchemeValueSimple::Int(num_bigint::BigInt::from(123)));
     }
 } 
