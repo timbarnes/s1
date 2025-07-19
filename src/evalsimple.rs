@@ -1268,7 +1268,7 @@ mod tests {
                 "plus".to_string(),
                 false,
             );
-            let plus_sym = new_symbol_simple(heap, "+");
+            let plus_sym = heap.intern_symbol("+");
             evaluator.env_mut().set_symbol(plus_sym, plus);
         }
         
@@ -1280,7 +1280,7 @@ mod tests {
             // Create (lambda (x) (+ x 1))
             let x_param = new_symbol_simple(heap, "x");
             let one = new_int_simple(heap, num_bigint::BigInt::from(1));
-            let plus_sym = new_symbol_simple(heap, "+");
+            let plus_sym = heap.intern_symbol("+");
             let nil = heap.nil_simple();
             
             // Build (+ x 1)
@@ -1362,7 +1362,7 @@ mod tests {
                 "plus".to_string(),
                 false,
             );
-            let plus_sym = new_symbol_simple(heap, "+");
+            let plus_sym = heap.intern_symbol("+");
             evaluator.env_mut().set_symbol(plus_sym, plus);
         }
         
@@ -1373,7 +1373,7 @@ mod tests {
             let heap = evaluator.heap_mut();
             let x_param = new_symbol_simple(heap, "x");
             let y_param = new_symbol_simple(heap, "y");
-            let plus_sym = new_symbol_simple(heap, "+");
+            let plus_sym = heap.intern_symbol("+");
             let nil = heap.nil_simple();
             
             // Build (+ x y)
@@ -1425,10 +1425,10 @@ mod tests {
         let set_expr;
         {
             let heap = evaluator.heap_mut();
-            symbol = new_symbol_simple(heap, "x");
+            symbol = heap.intern_symbol("x");
             value = new_int_simple(heap, num_bigint::BigInt::from(123));
             set_sym = new_symbol_simple(heap, "set!");
-            x_sym = new_symbol_simple(heap, "x");
+            x_sym = heap.intern_symbol("x");
             val_123 = new_int_simple(heap, num_bigint::BigInt::from(123));
             let nil = heap.nil_simple();
             arg_pair = new_pair_simple(heap, val_123, nil);
