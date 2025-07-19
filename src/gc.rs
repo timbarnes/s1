@@ -280,6 +280,10 @@ pub struct GcHeap {
     /// Root references that keep objects alive
     roots: Vec<GcRef>,
     nil: Option<GcRef>,
+    // Singleton values for SchemeValueSimple
+    nil_simple: Option<GcRefSimple>,
+    true_simple: Option<GcRefSimple>,
+    false_simple: Option<GcRefSimple>,
 }
 
 impl GcHeap {
@@ -298,9 +302,29 @@ impl GcHeap {
             objects: Vec::new(),
             roots: Vec::new(),
             nil: None,
+            nil_simple: None,
+            true_simple: None,
+            false_simple: None,
         };
+        // Allocate singletons for the new system
+        let nil_simple = heap.alloc_simple(GcObjectSimple {
+            value: SchemeValueSimple::Nil,
+            marked: false,
+        });
+        let t = heap.alloc_simple(GcObjectSimple {
+            value: SchemeValueSimple::Bool(true),
+            marked: false,
+        });
+        let f = heap.alloc_simple(GcObjectSimple {
+            value: SchemeValueSimple::Bool(false),
+            marked: false,
+        });
+        heap.nil_simple = Some(nil_simple);
+        heap.true_simple = Some(t);
+        heap.false_simple = Some(f);
+        // Allocate singleton for the old system
         let nil_obj = heap.alloc(SchemeValue::Nil);
-        heap.nil = Some(nil_obj.clone());
+        heap.nil = Some(nil_obj);
         heap
     }
 
@@ -472,11 +496,14 @@ impl GcHeap {
     }
 
     /// Get the nil value using the reference-based system.
-    pub fn nil_simple(&mut self) -> GcRefSimple {
-        // For now, create a new nil object each time
-        // In a real implementation, we'd cache this
-        let nil_obj = GcObjectSimple { value: SchemeValueSimple::Nil, marked: false };
-        self.alloc_simple(nil_obj)
+    pub fn nil_simple(&self) -> GcRefSimple {
+        self.nil_simple.expect("nil_simple not initialized")
+    }
+    pub fn true_simple(&self) -> GcRefSimple {
+        self.true_simple.expect("true_simple not initialized")
+    }
+    pub fn false_simple(&self) -> GcRefSimple {
+        self.false_simple.expect("false_simple not initialized")
     }
 }
 
@@ -1083,6 +1110,7 @@ mod tests {
         // Closure
         let params = vec![new_symbol(&mut heap, "x"), new_symbol(&mut heap, "y")];
         let body = new_symbol(&mut heap, "body");
+        // Use the singleton nil object for env
         let env = heap.nil();
         let clo = new_closure(&mut heap, params.clone(), body.clone(), env.clone());
         let (p, b, e) = as_closure(&clo).unwrap();
@@ -1155,11 +1183,30 @@ mod tests {
     #[test]
     fn test_is_nil() {
         let mut heap = GcHeap::new();
-        let nil = new_nil(&mut heap);
+        // Use the singleton nil object
+        let nil = heap.nil();
         assert!(is_nil(&nil));
 
         let not_nil = new_int(&mut heap, BigInt::from(42));
         assert!(!is_nil(&not_nil));
+    }
+
+    #[test]
+    fn test_singleton_nil_true_false() {
+        let mut heap = GcHeap::new();
+        let nil1 = heap.nil_simple();
+        let nil2 = heap.nil_simple();
+        let t1 = heap.true_simple();
+        let t2 = heap.true_simple();
+        let f1 = heap.false_simple();
+        let f2 = heap.false_simple();
+        assert!(std::ptr::eq(nil1, nil2), "nil_simple should be unique");
+        assert!(std::ptr::eq(t1, t2), "true_simple should be unique");
+        assert!(std::ptr::eq(f1, f2), "false_simple should be unique");
+        // Check values
+        match &nil1.value { SchemeValueSimple::Nil => (), _ => panic!("nil_simple wrong value") }
+        match &t1.value { SchemeValueSimple::Bool(true) => (), _ => panic!("true_simple wrong value") }
+        match &f1.value { SchemeValueSimple::Bool(false) => (), _ => panic!("false_simple wrong value") }
     }
 }
 
