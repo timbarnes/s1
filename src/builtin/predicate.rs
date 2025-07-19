@@ -24,6 +24,8 @@ pub fn type_of(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
         SchemeValue::Primitive { .. } => "primitive",
         SchemeValue::EnvFrame(_) => "env-frame",
         SchemeValue::Nil => "nil",
+        SchemeValue::SpecialForm { .. } => "special-form",
+        _ => "unknown",
     };
     Ok(new_symbol(heap, type_name))
 }

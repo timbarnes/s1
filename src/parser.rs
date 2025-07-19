@@ -182,7 +182,7 @@ mod tests {
     use super::*;
     use crate::io::{Port, PortKind};
     use crate::gc::{as_int, as_symbol, as_string, is_nil, as_pair, as_bool, as_char, as_vector, SchemeValue};
-    use crate::builtin::{register_all, BuiltinKind};
+    use crate::builtin::{register_all};
     use std::collections::HashMap;
 
     #[test]
@@ -336,7 +336,7 @@ mod tests {
         if let SchemeValue::Pair(car, cdr) = &expr.borrow().value {
             if let SchemeValue::Symbol(ref name) = car.borrow().value {
                 if let Some(builtin) = env.get(name) {
-                    if let BuiltinKind::SpecialFormNew(f) = builtin {
+                    if let SchemeValue::SpecialForm { func, .. } = &builtin.borrow().value {
                         let mut args = Vec::new();
                         let mut cur = cdr.clone();
                         loop {
@@ -360,7 +360,7 @@ mod tests {
                         assert!(matches!(&cur.borrow().value, SchemeValue::Nil));
                         // Create a temporary evaluator for the new interface
                         let mut temp_evaluator = crate::eval::Evaluator::new();
-                        let result = f(&mut temp_evaluator, &args).unwrap();
+                        let result = func(&mut temp_evaluator, &args).unwrap();
                         assert_eq!(as_symbol(&result), Some("foo".to_string()));
                     } else {
                         panic!("quote not registered as special form");

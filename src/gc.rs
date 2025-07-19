@@ -69,6 +69,11 @@ pub enum SchemeValue {
         doc: String,
         is_special_form: bool,
     },
+    /// Special forms that need access to the evaluator
+    SpecialForm {
+        func: Rc<dyn Fn(&mut crate::eval::Evaluator, &[GcRef]) -> Result<GcRef, String> + 'static>,
+        doc: String,
+    },
     /// Environment frames (variable bindings)
     EnvFrame(HashMap<String, GcRef>),
     /// Empty list (nil)
@@ -90,6 +95,7 @@ impl std::fmt::Debug for SchemeValue {
             SchemeValue::Bool(b) => write!(f, "Bool({})", b),
             SchemeValue::Char(c) => write!(f, "Char({:?})", c),
             SchemeValue::Primitive { .. } => write!(f, "Primitive(<builtin>)"),
+            SchemeValue::SpecialForm { .. } => write!(f, "SpecialForm(<builtin>)"),
             SchemeValue::EnvFrame(map) => f.debug_map().entries(map.iter()).finish(),
             SchemeValue::Nil => write!(f, "Nil"),
         }
@@ -132,6 +138,7 @@ impl PartialEq for SchemeValue {
             (SchemeValue::Char(a), SchemeValue::Char(b)) => a == b,
             // For Primitive and Port, just compare type (not function pointer or port identity)
             (SchemeValue::Primitive { .. }, SchemeValue::Primitive { .. }) => true,
+            (SchemeValue::SpecialForm { .. }, SchemeValue::SpecialForm { .. }) => true,
             (SchemeValue::EnvFrame(a), SchemeValue::EnvFrame(b)) => {
                 if a.len() != b.len() { return false; }
                 for (k, va) in a.iter() {
@@ -542,10 +549,35 @@ pub fn new_primitive(
 /// ```
 pub fn new_special_form(
     heap: &mut GcHeap,
-    f: Rc<dyn Fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>>,
+    f: Rc<dyn Fn(&mut crate::eval::Evaluator, &[GcRef]) -> Result<GcRef, String>>,
     doc: String,
 ) -> GcRef {
-    heap.alloc(SchemeValue::Primitive { func: f, doc, is_special_form: true })
+    heap.alloc(SchemeValue::SpecialForm { func: f, doc })
+}
+
+/// Create a new special form with evaluator access on the heap.
+///
+/// This function creates special forms that can access the evaluator directly,
+/// allowing them to use the same heap and environment as all other evaluations.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_special_form_with_evaluator};
+/// use std::rc::Rc;
+///
+/// let mut heap = GcHeap::new();
+/// let define_form = new_special_form_with_evaluator(&mut heap, Rc::new(|evaluator, args| {
+///     // Implementation that can access evaluator.heap and evaluator.env
+///     Ok(new_bool(&mut evaluator.heap, true))
+/// }), "define special form".to_string());
+/// ```
+pub fn new_special_form_with_evaluator(
+    heap: &mut GcHeap,
+    f: Rc<dyn Fn(&mut crate::eval::Evaluator, &[GcRef]) -> Result<GcRef, String> + 'static>,
+    doc: String,
+) -> GcRef {
+    heap.alloc(SchemeValue::SpecialForm { func: f, doc })
 }
 
 /// Create a new environment frame on the heap.
@@ -751,6 +783,22 @@ pub fn as_char(obj: &GcRef) -> Option<char> {
 /// ```
 pub fn is_primitive(obj: &GcRef) -> bool {
     matches!(&obj.borrow().value, SchemeValue::Primitive { .. })
+}
+
+/// Check if a GcRef contains a special form.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::{GcHeap, new_special_form, is_special_form};
+/// use std::rc::Rc;
+///
+/// let mut heap = GcHeap::new();
+/// let special_form = new_special_form(&mut heap, Rc::new(|_, _| Ok(new_nil(&mut heap))), "if special form".to_string());
+/// assert!(is_special_form(&special_form));
+/// ```
+pub fn is_special_form(obj: &GcRef) -> bool {
+    matches!(&obj.borrow().value, SchemeValue::SpecialForm { .. })
 }
 
 /// Extract an environment frame from a GcRef, if it contains one.

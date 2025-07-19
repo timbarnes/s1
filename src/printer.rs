@@ -55,5 +55,6 @@ pub fn scheme_display(val: &SchemeValue) -> String {
         SchemeValue::Primitive { .. } => "#<procedure>".to_string(),
         SchemeValue::Closure { .. } => "#<closure>".to_string(),
         SchemeValue::EnvFrame(_) => "#<env-frame>".to_string(),
+        SchemeValue::SpecialForm { .. } => "#<special-form>".to_string(),
     }
 } 

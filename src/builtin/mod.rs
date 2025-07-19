@@ -2,19 +2,12 @@ pub mod number;
 pub mod predicate;
 
 use crate::gc::{GcHeap, GcRef, new_string, new_bool};
+use std::rc::Rc;
 use num_bigint::BigInt;
 use crate::gc::SchemeValue;
 use number::{plus_builtin, minus_builtin, times_builtin, div_builtin, mod_builtin};
 use crate::printer::scheme_display;
 use crate::eval::Evaluator;
-
-pub enum BuiltinKind {
-    // New special form signature using Evaluator
-    SpecialFormNew(fn(&mut Evaluator, &[GcRef]) -> Result<GcRef, String>),
-    Normal(fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>),
-}
-
-// No Clone implementation needed for BuiltinKind with function pointers
 
 /// New quote handler using Evaluator interface
 pub fn quote_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
@@ -143,24 +136,28 @@ pub fn quit_builtin(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef]) -> 
     std::process::exit(0);
 }
 
-pub fn register_all(heap: &mut crate::gc::GcHeap, env: &mut std::collections::HashMap<String, BuiltinKind>) {
-    env.insert("number?".to_string(), BuiltinKind::Normal(predicate::number_q));
-    env.insert("help".to_string(), BuiltinKind::Normal(help_builtin));
-    env.insert("quote".to_string(), BuiltinKind::SpecialFormNew(quote_handler_new));
-    env.insert("if".to_string(), BuiltinKind::SpecialFormNew(if_handler_new));
-    env.insert("begin".to_string(), BuiltinKind::SpecialFormNew(begin_handler_new));
-    env.insert("and".to_string(), BuiltinKind::SpecialFormNew(and_handler_new));
-    env.insert("or".to_string(), BuiltinKind::SpecialFormNew(or_handler_new));
-    env.insert("define".to_string(), BuiltinKind::SpecialFormNew(define_handler_new));
-    env.insert("type-of".to_string(), BuiltinKind::Normal(predicate::type_of));
-    env.insert("+".to_string(), BuiltinKind::Normal(plus_builtin));
-    env.insert("-".to_string(), BuiltinKind::Normal(minus_builtin));
-    env.insert("*".to_string(), BuiltinKind::Normal(times_builtin));
-    env.insert("/".to_string(), BuiltinKind::Normal(div_builtin));
-    env.insert("mod".to_string(), BuiltinKind::Normal(mod_builtin));
-    env.insert("display".to_string(), BuiltinKind::Normal(display_builtin));
-    env.insert("newline".to_string(), BuiltinKind::Normal(newline_builtin));
-    env.insert("quit".to_string(), BuiltinKind::Normal(quit_builtin));
+pub fn register_all(heap: &mut crate::gc::GcHeap, env: &mut std::collections::HashMap<String, crate::gc::GcRef>) {
+    // Convert normal functions to GcRef objects
+    env.insert("number?".to_string(), crate::gc::new_primitive(heap, Rc::new(predicate::number_q), "number?: returns #t if argument is a number".to_string(), false));
+    env.insert("help".to_string(), crate::gc::new_primitive(heap, Rc::new(help_builtin), "help: returns help for a symbol".to_string(), false));
+    env.insert("type-of".to_string(), crate::gc::new_primitive(heap, Rc::new(predicate::type_of), "type-of: returns the type of an object".to_string(), false));
+    env.insert("+".to_string(), crate::gc::new_primitive(heap, Rc::new(plus_builtin), "+: adds numbers".to_string(), false));
+    env.insert("-".to_string(), crate::gc::new_primitive(heap, Rc::new(minus_builtin), "-: subtracts numbers".to_string(), false));
+    env.insert("*".to_string(), crate::gc::new_primitive(heap, Rc::new(times_builtin), "*: multiplies numbers".to_string(), false));
+    env.insert("/".to_string(), crate::gc::new_primitive(heap, Rc::new(div_builtin), "/: divides numbers".to_string(), false));
+    env.insert("mod".to_string(), crate::gc::new_primitive(heap, Rc::new(mod_builtin), "mod: returns remainder of division".to_string(), false));
+    env.insert("display".to_string(), crate::gc::new_primitive(heap, Rc::new(display_builtin), "display: displays a value".to_string(), false));
+    env.insert("newline".to_string(), crate::gc::new_primitive(heap, Rc::new(newline_builtin), "newline: prints a newline".to_string(), false));
+    env.insert("quit".to_string(), crate::gc::new_primitive(heap, Rc::new(quit_builtin), "quit: exits the interpreter".to_string(), false));
+    
+    // Convert special forms to GcRef objects
+    // Use the new special form approach that gives direct access to the evaluator
+    env.insert("quote".to_string(), crate::gc::new_special_form_with_evaluator(heap, Rc::new(quote_handler_new), "quote: returns its argument unevaluated".to_string()));
+    env.insert("if".to_string(), crate::gc::new_special_form_with_evaluator(heap, Rc::new(if_handler_new), "if: conditional expression".to_string()));
+    env.insert("begin".to_string(), crate::gc::new_special_form_with_evaluator(heap, Rc::new(begin_handler_new), "begin: evaluates expressions in sequence".to_string()));
+    env.insert("and".to_string(), crate::gc::new_special_form_with_evaluator(heap, Rc::new(and_handler_new), "and: logical and".to_string()));
+    env.insert("or".to_string(), crate::gc::new_special_form_with_evaluator(heap, Rc::new(or_handler_new), "or: logical or".to_string()));
+    env.insert("define".to_string(), crate::gc::new_special_form_with_evaluator(heap, Rc::new(define_handler_new), "define: defines a variable".to_string()));
     // Add more builtins and special forms here
 }
 
