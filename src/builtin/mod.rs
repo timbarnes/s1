@@ -15,7 +15,7 @@ use crate::eval::Evaluator;
 use crate::eval::EvaluatorSimple;
 
 /// New quote handler using Evaluator interface
-pub fn quote_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
+pub fn quote_handler_new(_evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 1 {
         Err("quote: expected exactly 1 argument".to_string())
     } else {
@@ -24,25 +24,25 @@ pub fn quote_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<Gc
 }
 
 /// New and handler using Evaluator interface
-pub fn and_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
+pub fn and_handler_new(_evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
     if args.is_empty() {
         // (and) returns #t
-        return Ok(new_bool(&mut evaluator.heap, true));
+        return Ok(new_bool(&mut _evaluator.heap, true));
     }
     Ok(args[0].clone())
 }
 
 /// New or handler using Evaluator interface
-pub fn or_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
+pub fn or_handler_new(_evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
     if args.is_empty() {
         // (or) returns #f
-        return Ok(new_bool(&mut evaluator.heap, false));
+        return Ok(new_bool(&mut _evaluator.heap, false));
     }
     Ok(args[0].clone())
 }
 
 /// New define handler using Evaluator interface
-pub fn define_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
+pub fn define_handler_new(_evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 2 {
         return Err("define: expected exactly 2 arguments (symbol expr)".to_string());
     }
@@ -58,17 +58,17 @@ pub fn define_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<G
     let expr = &args[1];
     
     // Evaluate the expression using the evaluator's eval_service
-    let evaluated_value = evaluator.eval_service(expr)?;
+    let evaluated_value = _evaluator.eval_service(expr)?;
     
     // Store the evaluated value in the evaluator's environment
-    evaluator.insert_global_binding(symbol_name.clone(), evaluated_value.clone());
+    _evaluator.insert_global_binding(symbol_name.clone(), evaluated_value.clone());
     
     // Return the evaluated value
     Ok(evaluated_value)
 }
 
 /// New if handler using Evaluator interface
-pub fn if_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
+pub fn if_handler_new(_evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 2 && args.len() != 3 {
         return Err("if: expected 2 or 3 arguments".to_string());
     }
@@ -79,7 +79,7 @@ pub fn if_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef
 }
 
 /// New begin handler using Evaluator interface
-pub fn begin_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
+pub fn begin_handler_new(_evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
     if args.is_empty() {
         return Err("begin: expected at least 1 argument".to_string());
     }
@@ -133,7 +133,7 @@ pub fn newline_builtin(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef]) 
 /// 
 /// Exits the Scheme interpreter with exit code 0.
 /// This works in both programs and the REPL.
-pub fn quit_builtin(heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef]) -> Result<crate::gc::GcRef, String> {
+pub fn quit_builtin(_heap: &mut crate::gc::GcHeap, args: &[crate::gc::GcRef]) -> Result<crate::gc::GcRef, String> {
     if !args.is_empty() {
         return Err("quit: expected 0 arguments".to_string());
     }
@@ -181,7 +181,7 @@ pub fn help_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> 
 // ============================================================================
 
 /// Simple quote handler using EvaluatorSimple interface
-pub fn quote_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+pub fn quote_handler_simple(_evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if args.len() != 1 {
         Err("quote: expected exactly 1 argument".to_string())
     } else {
@@ -190,25 +190,25 @@ pub fn quote_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple
 }
 
 /// Simple and handler using EvaluatorSimple interface
-pub fn and_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+pub fn and_handler_simple(_evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if args.is_empty() {
         // (and) returns #t
-        return Ok(evaluator.heap.true_simple());
+        return Ok(_evaluator.heap.true_simple());
     }
     Ok(args[0])
 }
 
 /// Simple or handler using EvaluatorSimple interface
-pub fn or_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+pub fn or_handler_simple(_evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if args.is_empty() {
         // (or) returns #f
-        return Ok(evaluator.heap.false_simple());
+        return Ok(_evaluator.heap.false_simple());
     }
     Ok(args[0])
 }
 
 /// Simple define handler using EvaluatorSimple interface
-pub fn define_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+pub fn define_handler_simple(_evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if args.len() != 2 {
         return Err("define: expected exactly 2 arguments (symbol expr)".to_string());
     }
@@ -225,14 +225,14 @@ pub fn define_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimpl
     
     // For now, just store the expression as-is without evaluation
     // TODO: Implement proper evaluation when we have the evaluator interface
-    evaluator.insert_global_binding(symbol_name.clone(), *expr);
+    _evaluator.insert_global_binding(symbol_name.clone(), *expr);
     
     // Return the expression
     Ok(*expr)
 }
 
 /// Simple if handler using EvaluatorSimple interface
-pub fn if_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+pub fn if_handler_simple(_evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if args.len() != 2 && args.len() != 3 {
         return Err("if: expected 2 or 3 arguments".to_string());
     }
@@ -243,7 +243,7 @@ pub fn if_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) 
 }
 
 /// Simple begin handler using EvaluatorSimple interface
-pub fn begin_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+pub fn begin_handler_simple(_evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if args.is_empty() {
         return Err("begin: expected at least 1 argument".to_string());
     }
@@ -320,7 +320,7 @@ pub fn help_builtin_simple(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result<Gc
     }
 }
 
-/// Register all simple builtins in the environment
+/// Register all simple builtins in the environment (old flat HashMap version)
 pub fn register_all_simple(heap: &mut GcHeap, env: &mut std::collections::HashMap<String, GcRefSimple>) {
     // Register basic builtins using the new simple primitive system
     env.insert("number?".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(number_q_simple), "number?: returns #t if argument is a number".to_string(), false));
@@ -334,6 +334,25 @@ pub fn register_all_simple(heap: &mut GcHeap, env: &mut std::collections::HashMa
     env.insert("newline".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(newline_builtin_simple), "newline: prints a newline".to_string(), false));
     env.insert("quit".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(quit_builtin_simple), "quit: exits the interpreter".to_string(), false));
     env.insert("help".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(help_builtin_simple), "help: returns help for a symbol".to_string(), false));
+    
+    // Note: Special forms are left for later as requested
+    // TODO: Add special forms (quote, if, begin, and, or, define) when ready
+}
+
+/// Register all simple builtins in the frame-based environment
+pub fn register_all_simple_frames(heap: &mut GcHeap, env: &mut crate::env::Environment) {
+    // Register basic builtins using the new simple primitive system
+    env.add_binding("number?".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(number_q_simple), "number?: returns #t if argument is a number".to_string(), false));
+    env.add_binding("type-of".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(type_of_simple), "type-of: returns the type of an object".to_string(), false));
+    env.add_binding("+".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(plus_builtin_simple), "+: adds numbers".to_string(), false));
+    env.add_binding("-".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(minus_builtin_simple), "-: subtracts numbers".to_string(), false));
+    env.add_binding("*".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(times_builtin_simple), "*: multiplies numbers".to_string(), false));
+    env.add_binding("/".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(div_builtin_simple), "/: divides numbers".to_string(), false));
+    env.add_binding("mod".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(mod_builtin_simple), "mod: returns remainder of division".to_string(), false));
+    env.add_binding("display".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(display_builtin_simple), "display: displays a value".to_string(), false));
+    env.add_binding("newline".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(newline_builtin_simple), "newline: prints a newline".to_string(), false));
+    env.add_binding("quit".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(quit_builtin_simple), "quit: exits the interpreter".to_string(), false));
+    env.add_binding("help".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(help_builtin_simple), "help: returns help for a symbol".to_string(), false));
     
     // Note: Special forms are left for later as requested
     // TODO: Add special forms (quote, if, begin, and, or, define) when ready

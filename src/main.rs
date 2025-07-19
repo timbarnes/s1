@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 mod gc;
 mod io;
 mod tokenizer;
@@ -10,7 +11,7 @@ mod env;
 use crate::gc::GcHeap;
 use crate::parser::ParserSimple;
 use crate::eval::EvaluatorSimple;
-use crate::builtin::register_all_simple;
+use crate::builtin::register_all_simple_frames;
 use crate::io::{Port, PortKind};
 use crate::evalsimple::{Evaluator, eval_logic};
 use crate::env::Environment;
@@ -82,7 +83,7 @@ fn main() {
     let args: Args = argh::from_env();
     let mut heap = GcHeap::new();
     let mut evaluator = Evaluator::new();
-    register_all_simple(&mut heap, evaluator.env_mut().bindings_mut());
+    register_all_simple_frames(&mut heap, evaluator.env_mut());
 
     // File loading uses a port stack
     let mut port_stack = PortStack::new(Port {
@@ -139,26 +140,20 @@ fn repl(
         println!("Welcome to the Scheme REPL (EvaluatorSimple, new GC)");
     }
     loop {
+        // Prompt if we're on stdin and about to read
         if matches!(port_stack.current().kind, PortKind::Stdin) {
             print!("s1> ");
             stdio::stdout().flush().unwrap();
-            let mut input = String::new();
-            if stdin.read_line(&mut input).unwrap() == 0 {
-                // EOF on stdin
-                break;
-            }
-            if input.trim().is_empty() { continue; }
-            port_stack.current_mut().kind = PortKind::StringPortInput {
-                content: input.clone(),
-                pos: 0,
-            };
         }
+        
         let parse_result = parser.parse(heap, port_stack.current_mut());
         match parse_result {
             Ok(expr) => {
                 match eval_logic(expr, evaluator) {
                     Ok(result) => {
-                        println!("=> {}", print_scheme_value(&result.value));
+                        if interactive {
+                            println!("=> {}", print_scheme_value(&result.value));
+                        }
                     }
                     Err(e) => println!("Evaluation error: {}", e),
                 }
@@ -170,7 +165,24 @@ fn repl(
                 // If we pop to stdin, set interactive mode
                 interactive = matches!(port_stack.current().kind, PortKind::Stdin);
             }
-            Err(e) => println!("Parse error: {}", e),
+            Err(e) => {
+                // For stdin, read input and create a new port
+                if matches!(port_stack.current().kind, PortKind::Stdin) {
+                    let mut input = String::new();
+                    if stdin.read_line(&mut input).unwrap() == 0 {
+                        // EOF on stdin
+                        break;
+                    }
+                    if input.trim().is_empty() { continue; }
+                    // Replace the current port with the new input
+                    port_stack.current_mut().kind = PortKind::StringPortInput {
+                        content: input,
+                        pos: 0,
+                    };
+                } else {
+                    println!("Parse error: {}", e);
+                }
+            }
         }
     }
 }
