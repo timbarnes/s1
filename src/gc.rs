@@ -302,6 +302,8 @@ pub struct GcHeap {
     free_list_simple: Vec<GcObjectSimple>,
     // All allocated GcRefSimple objects (for potential future GC)
     objects_simple: Vec<GcRefSimple>,
+    // Symbol table for interning symbols (name -> symbol object)
+    symbol_table: HashMap<String, GcRefSimple>,
 }
 
 impl GcHeap {
@@ -325,6 +327,7 @@ impl GcHeap {
             false_simple: None,
             free_list_simple: Vec::new(),
             objects_simple: Vec::new(),
+            symbol_table: HashMap::new(),
         };
         
         // Pre-allocate objects for the free list
@@ -555,6 +558,54 @@ impl GcHeap {
     /// Get statistics about the simple allocation system
     pub fn simple_stats(&self) -> (usize, usize) {
         (self.objects_simple.len(), self.free_list_simple.len())
+    }
+
+    /// Intern a symbol by name, returning the same symbol object for the same name.
+    ///
+    /// This ensures that symbols with the same name are the same object,
+    /// enabling fast comparison and memory efficiency.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use s1::gc::GcHeap;
+    ///
+    /// let mut heap = GcHeap::new();
+    /// let sym1 = heap.intern_symbol("foo");
+    /// let sym2 = heap.intern_symbol("foo");
+    /// assert!(std::ptr::eq(sym1, sym2)); // Same object
+    /// ```
+    pub fn intern_symbol(&mut self, name: &str) -> GcRefSimple {
+        if let Some(existing_symbol) = self.symbol_table.get(name) {
+            *existing_symbol
+        } else {
+            // Create new symbol and add to table
+            let new_symbol = self.alloc_simple(GcObjectSimple {
+                value: SchemeValueSimple::Symbol(name.to_string()),
+                marked: false,
+            });
+            self.symbol_table.insert(name.to_string(), new_symbol);
+            new_symbol
+        }
+    }
+
+    /// Get statistics about the symbol table.
+    ///
+    /// Returns the number of interned symbols.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use s1::gc::GcHeap;
+    ///
+    /// let mut heap = GcHeap::new();
+    /// heap.intern_symbol("foo");
+    /// heap.intern_symbol("bar");
+    /// heap.intern_symbol("foo"); // Should not create new symbol
+    /// assert_eq!(heap.symbol_table_stats(), 2);
+    /// ```
+    pub fn symbol_table_stats(&self) -> usize {
+        self.symbol_table.len()
     }
 }
 
@@ -1294,19 +1345,70 @@ mod tests {
     #[test]
     fn test_singleton_nil_true_false() {
         let mut heap = GcHeap::new();
+        
+        // Test that singletons are the same objects
         let nil1 = heap.nil_simple();
         let nil2 = heap.nil_simple();
-        let t1 = heap.true_simple();
-        let t2 = heap.true_simple();
-        let f1 = heap.false_simple();
-        let f2 = heap.false_simple();
-        assert!(std::ptr::eq(nil1, nil2), "nil_simple should be unique");
-        assert!(std::ptr::eq(t1, t2), "true_simple should be unique");
-        assert!(std::ptr::eq(f1, f2), "false_simple should be unique");
-        // Check values
-        match &nil1.value { SchemeValueSimple::Nil => (), _ => panic!("nil_simple wrong value") }
-        match &t1.value { SchemeValueSimple::Bool(true) => (), _ => panic!("true_simple wrong value") }
-        match &f1.value { SchemeValueSimple::Bool(false) => (), _ => panic!("false_simple wrong value") }
+        assert!(std::ptr::eq(nil1, nil2));
+        
+        let true1 = heap.true_simple();
+        let true2 = heap.true_simple();
+        assert!(std::ptr::eq(true1, true2));
+        
+        let false1 = heap.false_simple();
+        let false2 = heap.false_simple();
+        assert!(std::ptr::eq(false1, false2));
+        
+        // Test that they're different from each other
+        assert!(!std::ptr::eq(nil1, true1));
+        assert!(!std::ptr::eq(nil1, false1));
+        assert!(!std::ptr::eq(true1, false1));
+        
+        // Test their values
+        match &nil1.value {
+            SchemeValueSimple::Nil => {},
+            _ => panic!("nil should be Nil"),
+        }
+        match &true1.value {
+            SchemeValueSimple::Bool(true) => {},
+            _ => panic!("true should be Bool(true)"),
+        }
+        match &false1.value {
+            SchemeValueSimple::Bool(false) => {},
+            _ => panic!("false should be Bool(false)"),
+        }
+    }
+
+    #[test]
+    fn test_symbol_interning() {
+        let mut heap = GcHeap::new();
+        
+        // Test that same name returns same object
+        let sym1 = heap.intern_symbol("foo");
+        let sym2 = heap.intern_symbol("foo");
+        assert!(std::ptr::eq(sym1, sym2), "Same symbol name should return same object");
+        
+        // Test that different names return different objects
+        let sym3 = heap.intern_symbol("bar");
+        assert!(!std::ptr::eq(sym1, sym3), "Different symbol names should return different objects");
+        
+        // Test symbol table statistics
+        assert_eq!(heap.symbol_table_stats(), 2, "Should have 2 unique symbols");
+        
+        // Test that re-interned symbols don't increase the count
+        let sym4 = heap.intern_symbol("foo");
+        assert!(std::ptr::eq(sym1, sym4), "Re-interned symbol should be same object");
+        assert_eq!(heap.symbol_table_stats(), 2, "Count should not increase for existing symbols");
+        
+        // Test symbol values
+        match &sym1.value {
+            SchemeValueSimple::Symbol(name) => assert_eq!(name, "foo"),
+            _ => panic!("Should be a symbol"),
+        }
+        match &sym3.value {
+            SchemeValueSimple::Symbol(name) => assert_eq!(name, "bar"),
+            _ => panic!("Should be a symbol"),
+        }
     }
 }
 
