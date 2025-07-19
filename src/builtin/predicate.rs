@@ -1,4 +1,5 @@
 use crate::gc::{GcHeap, GcRef, SchemeValue, new_bool, new_symbol};
+use crate::gc::{GcRefSimple, new_bool_simple, new_symbol_simple};
 
 pub fn number_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     let arg = args.get(0).ok_or("number?: expected 1 argument")?;
@@ -30,10 +31,45 @@ pub fn type_of(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     Ok(new_symbol(heap, type_name))
 }
 
+// ============================================================================
+// SIMPLE PREDICATE BUILTINS (Reference-based GC system)
+// ============================================================================
+
+pub fn number_q_simple(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+    let arg = args.get(0).ok_or("number?: expected 1 argument")?;
+    let is_number = match &arg.value {
+        SchemeValue::Int(_) | SchemeValue::Float(_) => true,
+        _ => false,
+    };
+    Ok(new_bool_simple(heap, is_number))
+}
+
+pub fn type_of_simple(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+    let arg = args.get(0).ok_or("type-of: expected 1 argument")?;
+    let type_name = match &arg.value {
+        SchemeValue::Int(_) => "integer",
+        SchemeValue::Float(_) => "float",
+        SchemeValue::Symbol(_) => "symbol",
+        SchemeValue::Pair(_, _) => "pair",
+        SchemeValue::Str(_) => "string",
+        SchemeValue::Vector(_) => "vector",
+        SchemeValue::Closure { .. } => "closure",
+        SchemeValue::Bool(_) => "boolean",
+        SchemeValue::Char(_) => "char",
+        SchemeValue::Primitive { .. } => "primitive",
+        SchemeValue::EnvFrame(_) => "env-frame",
+        SchemeValue::Nil => "nil",
+        SchemeValue::SpecialForm { .. } => "special-form",
+        _ => "unknown",
+    };
+    Ok(new_symbol_simple(heap, type_name))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::gc::{GcHeap, new_int, new_float, new_symbol, new_pair, new_string, new_vector, new_bool, new_char, new_primitive, new_env_frame, new_nil};
+    use crate::gc::{new_int_simple, new_float_simple, new_symbol_simple};
     use std::rc::Rc;
     use num_bigint::BigInt;
     
@@ -91,6 +127,87 @@ mod tests {
                 _ => panic!("unexpected symbol from type_of: {}", s),
             },
             _ => panic!("type_of did not return a symbol"),
+        }
+    }
+
+    // ============================================================================
+    // TESTS FOR SIMPLE PREDICATE BUILTINS (Reference-based GC system)
+    // ============================================================================
+
+    #[test]
+    fn test_number_q_simple() {
+        let mut heap = GcHeap::new();
+        
+        // Test with integer
+        let int_val = new_int_simple(&mut heap, BigInt::from(42));
+        let result = number_q_simple(&mut heap, &[int_val]);
+        assert!(result.is_ok());
+        assert!(matches!(&result.unwrap().value, SchemeValue::Bool(true)));
+        
+        // Test with float
+        let float_val = new_float_simple(&mut heap, 3.14);
+        let result = number_q_simple(&mut heap, &[float_val]);
+        assert!(result.is_ok());
+        assert!(matches!(&result.unwrap().value, SchemeValue::Bool(true)));
+        
+        // Test with non-number
+        let sym_val = new_symbol_simple(&mut heap, "foo");
+        let result = number_q_simple(&mut heap, &[sym_val]);
+        assert!(result.is_ok());
+        assert!(matches!(&result.unwrap().value, SchemeValue::Bool(false)));
+        
+        // Test error case: no arguments
+        let result = number_q_simple(&mut heap, &[]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expected 1 argument"));
+    }
+
+    #[test]
+    fn test_type_of_simple() {
+        let mut heap = GcHeap::new();
+        
+        // Test with integer
+        let int_val = new_int_simple(&mut heap, BigInt::from(42));
+        let result = type_of_simple(&mut heap, &[int_val]);
+        assert!(result.is_ok());
+        assert_eq!(as_type_simple(&result.unwrap()), "integer");
+        
+        // Test with float
+        let float_val = new_float_simple(&mut heap, 3.14);
+        let result = type_of_simple(&mut heap, &[float_val]);
+        assert!(result.is_ok());
+        assert_eq!(as_type_simple(&result.unwrap()), "float");
+        
+        // Test with symbol
+        let sym_val = new_symbol_simple(&mut heap, "foo");
+        let result = type_of_simple(&mut heap, &[sym_val]);
+        assert!(result.is_ok());
+        assert_eq!(as_type_simple(&result.unwrap()), "symbol");
+        
+        // Test error case: no arguments
+        let result = type_of_simple(&mut heap, &[]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expected 1 argument"));
+    }
+
+    fn as_type_simple(val: &GcRefSimple) -> &'static str {
+        match &val.value {
+            SchemeValue::Symbol(s) => match s.as_str() {
+                "integer" => "integer",
+                "float" => "float",
+                "symbol" => "symbol",
+                "pair" => "pair",
+                "string" => "string",
+                "vector" => "vector",
+                "closure" => "closure",
+                "boolean" => "boolean",
+                "char" => "char",
+                "primitive" => "primitive",
+                "env-frame" => "env-frame",
+                "nil" => "nil",
+                _ => panic!("unexpected symbol from type_of_simple: {}", s),
+            },
+            _ => panic!("type_of_simple did not return a symbol"),
         }
     }
 } 

@@ -2,12 +2,14 @@ pub mod number;
 pub mod predicate;
 
 use crate::gc::{GcHeap, GcRef, new_string, new_bool};
+use crate::gc::{GcRefSimple, new_string_simple, new_bool_simple, new_int_simple, new_float_simple, new_symbol_simple};
 use std::rc::Rc;
 use num_bigint::BigInt;
 use crate::gc::SchemeValue;
 use number::{plus_builtin, minus_builtin, times_builtin, div_builtin, mod_builtin};
 use crate::printer::scheme_display;
 use crate::eval::Evaluator;
+use crate::eval::EvaluatorSimple;
 
 /// New quote handler using Evaluator interface
 pub fn quote_handler_new(evaluator: &mut Evaluator, args: &[GcRef]) -> Result<GcRef, String> {
@@ -176,6 +178,161 @@ pub fn help_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> 
         Err("help: expected 1 argument".to_string())
     }
 } 
+
+// ============================================================================
+// SIMPLE BUILTINS (Reference-based GC system)
+// ============================================================================
+
+/// Simple quote handler using EvaluatorSimple interface
+pub fn quote_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+    if args.len() != 1 {
+        Err("quote: expected exactly 1 argument".to_string())
+    } else {
+        Ok(args[0])
+    }
+}
+
+/// Simple and handler using EvaluatorSimple interface
+pub fn and_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+    if args.is_empty() {
+        // (and) returns #t
+        return Ok(new_bool_simple(&mut evaluator.heap, true));
+    }
+    Ok(args[0])
+}
+
+/// Simple or handler using EvaluatorSimple interface
+pub fn or_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+    if args.is_empty() {
+        // (or) returns #f
+        return Ok(new_bool_simple(&mut evaluator.heap, false));
+    }
+    Ok(args[0])
+}
+
+/// Simple define handler using EvaluatorSimple interface
+pub fn define_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+    if args.len() != 2 {
+        return Err("define: expected exactly 2 arguments (symbol expr)".to_string());
+    }
+    
+    // First argument should be a symbol
+    let symbol = &args[0];
+    let symbol_name = match &symbol.value {
+        SchemeValue::Symbol(name) => name.clone(),
+        _ => return Err("define: first argument must be a symbol".to_string()),
+    };
+    
+    // Second argument is the expression to evaluate
+    let expr = &args[1];
+    
+    // Evaluate the expression using the evaluator's eval_service
+    let evaluated_value = evaluator.eval_service(expr)?;
+    
+    // Store the evaluated value in the evaluator's environment
+    evaluator.insert_global_binding(symbol_name.clone(), evaluated_value);
+    
+    // Return the evaluated value
+    Ok(evaluated_value)
+}
+
+/// Simple if handler using EvaluatorSimple interface
+pub fn if_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+    if args.len() != 2 && args.len() != 3 {
+        return Err("if: expected 2 or 3 arguments".to_string());
+    }
+    
+    // For now, just return the test expression
+    // TODO: Implement proper evaluation with environment
+    Ok(args[0])
+}
+
+/// Simple begin handler using EvaluatorSimple interface
+pub fn begin_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+    if args.is_empty() {
+        return Err("begin: expected at least 1 argument".to_string());
+    }
+    
+    // For now, just return the last expression
+    // TODO: Implement proper evaluation with environment
+    Ok(args[args.len()-1])
+}
+
+/// Simple display builtin using reference-based GC system
+pub fn display_builtin_simple(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+    if args.len() < 1 || args.len() > 2 {
+        return Err("display: expected 1 or 2 arguments".to_string());
+    }
+    
+    let val = &args[0];
+    let s = scheme_display(&val.value);
+    
+    // If a port is provided as the second argument, write to it
+    if args.len() == 2 {
+        let _port_arg = &args[1];
+        // For now, we'll just write to stdout since we don't have port objects in GC yet
+        // In a full implementation, we'd check if port_arg is a port and write to it
+        print!("{}", s);
+        use std::io::Write;
+        std::io::stdout().flush().unwrap();
+    } else {
+        // Default behavior: write to stdout
+        print!("{}", s);
+        use std::io::Write;
+        std::io::stdout().flush().unwrap();
+    }
+    
+    Ok(*val)
+}
+
+/// Simple newline builtin using reference-based GC system
+pub fn newline_builtin_simple(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+    if args.len() > 1 {
+        return Err("newline: expected 0 or 1 arguments".to_string());
+    }
+    
+    // For now, just print a newline to stdout
+    // In a full implementation, we'd write to the specified port
+    println!();
+    
+    // Return undefined (we'll use #f for now)
+    Ok(new_bool_simple(heap, false))
+}
+
+/// Simple quit builtin using reference-based GC system
+pub fn quit_builtin_simple(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+    if !args.is_empty() {
+        return Err("quit: expected 0 arguments".to_string());
+    }
+    
+    // Exit the system cleanly
+    std::process::exit(0);
+}
+
+/// Simple help builtin using reference-based GC system
+pub fn help_builtin_simple(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+    if let Some(arg) = args.get(0) {
+        if let SchemeValue::Symbol(sym) = &arg.value {
+            // In a real implementation, you would have access to the environment here.
+            // For now, return a placeholder string.
+            Ok(new_string_simple(heap, &format!("Help for {}: ...", sym)))
+        } else {
+            Err("help: argument must be a symbol".to_string())
+        }
+    } else {
+        Err("help: expected 1 argument".to_string())
+    }
+}
+
+/// Register all simple builtins in the environment
+pub fn register_all_simple(heap: &mut GcHeap, env: &mut std::collections::HashMap<String, GcRefSimple>) {
+    // For now, we'll just register the simple builtins that don't require complex function objects
+    // TODO: Create simple versions of primitive functions and special forms
+    
+    // Note: This is a placeholder. In a full implementation, we'd need to create
+    // simple versions of primitive functions that work with GcRefSimple
+    // For now, we'll just register the special forms that we can implement directly
+}
 
 #[cfg(test)]
 mod tests {
@@ -497,5 +654,151 @@ mod tests {
         
         // Note: We can't test the success case (no arguments) because quit_builtin calls std::process::exit(0)
         // which would terminate the test process. In a real environment, this would work correctly.
+    }
+
+    // ============================================================================
+    // TESTS FOR SIMPLE BUILTINS (Reference-based GC system)
+    // ============================================================================
+
+    #[test]
+    fn test_quote_handler_simple() {
+        use crate::eval::EvaluatorSimple;
+        use crate::gc::{new_symbol_simple, new_int_simple};
+        use num_bigint::BigInt;
+
+        // Create an evaluator and test the simple quote handler
+        let mut evaluator = EvaluatorSimple::new();
+        
+        // Create test arguments: (quote foo)
+        let symbol = new_symbol_simple(&mut evaluator.heap, "foo");
+        let args = vec![symbol];
+        
+        // Test the simple quote handler
+        let result = quote_handler_simple(&mut evaluator, &args);
+        assert!(result.is_ok());
+        
+        // Test error case: wrong number of arguments
+        let empty_args: Vec<crate::gc::GcRefSimple> = vec![];
+        let result = quote_handler_simple(&mut evaluator, &empty_args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expected exactly 1 argument"));
+    }
+
+    #[test]
+    fn test_and_handler_simple() {
+        use crate::eval::EvaluatorSimple;
+        use crate::gc::{new_int_simple, new_bool_simple};
+        use num_bigint::BigInt;
+
+        // Create an evaluator and test the simple and handler
+        let mut evaluator = EvaluatorSimple::new();
+        
+        // Test with no arguments (should return #t)
+        let empty_args: Vec<crate::gc::GcRefSimple> = vec![];
+        let result = and_handler_simple(&mut evaluator, &empty_args);
+        assert!(result.is_ok());
+        assert!(matches!(&result.unwrap().value, crate::gc::SchemeValue::Bool(true)));
+        
+        // Test with arguments (should return first argument)
+        let arg1 = new_int_simple(&mut evaluator.heap, BigInt::from(42));
+        let args = vec![arg1];
+        let result = and_handler_simple(&mut evaluator, &args);
+        assert!(result.is_ok());
+        assert_eq!(&result.unwrap().value, &crate::gc::SchemeValue::Int(BigInt::from(42)));
+    }
+
+    #[test]
+    fn test_or_handler_simple() {
+        use crate::eval::EvaluatorSimple;
+        use crate::gc::{new_int_simple, new_bool_simple};
+        use num_bigint::BigInt;
+
+        // Create an evaluator and test the simple or handler
+        let mut evaluator = EvaluatorSimple::new();
+        
+        // Test with no arguments (should return #f)
+        let empty_args: Vec<crate::gc::GcRefSimple> = vec![];
+        let result = or_handler_simple(&mut evaluator, &empty_args);
+        assert!(result.is_ok());
+        assert!(matches!(&result.unwrap().value, crate::gc::SchemeValue::Bool(false)));
+        
+        // Test with arguments (should return first argument)
+        let arg1 = new_int_simple(&mut evaluator.heap, BigInt::from(42));
+        let args = vec![arg1];
+        let result = or_handler_simple(&mut evaluator, &args);
+        assert!(result.is_ok());
+        assert_eq!(&result.unwrap().value, &crate::gc::SchemeValue::Int(BigInt::from(42)));
+    }
+
+    #[test]
+    fn test_display_builtin_simple() {
+        use crate::gc::{new_string_simple, new_int_simple};
+        use num_bigint::BigInt;
+
+        // Create a heap and test the simple display builtin
+        let mut heap = GcHeap::new();
+        
+        // Test display with one argument
+        let test_string = new_string_simple(&mut heap, "hello world");
+        let args = vec![test_string];
+        let result = display_builtin_simple(&mut heap, &args);
+        assert!(result.is_ok());
+        
+        // Test error case: too many arguments
+        let test_int = new_int_simple(&mut heap, BigInt::from(42));
+        let too_many_args = vec![test_string, test_int, new_string_simple(&mut heap, "extra")];
+        let result = display_builtin_simple(&mut heap, &too_many_args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expected 1 or 2 arguments"));
+    }
+
+    #[test]
+    fn test_newline_builtin_simple() {
+        use crate::gc::GcHeap;
+
+        // Create a heap and test the simple newline builtin
+        let mut heap = GcHeap::new();
+        
+        // Test newline with no arguments
+        let empty_args: Vec<crate::gc::GcRefSimple> = vec![];
+        let result = newline_builtin_simple(&mut heap, &empty_args);
+        assert!(result.is_ok());
+        assert!(matches!(&result.unwrap().value, crate::gc::SchemeValue::Bool(false)));
+        
+        // Test error case: too many arguments
+        let test_int = new_int_simple(&mut heap, num_bigint::BigInt::from(42));
+        let too_many_args = vec![test_int, new_int_simple(&mut heap, num_bigint::BigInt::from(99))];
+        let result = newline_builtin_simple(&mut heap, &too_many_args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expected 0 or 1 arguments"));
+    }
+
+    #[test]
+    fn test_help_builtin_simple() {
+        use crate::gc::{new_symbol_simple, new_int_simple};
+        use num_bigint::BigInt;
+
+        // Create a heap and test the simple help builtin
+        let mut heap = GcHeap::new();
+        
+        // Test help with a symbol argument
+        let symbol = new_symbol_simple(&mut heap, "foo");
+        let args = vec![symbol];
+        let result = help_builtin_simple(&mut heap, &args);
+        assert!(result.is_ok());
+        assert!(matches!(&result.unwrap().value, crate::gc::SchemeValue::Str(s) if s.contains("Help for foo")));
+        
+        // Test error case: wrong argument type
+        let wrong_arg = new_int_simple(&mut heap, BigInt::from(42));
+        let args = vec![wrong_arg];
+        let result = help_builtin_simple(&mut heap, &args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("argument must be a symbol"));
+        
+        // Test error case: no arguments
+        let empty_args: Vec<crate::gc::GcRefSimple> = vec![];
+        let result = help_builtin_simple(&mut heap, &empty_args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expected 1 argument"));
     }
 } 
