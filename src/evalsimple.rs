@@ -143,8 +143,26 @@ pub fn quote_logic(expr: GcRefSimple, _evaluator: &mut Evaluator) -> Result<GcRe
 }
 
 // Stubs for special forms
-pub fn begin_logic(_expr: GcRefSimple, _evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
-    Err("begin not implemented yet".to_string())
+pub fn begin_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
+    // (begin expr1 expr2 ... exprN) => evaluate each in sequence, return last
+    match &expr.value {
+        SchemeValueSimple::Pair(_, cdr) => {
+            let mut current = *cdr;
+            let mut last_result = None;
+            loop {
+                match &current.value {
+                    SchemeValueSimple::Nil => break,
+                    SchemeValueSimple::Pair(car, next) => {
+                        last_result = Some(eval_logic(*car, evaluator)?);
+                        current = *next;
+                    }
+                    _ => return Err("Malformed begin: improper list".to_string()),
+                }
+            }
+            last_result.ok_or_else(|| "Malformed begin: no expressions".to_string())
+        }
+        _ => Err("Malformed begin: not a pair".to_string()),
+    }
 }
 pub fn define_logic(_expr: GcRefSimple, _evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
     Err("define not implemented yet".to_string())
@@ -566,6 +584,54 @@ mod tests {
         match &result2.value {
             SchemeValueSimple::Pair(_, _) => (),
             _ => panic!("Expected quoted list"),
+        }
+    }
+
+    #[test]
+    fn test_eval_logic_begin() {
+        use std::rc::Rc;
+        let mut evaluator = Evaluator::new();
+        let plus;
+        let a;
+        let b;
+        let c;
+        let plus_sym;
+        let plus_args;
+        let plus_expr;
+        let begin_sym;
+        let begin_args;
+        let expr;
+        {
+            let heap = evaluator.heap_mut();
+            plus = new_primitive_simple(
+                heap,
+                Rc::new(|heap, args| {
+                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    Ok(new_int_simple(heap, a + b))
+                }),
+                "plus".to_string(),
+                false,
+            );
+            a = new_int_simple(heap, num_bigint::BigInt::from(1));
+            b = new_int_simple(heap, num_bigint::BigInt::from(2));
+            c = new_int_simple(heap, num_bigint::BigInt::from(3));
+            plus_sym = new_symbol_simple(heap, "+");
+            let nil = new_nil_simple(heap);
+            let b_pair = new_pair_simple(heap, b, nil);
+            plus_args = new_pair_simple(heap, a, b_pair);
+            plus_expr = new_pair_simple(heap, plus_sym, plus_args);
+            begin_sym = new_symbol_simple(heap, "begin");
+            let c_pair = new_pair_simple(heap, c, nil);
+            let plus_expr_pair = new_pair_simple(heap, plus_expr, c_pair);
+            begin_args = plus_expr_pair;
+            expr = new_pair_simple(heap, begin_sym, begin_args);
+        }
+        evaluator.env_mut().set("+".to_string(), plus);
+        let result = eval_logic(expr, &mut evaluator).unwrap();
+        match &result.value {
+            SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "3"),
+            _ => panic!("Expected integer result from begin"),
         }
     }
 } 
