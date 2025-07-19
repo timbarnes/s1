@@ -185,10 +185,11 @@ pub fn repl(
         };
         match result {
             Ok(expr) => {
-                let value = expr.borrow().value.clone();
-                if is_self_evaluating(&value) {
-                    println!("=> {}", scheme_display(&value));
-                } else if let SchemeValue::Symbol(ref name) = value {
+                let expr_borrow = expr.borrow();
+                let value = &expr_borrow.value;
+                if is_self_evaluating(value) {
+                    println!("=> {}", scheme_display(value));
+                } else if let SchemeValue::Symbol(name) = value {
                     // Variable lookup
                     match evaluator.lookup_global_binding(name) {
                         Some(value) => println!("=> {}", scheme_display(&value.borrow().value)),
@@ -264,7 +265,7 @@ pub fn repl(
                         println!("Error: cannot evaluate non-symbol operator");
                     }
                 } else {
-                    println!("Error: cannot evaluate form: {}", scheme_display(&value));
+                    println!("Error: cannot evaluate form: {}", scheme_display(value));
                 }
             }
             Err(e) if e.contains("end of input") => {
@@ -334,18 +335,18 @@ pub fn eval_trampoline_with_evaluator(expr: GcRef, evaluator: &mut Evaluator) ->
 ///
 /// This is the core of the trampoline pattern for tail recursion optimization.
 fn eval_step_with_evaluator(expr: GcRef, evaluator: &mut Evaluator) -> Result<EvalResult, String> {
-    let value = expr.borrow().value.clone();
+    let value = &expr.borrow().value;
     
-    if is_self_evaluating(&value) {
-        Ok(EvalResult::Done(expr))
-    } else if let SchemeValue::Symbol(name) = &value {
+    if is_self_evaluating(value) {
+        Ok(EvalResult::Done(expr.clone()))
+    } else if let SchemeValue::Symbol(name) = value {
         // Handle bare symbols - look them up in the environment
         if let Some(bound_value) = evaluator.env.get(name) {
             Ok(EvalResult::Done(bound_value.clone()))
         } else {
             Err(format!("unbound variable: {}", name))
         }
-    } else if let SchemeValue::Pair(car, cdr) = &value {
+    } else if let SchemeValue::Pair(car, cdr) = value {
         if let SchemeValue::Symbol(ref name) = car.borrow().value {
             // Look up the symbol in the unified environment
             if let Some(bound_value) = evaluator.env.get(name) {
