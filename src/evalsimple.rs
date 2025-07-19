@@ -168,8 +168,39 @@ pub fn begin_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRef
         _ => Err("Malformed begin: not a pair".to_string()),
     }
 }
-pub fn define_logic(_expr: GcRefSimple, _evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
-    Err("define not implemented yet".to_string())
+pub fn define_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
+    // (define symbol expr)
+    match &expr.value {
+        SchemeValueSimple::Pair(_, cdr) => {
+            // cdr should be (symbol . rest)
+            match &cdr.value {
+                SchemeValueSimple::Pair(sym, rest) => {
+                    // sym should be a symbol
+                    let name = match &sym.value {
+                        SchemeValueSimple::Symbol(s) => s.clone(),
+                        _ => return Err("define: first argument must be a symbol".to_string()),
+                    };
+                    // rest should be (expr . nil)
+                    match &rest.value {
+                        SchemeValueSimple::Pair(expr_val, tail) => {
+                            match &tail.value {
+                                SchemeValueSimple::Nil => {
+                                    // Evaluate expr_val
+                                    let value = eval_logic(*expr_val, evaluator)?;
+                                    evaluator.env_mut().set(name, value);
+                                    Ok(value)
+                                }
+                                _ => Err("define: too many arguments".to_string()),
+                            }
+                        }
+                        _ => Err("define: missing value expression".to_string()),
+                    }
+                }
+                _ => Err("define: malformed arguments".to_string()),
+            }
+        }
+        _ => Err("define: not a pair".to_string()),
+    }
 }
 pub fn if_logic(_expr: GcRefSimple, _evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
     Err("if not implemented yet".to_string())
@@ -636,6 +667,34 @@ mod tests {
         match &result.value {
             SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "3"),
             _ => panic!("Expected integer result from begin"),
+        }
+    }
+
+    #[test]
+    fn test_eval_logic_define() {
+        let mut evaluator = Evaluator::new();
+        let symbol;
+        let expr;
+        {
+            let heap = evaluator.heap_mut();
+            symbol = new_symbol_simple(heap, "y");
+            let val = new_int_simple(heap, num_bigint::BigInt::from(42));
+            let nil = heap.nil_simple();
+            let val_pair = new_pair_simple(heap, val, nil);
+            let args = new_pair_simple(heap, symbol, val_pair);
+            let define_sym = new_symbol_simple(heap, "define");
+            expr = new_pair_simple(heap, define_sym, args);
+        }
+        let result = eval_logic(expr, &mut evaluator).unwrap();
+        match &result.value {
+            SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "42"),
+            _ => panic!("Expected integer result"),
+        }
+        // Check that the variable is now bound
+        let bound = evaluator.env().get("y").unwrap();
+        match &bound.value {
+            SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "42"),
+            _ => panic!("Expected integer result in env"),
         }
     }
 } 

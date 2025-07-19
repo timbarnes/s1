@@ -51,6 +51,11 @@ fn main() {
         ("'(1 2 3)", "Quote special form (list)"),
         ("(begin 1 2 3)", "Begin special form (sequence)"),
         ("(begin (+ 1 2) (* 3 4))", "Begin special form (multiple expressions)"),
+        // Define and variable lookup
+        ("(define x 22)", "Define x to 22"),
+        ("(define y 'z)", "Define y to symbol z"),
+        ("x", "Lookup x after define"),
+        ("y", "Lookup y after define"),
     ];
 
     // Add a binding for symbol lookup test
