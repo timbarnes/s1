@@ -193,7 +193,7 @@ pub fn quote_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple
 pub fn and_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if args.is_empty() {
         // (and) returns #t
-        return Ok(new_bool_simple(&mut evaluator.heap, true));
+        return Ok(evaluator.heap.true_simple());
     }
     Ok(args[0])
 }
@@ -202,7 +202,7 @@ pub fn and_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple])
 pub fn or_handler_simple(evaluator: &mut EvaluatorSimple, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if args.is_empty() {
         // (or) returns #f
-        return Ok(new_bool_simple(&mut evaluator.heap, false));
+        return Ok(evaluator.heap.false_simple());
     }
     Ok(args[0])
 }
@@ -292,7 +292,7 @@ pub fn newline_builtin_simple(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result
     println!();
     
     // Return undefined (we'll use #f for now)
-    Ok(new_bool_simple(heap, false))
+    Ok(heap.false_simple())
 }
 
 /// Simple quit builtin using reference-based GC system
