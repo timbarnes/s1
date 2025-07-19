@@ -29,6 +29,8 @@ use std::cmp::PartialEq;
 
 use std::collections::HashMap;
 
+use std::hash::{Hash, Hasher};
+
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 
@@ -279,6 +281,20 @@ pub struct GcObjectSimple {
     pub value: SchemeValueSimple,
     /// Mark bit used during garbage collection
     marked: bool,
+}
+
+impl Eq for GcObjectSimple {}
+
+impl PartialEq for GcObjectSimple {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+    }
+}
+
+impl Hash for GcObjectSimple {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        std::ptr::hash(self, state);
+    }
 }
 
 /// The garbage collected heap, with root management APIs.
