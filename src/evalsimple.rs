@@ -382,6 +382,7 @@ pub fn is_self_evaluating(expr: GcRefSimple) -> bool {
         SchemeValueSimple::Float(_) => true,
         SchemeValueSimple::Str(_) => true,
         SchemeValueSimple::Bool(_) => true,
+        SchemeValueSimple::Char(_) => true,
         SchemeValueSimple::Nil => true,
         _ => false,
     }

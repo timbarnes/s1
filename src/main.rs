@@ -14,117 +14,161 @@ use crate::io::{Port, PortKind};
 use crate::evalsimple::{Evaluator, eval_logic};
 use argh::FromArgs;
 use num_bigint::BigInt;
+use std::io as stdio;
+use stdio::Write;
+use std::fs::File;
+use std::io::BufReader;
+use std::io::Read;
+use crate::io::PortStack;
+
+fn print_scheme_value(val: &crate::gc::SchemeValueSimple) -> String {
+    use crate::gc::SchemeValueSimple;
+    match val {
+        SchemeValueSimple::Pair(_, _) => {
+            let mut s = String::from("(");
+            let mut first = true;
+            let mut current = val;
+            loop {
+                match current {
+                    SchemeValueSimple::Pair(car, cdr) => {
+                        if !first { s.push(' '); }
+                        s.push_str(&print_scheme_value(&car.value));
+                        current = &cdr.value;
+                        first = false;
+                    }
+                    SchemeValueSimple::Nil => {
+                        s.push(')');
+                        break;
+                    }
+                    _ => {
+                        s.push_str(" . ");
+                        s.push_str(&print_scheme_value(current));
+                        s.push(')');
+                        break;
+                    }
+                }
+            }
+            s
+        }
+        SchemeValueSimple::Symbol(s) => s.clone(),
+        SchemeValueSimple::Int(i) => i.to_string(),
+        SchemeValueSimple::Float(f) => f.to_string(),
+        SchemeValueSimple::Str(s) => format!("\"{}\"", s),
+        SchemeValueSimple::Bool(true) => "#t".to_string(),
+        SchemeValueSimple::Bool(false) => "#f".to_string(),
+        SchemeValueSimple::Char(c) => format!("#\\{}", c),
+        SchemeValueSimple::Nil => "nil".to_string(),
+        _ => format!("{:?}", val),
+    }
+}
 
 #[derive(FromArgs)]
 /// A simple Scheme interpreter
 struct Args {
-    /// input file to execute (optional)
-    #[argh(positional)]
-    file: Option<String>,
+    /// do not load scheme/s1-core.scm
+    #[argh(switch, short = 'n')]
+    no_core: bool,
+    /// files to load after core (can be repeated)
+    #[argh(option, short = 'f')]
+    file: Vec<String>,
+    /// exit after file loading, do not enter REPL
+    #[argh(switch, short = 'q')]
+    quit: bool,
 }
 
 fn main() {
-    println!("Testing EvaluatorSimple with new GC system...\n");
-
+    let args: Args = argh::from_env();
     let mut heap = GcHeap::new();
     let mut evaluator = Evaluator::new();
-
-    // Register builtins
     register_all_simple(&mut heap, evaluator.env_mut().bindings_mut());
 
-    // Test cases for self-evaluating forms and symbol lookup
-    let test_cases = vec![
-        ("42", "Number"),
-        ("3.14", "Float"), 
-        ("\"hello\"", "String"),
-        ("#t", "Boolean true"),
-        ("#f", "Boolean false"),
-        ("#\\a", "Character"),
-        ("nil", "Nil"),
-        ("x", "Symbol (unbound)"),
-        ("(+ 1 2)", "Basic addition"),
-        ("(* 3 4)", "Basic multiplication"),
-        ("(number? 42)", "Number predicate"),
-        ("(type-of 42)", "Type of function"),
-        // Special forms
-        ("'foo", "Quote special form (symbol)"),
-        ("'(1 2 3)", "Quote special form (list)"),
-        ("(begin 1 2 3)", "Begin special form (sequence)"),
-        ("(begin (+ 1 2) (* 3 4))", "Begin special form (multiple expressions)"),
-        // Define and variable lookup
-        ("(define x 22)", "Define x to 22"),
-        ("(define y 'z)", "Define y to symbol z"),
-        ("x", "Lookup x after define"),
-        ("y", "Lookup y after define"),
-        // If special form
-        ("(if #t 1 2)", "If true branch"),
-        ("(if #f 1 2)", "If false branch"),
-        ("(if #f 1)", "If false branch, no alternate (should return nil)"),
-        ("(if #t 1)", "If true branch, no alternate"),
-        // And special form
-        ("(and)", "And with no arguments (should return #t)"),
-        ("(and #t 1 2)", "And with all true values (should return last)"),
-        ("(and #t #f 1)", "And with early false (should return #f)"),
-        // Or special form
-        ("(or)", "Or with no arguments (should return #f)"),
-        ("(or #f #f)", "Or with all false (should return #f)"),
-        ("(or #f 1 2)", "Or with first true value (should return 1)"),
-        ("(or #f #f 3)", "Or with last true value (should return 3)"),
-        // Set! special form
-        ("(define x 10)", "Define x to 10"),
-        ("(set! x 42)", "Set! x to 42"),
-        ("x", "Lookup x after set! to 42"),
-        ("(set! x 'foo)", "Set! x to symbol foo"),
-        ("x", "Lookup x after set! to foo"),
-        ("(set! yy 99)", "Set! on unbound variable yy (should error)"),
-    ];
+    // File loading uses a port stack
+    let mut port_stack = PortStack::new(Port {
+        kind: PortKind::Stdin,
+    });
+    let mut parser = ParserSimple::new();
 
-    // Add a binding for symbol lookup test
-    let x_value = crate::gc::new_int_simple(&mut heap, num_bigint::BigInt::from(99));
-    evaluator.env_mut().set("x".to_string(), x_value);
+    // Load core file unless --no-core
+    if !args.no_core {
+        if let Err(e) = load_scheme_file("scheme/s1-core.scm", &mut heap, &mut port_stack) {
+            eprintln!("Error loading core: {}", e);
+            std::process::exit(1);
+        }
+    }
+    // Load each file in order
+    for filename in &args.file {
+        if let Err(e) = load_scheme_file(filename, &mut heap, &mut port_stack) {
+            eprintln!("Error loading {}: {}", filename, e);
+            std::process::exit(1);
+        }
+    }
+    if args.quit {
+        return;
+    }
+    repl(&mut heap, &mut evaluator, &mut port_stack, &mut parser);
+}
 
-    for (input, description) in test_cases {
-        println!("Testing {}: {}", description, input);
-        
-        // Create a port for the input
-        let mut port = Port { 
-            kind: PortKind::StringPortInput { 
-                content: input.to_string(), 
-                pos: 0 
-            } 
-        };
-        
-        // Parse the expression
-        let mut parser = ParserSimple::new();
-        match parser.parse(&mut heap, &mut port) {
+fn load_scheme_file(
+    filename: &str,
+    heap: &mut GcHeap,
+    port_stack: &mut PortStack,
+) -> Result<(), String> {
+    let file = File::open(filename).map_err(|e| format!("could not open {}: {}", filename, e))?;
+    let mut content = String::new();
+    BufReader::new(file).read_to_string(&mut content).map_err(|e| format!("could not read {}: {}", filename, e))?;
+    port_stack.push(Port {
+        kind: PortKind::StringPortInput {
+            content,
+            pos: 0,
+        },
+    });
+    Ok(())
+}
+
+fn repl(
+    heap: &mut GcHeap,
+    evaluator: &mut Evaluator,
+    port_stack: &mut PortStack,
+    parser: &mut ParserSimple,
+) {
+    let stdin = stdio::stdin();
+    let mut interactive = matches!(port_stack.current().kind, PortKind::Stdin);
+    if interactive {
+        println!("Welcome to the Scheme REPL (EvaluatorSimple, new GC)");
+    }
+    loop {
+        if matches!(port_stack.current().kind, PortKind::Stdin) {
+            print!("s1> ");
+            stdio::stdout().flush().unwrap();
+            let mut input = String::new();
+            if stdin.read_line(&mut input).unwrap() == 0 {
+                // EOF on stdin
+                break;
+            }
+            if input.trim().is_empty() { continue; }
+            port_stack.current_mut().kind = PortKind::StringPortInput {
+                content: input.clone(),
+                pos: 0,
+            };
+        }
+        let parse_result = parser.parse(heap, port_stack.current_mut());
+        match parse_result {
             Ok(expr) => {
-                // Evaluate the expression using eval_logic from evalsimple
-                match eval_logic(expr, &mut evaluator) {
+                match eval_logic(expr, evaluator) {
                     Ok(result) => {
-                        println!("  Parsed: {:?}", result.value);
-                        // Print the value in a readable format
-                        match &result.value {
-                            crate::gc::SchemeValueSimple::Int(i) => println!("  => {}", i),
-                            crate::gc::SchemeValueSimple::Float(f) => println!("  => {}", f),
-                            crate::gc::SchemeValueSimple::Str(s) => println!("  => \"{}\"", s),
-                            crate::gc::SchemeValueSimple::Bool(b) => println!("  => {}", b),
-                            crate::gc::SchemeValueSimple::Char(c) => println!("  => #\\{}", c),
-                            crate::gc::SchemeValueSimple::Nil => println!("  => nil"),
-                            crate::gc::SchemeValueSimple::Symbol(s) => println!("  => {}", s),
-                            _ => println!("  => {:?}", result.value),
-                        }
+                        println!("=> {}", print_scheme_value(&result.value));
                     }
-                    Err(e) => {
-                        println!("  Evaluation error: {}", e);
-                    }
+                    Err(e) => println!("Evaluation error: {}", e),
                 }
             }
-            Err(e) => {
-                println!("  Parse error: {}", e);
+            Err(e) if e.contains("end of input") => {
+                if !port_stack.pop() {
+                    break;
+                }
+                // If we pop to stdin, set interactive mode
+                interactive = matches!(port_stack.current().kind, PortKind::Stdin);
             }
+            Err(e) => println!("Parse error: {}", e),
         }
-        println!();
     }
-
-    println!("Evaluator test complete!");
 }
