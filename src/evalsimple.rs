@@ -504,6 +504,7 @@ mod tests {
     #[test]
     fn test_eval_logic_nested_call() {
         use std::rc::Rc;
+        use crate::builtin::number::{plus_builtin_simple, times_builtin_simple};
         let mut evaluator = Evaluator::new();
         let plus;
         let times;
@@ -521,21 +522,13 @@ mod tests {
             let heap = evaluator.heap_mut();
             plus = new_primitive_simple(
                 heap,
-                Rc::new(|heap, args| {
-                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
-                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
-                    Ok(new_int_simple(heap, a + b))
-                }),
+                Rc::new(plus_builtin_simple),
                 "plus".to_string(),
                 false,
             );
             times = new_primitive_simple(
                 heap,
-                Rc::new(|heap, args| {
-                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
-                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
-                    Ok(new_int_simple(heap, a * b))
-                }),
+                Rc::new(times_builtin_simple),
                 "times".to_string(),
                 false,
             );
