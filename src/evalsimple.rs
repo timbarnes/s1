@@ -28,6 +28,10 @@ impl Environment {
     pub fn set(&mut self, name: String, value: GcRefSimple) {
         self.bindings.insert(name, value);
     }
+
+    pub fn bindings_mut(&mut self) -> &mut HashMap<String, GcRefSimple> {
+        &mut self.bindings
+    }
 }
 
 /// Evaluator that owns both heap and environment
@@ -240,7 +244,7 @@ pub fn is_self_evaluating(expr: GcRefSimple) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gc::{new_int_simple, new_float_simple, new_string_simple, new_bool_simple, new_symbol_simple, new_nil_simple, new_pair_simple, new_primitive_simple};
+    use crate::gc::{new_int_simple, new_float_simple, new_string_simple, new_symbol_simple, new_pair_simple, new_primitive_simple};
 
     #[test]
     fn test_eval_logic_self_evaluating() {
@@ -294,7 +298,7 @@ mod tests {
             a = new_int_simple(heap, num_bigint::BigInt::from(2));
             b = new_int_simple(heap, num_bigint::BigInt::from(3));
             plus_sym = new_symbol_simple(heap, "+");
-            let nil = new_nil_simple(heap);
+            let nil = heap.nil_simple();
             let b_pair = new_pair_simple(heap, b, nil);
             args = new_pair_simple(heap, a, b_pair);
             expr = new_pair_simple(heap, plus_sym, args);
@@ -350,12 +354,12 @@ mod tests {
             four = new_int_simple(heap, num_bigint::BigInt::from(4));
             five = new_int_simple(heap, num_bigint::BigInt::from(5));
             plus_sym = new_symbol_simple(heap, "+");
-            let nil1 = new_nil_simple(heap);
+            let nil1 = heap.nil_simple();
             let five_pair = new_pair_simple(heap, five, nil1);
             plus_args = new_pair_simple(heap, four, five_pair);
             plus_expr = new_pair_simple(heap, plus_sym, plus_args);
             star_sym = new_symbol_simple(heap, "*");
-            let nil2 = new_nil_simple(heap);
+            let nil2 = heap.nil_simple();
             let plus_expr_pair = new_pair_simple(heap, plus_expr, nil2);
             let three_pair = new_pair_simple(heap, three, plus_expr_pair);
             star_args = new_pair_simple(heap, two, three_pair);
@@ -378,7 +382,7 @@ mod tests {
         let arg1 = new_int_simple(&mut heap, num_bigint::BigInt::from(1));
         let arg2 = new_int_simple(&mut heap, num_bigint::BigInt::from(2));
         let arg3 = new_int_simple(&mut heap, num_bigint::BigInt::from(3));
-        let nil = new_nil_simple(&mut heap);
+        let nil = heap.nil_simple();
         
         // Build the list: (1 . (2 . (3 . nil)))
         let list_3 = new_pair_simple(&mut heap, arg3, nil);
@@ -445,12 +449,12 @@ mod tests {
             two2 = new_int_simple(heap, num_bigint::BigInt::from(2));
             three = new_int_simple(heap, num_bigint::BigInt::from(3));
             plus_sym = new_symbol_simple(heap, "+");
-            let nil1 = new_nil_simple(heap);
+            let nil1 = heap.nil_simple();
             let three_pair = new_pair_simple(heap, three, nil1);
             plus_args = new_pair_simple(heap, two2, three_pair);
             plus_expr = new_pair_simple(heap, plus_sym, plus_args);
             star_sym = new_symbol_simple(heap, "*");
-            let nil2 = new_nil_simple(heap);
+            let nil2 = heap.nil_simple();
             let plus_expr_pair = new_pair_simple(heap, plus_expr, nil2);
             star_args = new_pair_simple(heap, two, plus_expr_pair);
             expr = new_pair_simple(heap, star_sym, star_args);
@@ -521,17 +525,17 @@ mod tests {
             four = new_int_simple(heap, num_bigint::BigInt::from(4));
             five = new_int_simple(heap, num_bigint::BigInt::from(5));
             minus_sym = new_symbol_simple(heap, "-");
-            let nil1 = new_nil_simple(heap);
+            let nil1 = heap.nil_simple();
             let five_pair = new_pair_simple(heap, five, nil1);
             minus_args = new_pair_simple(heap, four, five_pair);
             minus_expr = new_pair_simple(heap, minus_sym, minus_args);
             times_sym = new_symbol_simple(heap, "*");
-            let nil2 = new_nil_simple(heap);
+            let nil2 = heap.nil_simple();
             let minus_expr_pair = new_pair_simple(heap, minus_expr, nil2);
             times_args = new_pair_simple(heap, three, minus_expr_pair);
             times_expr = new_pair_simple(heap, times_sym, times_args);
             plus_sym = new_symbol_simple(heap, "+");
-            let nil3 = new_nil_simple(heap);
+            let nil3 = heap.nil_simple();
             let times_expr_pair = new_pair_simple(heap, times_expr, nil3);
             plus_args = new_pair_simple(heap, two, times_expr_pair);
             expr = new_pair_simple(heap, plus_sym, plus_args);
@@ -554,7 +558,7 @@ mod tests {
         {
             let heap = evaluator.heap_mut();
             let sym = new_symbol_simple(heap, "foo");
-            let nil = new_nil_simple(heap);
+            let nil = heap.nil_simple();
             let sym_list = new_pair_simple(heap, sym, nil);
             let quote_sym = new_symbol_simple(heap, "quote");
             expr = new_pair_simple(heap, quote_sym, sym_list);
@@ -572,7 +576,7 @@ mod tests {
             let heap = evaluator.heap_mut();
             let foo = new_symbol_simple(heap, "foo");
             let bar = new_symbol_simple(heap, "bar");
-            let nil = new_nil_simple(heap);
+            let nil = heap.nil_simple();
             let bar_pair = new_pair_simple(heap, bar, nil);
             let foo_bar_list = new_pair_simple(heap, foo, bar_pair);
             let quote_sym = new_symbol_simple(heap, "quote");
@@ -617,7 +621,7 @@ mod tests {
             b = new_int_simple(heap, num_bigint::BigInt::from(2));
             c = new_int_simple(heap, num_bigint::BigInt::from(3));
             plus_sym = new_symbol_simple(heap, "+");
-            let nil = new_nil_simple(heap);
+            let nil = heap.nil_simple();
             let b_pair = new_pair_simple(heap, b, nil);
             plus_args = new_pair_simple(heap, a, b_pair);
             plus_expr = new_pair_simple(heap, plus_sym, plus_args);
