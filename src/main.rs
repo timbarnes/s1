@@ -61,6 +61,15 @@ fn main() {
         ("(if #f 1 2)", "If false branch"),
         ("(if #f 1)", "If false branch, no alternate (should return nil)"),
         ("(if #t 1)", "If true branch, no alternate"),
+        // And special form
+        ("(and)", "And with no arguments (should return #t)"),
+        ("(and #t 1 2)", "And with all true values (should return last)"),
+        ("(and #t #f 1)", "And with early false (should return #f)"),
+        // Or special form
+        ("(or)", "Or with no arguments (should return #f)"),
+        ("(or #f #f)", "Or with all false (should return #f)"),
+        ("(or #f 1 2)", "Or with first true value (should return 1)"),
+        ("(or #f #f 3)", "Or with last true value (should return 3)"),
     ];
 
     // Add a binding for symbol lookup test
