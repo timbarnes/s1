@@ -326,12 +326,20 @@ pub fn help_builtin_simple(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result<Gc
 
 /// Register all simple builtins in the environment
 pub fn register_all_simple(heap: &mut GcHeap, env: &mut std::collections::HashMap<String, GcRefSimple>) {
-    // For now, we'll just register the simple builtins that don't require complex function objects
-    // TODO: Create simple versions of primitive functions and special forms
+    // For now, we'll register the simple builtins that we can implement directly
+    // In a full implementation, we'd need to create simple versions of primitive functions
+    // that work with GcRefSimple and can be stored in the environment
     
-    // Note: This is a placeholder. In a full implementation, we'd need to create
-    // simple versions of primitive functions that work with GcRefSimple
-    // For now, we'll just register the special forms that we can implement directly
+    // Note: This is a placeholder implementation. The simple builtins are currently
+    // implemented as standalone functions, but to integrate them into the environment
+    // system, we'd need to create simple versions of primitive function objects
+    // that can be stored and called from the environment.
+    
+    // TODO: Create simple primitive function objects that can be stored in the environment
+    // and called by the evaluator. This would involve:
+    // 1. Creating a simple version of SchemeValue::Primitive that works with GcRefSimple
+    // 2. Creating wrapper functions that convert between GcRef and GcRefSimple
+    // 3. Registering these simple primitives in the environment
 }
 
 #[cfg(test)]
