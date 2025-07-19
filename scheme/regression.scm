@@ -107,11 +107,14 @@ v
 ; COMMENTED OUT TESTS - NOT YET IMPLEMENTED
 ; ============================================================================
 
-; Lambda functions - not yet implemented
-; (lambda (x) (+ x 1))
-; (define add1 (lambda (x) (+ x 1)))
-; (add1 5)
-; ((lambda (x y) (+ x y)) 3 4)
+; Lambda functions and closures (NOW WORKING!)
+(lambda (x) (+ x 1))
+(define add1 (lambda (x) (+ x 1)))
+(add1 5)
+((lambda (x y) (+ x y)) 3 4)
+(define make-adder (lambda (n) (lambda (x) (+ x n))))
+(define add5 (make-adder 5))
+(add5 3)
 
 ; Vector operations - not yet implemented
 ; #(1 2 3)
