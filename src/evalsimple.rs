@@ -202,8 +202,45 @@ pub fn define_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRe
         _ => Err("define: not a pair".to_string()),
     }
 }
-pub fn if_logic(_expr: GcRefSimple, _evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
-    Err("if not implemented yet".to_string())
+pub fn if_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
+    // (if test consequent [alternate])
+    match &expr.value {
+        SchemeValueSimple::Pair(_, cdr) => {
+            // cdr should be (test . rest)
+            match &cdr.value {
+                SchemeValueSimple::Pair(test_expr, rest) => {
+                    let test_val = eval_logic(*test_expr, evaluator)?;
+                    // rest should be (consequent . rest2)
+                    match &rest.value {
+                        SchemeValueSimple::Pair(consequent_expr, rest2) => {
+                            let test_is_true = match &test_val.value {
+                                SchemeValueSimple::Bool(false) => false,
+                                _ => true,
+                            };
+                            if test_is_true {
+                                eval_logic(*consequent_expr, evaluator)
+                            } else {
+                                // rest2 may be (alternate . nil) or nil
+                                match &rest2.value {
+                                    SchemeValueSimple::Pair(alternate_expr, tail) => {
+                                        match &tail.value {
+                                            SchemeValueSimple::Nil => eval_logic(*alternate_expr, evaluator),
+                                            _ => Err("if: too many arguments".to_string()),
+                                        }
+                                    }
+                                    SchemeValueSimple::Nil => Ok(evaluator.heap.nil_simple()),
+                                    _ => Err("if: malformed alternate".to_string()),
+                                }
+                            }
+                        }
+                        _ => Err("if: missing consequent expression".to_string()),
+                    }
+                }
+                _ => Err("if: missing test expression".to_string()),
+            }
+        }
+        _ => Err("if: not a pair".to_string()),
+    }
 }
 pub fn and_logic(_expr: GcRefSimple, _evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
     Err("and not implemented yet".to_string())
@@ -695,6 +732,42 @@ mod tests {
         match &bound.value {
             SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "42"),
             _ => panic!("Expected integer result in env"),
+        }
+    }
+
+    #[test]
+    fn test_eval_logic_if() {
+        let mut evaluator = Evaluator::new();
+        let expr_true;
+        let expr_false;
+        {
+            let heap = evaluator.heap_mut();
+            let if_sym = new_symbol_simple(heap, "if");
+            let t = heap.true_simple();
+            let f = heap.false_simple();
+            let one = new_int_simple(heap, num_bigint::BigInt::from(1));
+            let two = new_int_simple(heap, num_bigint::BigInt::from(2));
+            let nil = heap.nil_simple();
+            // (if #t 1 2)
+            let two_pair = new_pair_simple(heap, two, nil);
+            let one_pair = new_pair_simple(heap, one, two_pair);
+            let t_pair = new_pair_simple(heap, t, one_pair);
+            expr_true = new_pair_simple(heap, if_sym, t_pair);
+            // (if #f 1 2)
+            let two_pair2 = new_pair_simple(heap, two, nil);
+            let one_pair2 = new_pair_simple(heap, one, two_pair2);
+            let f_pair = new_pair_simple(heap, f, one_pair2);
+            expr_false = new_pair_simple(heap, if_sym, f_pair);
+        }
+        let result_true = eval_logic(expr_true, &mut evaluator).unwrap();
+        match &result_true.value {
+            SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "1"),
+            _ => panic!("Expected integer result for true branch"),
+        }
+        let result_false = eval_logic(expr_false, &mut evaluator).unwrap();
+        match &result_false.value {
+            SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "2"),
+            _ => panic!("Expected integer result for false branch"),
         }
     }
 } 

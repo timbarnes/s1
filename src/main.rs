@@ -56,6 +56,11 @@ fn main() {
         ("(define y 'z)", "Define y to symbol z"),
         ("x", "Lookup x after define"),
         ("y", "Lookup y after define"),
+        // If special form
+        ("(if #t 1 2)", "If true branch"),
+        ("(if #f 1 2)", "If false branch"),
+        ("(if #f 1)", "If false branch, no alternate (should return nil)"),
+        ("(if #t 1)", "If true branch, no alternate"),
     ];
 
     // Add a binding for symbol lookup test
