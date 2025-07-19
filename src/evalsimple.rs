@@ -1,0 +1,548 @@
+//! Simple evaluator using the new GC system and two-layer architecture.
+//!
+//! This module implements a clean separation between evaluation logic and function application.
+//! The logic layer handles self-evaluating forms, special forms, and argument evaluation,
+//! while the apply layer handles function calls with pre-evaluated arguments.
+
+use crate::gc::{GcHeap, GcRefSimple, SchemeValueSimple};
+use crate::parser::ParserSimple;
+use crate::io::Port;
+use std::collections::HashMap;
+
+/// Simple environment for variable bindings
+pub struct Environment {
+    bindings: HashMap<String, GcRefSimple>,
+}
+
+impl Environment {
+    pub fn new() -> Self {
+        Self {
+            bindings: HashMap::new(),
+        }
+    }
+
+    pub fn get(&self, name: &str) -> Option<GcRefSimple> {
+        self.bindings.get(name).copied()
+    }
+
+    pub fn set(&mut self, name: String, value: GcRefSimple) {
+        self.bindings.insert(name, value);
+    }
+}
+
+/// Evaluator that owns both heap and environment
+pub struct Evaluator {
+    pub heap: GcHeap,
+    env: Environment,
+}
+
+impl Evaluator {
+    pub fn new() -> Self {
+        Self {
+            heap: GcHeap::new(),
+            env: Environment::new(),
+        }
+    }
+
+    /// Get a reference to the heap for allocation
+    pub fn heap_mut(&mut self) -> &mut GcHeap {
+        &mut self.heap
+    }
+
+    /// Get a reference to the environment (read-only)
+    pub fn env(&self) -> &Environment {
+        &self.env
+    }
+
+    /// Get a mutable reference to the environment (for eval_apply only)
+    pub fn env_mut(&mut self) -> &mut Environment {
+        &mut self.env
+    }
+}
+
+/// Apply function to pre-evaluated arguments
+/// Handles environment access for symbol lookup and function application
+pub fn eval_apply(func: GcRefSimple, args: &[GcRefSimple], evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
+    match &func.value {
+        SchemeValueSimple::Symbol(name) => {
+            // Symbol lookup - check environment
+            evaluator.env().get(name)
+                .ok_or_else(|| format!("Unbound variable: {}", name))
+        }
+        SchemeValueSimple::Primitive { func: primitive_func, .. } => {
+            // Apply primitive function
+            primitive_func(&mut evaluator.heap_mut(), args)
+        }
+        _ => {
+            Err("eval_apply: function is not a symbol or primitive".to_string())
+        }
+    }
+}
+
+/// Main evaluation walker - handles self-evaluating forms, symbol resolution, and nested calls
+pub fn eval_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
+    // 1. Self-evaluating forms
+    if is_self_evaluating(expr) {
+        return Ok(expr);
+    }
+
+    match &expr.value {
+        // 2. Symbol: resolve to function object (or variable) via eval_apply
+        SchemeValueSimple::Symbol(_) => {
+            eval_apply(expr, &[], evaluator)
+        }
+        // 3. Pair: function call or special form
+        SchemeValueSimple::Pair(car, cdr) => {
+            // Recursively evaluate all arguments (cdr)
+            let mut evaluated_args = Vec::new();
+            let mut current = *cdr;
+            loop {
+                match &current.value {
+                    SchemeValueSimple::Nil => break,
+                    SchemeValueSimple::Pair(arg, next) => {
+                        evaluated_args.push(eval_logic(*arg, evaluator)?);
+                        current = *next;
+                    }
+                    _ => return Err("Improper list in function call".to_string()),
+                }
+            }
+            // Recursively evaluate the function position (car)
+            let func = eval_logic(*car, evaluator)?;
+            // Apply the function to the evaluated arguments
+            eval_apply(func, &evaluated_args, evaluator)
+        }
+        _ => Err("eval_logic: unsupported expression type".to_string()),
+    }
+}
+
+// ============================================================================
+// SPECIAL FORM LOGIC FUNCTIONS
+// ============================================================================
+
+/// Quote logic: return first argument unevaluated
+pub fn quote_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
+    // TODO: Implement quote logic
+    // - Extract first argument from (quote expr)
+    // - Return it unevaluated
+    // - No environment access needed
+    Err("quote_logic not implemented yet".to_string())
+}
+
+/// If logic: evaluate condition, then evaluate appropriate branch
+pub fn if_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
+    // TODO: Implement if logic
+    // - Extract condition, then-branch, and else-branch from (if test then else)
+    // - Call eval_logic on condition
+    // - Based on result, call eval_logic on appropriate branch
+    // - Return result
+    Err("if_logic not implemented yet".to_string())
+}
+
+/// Define logic: evaluate value expression and store in environment
+pub fn define_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
+    // TODO: Implement define logic
+    // - Extract symbol and value expression from (define symbol expr)
+    // - Call eval_logic on the value expression
+    // - Store result in environment (through evaluator.env_mut())
+    // - Return the result
+    Err("define_logic not implemented yet".to_string())
+}
+
+/// Begin logic: evaluate all expressions in sequence, return last result
+pub fn begin_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
+    // TODO: Implement begin logic
+    // - Extract all expressions from (begin expr1 expr2 ...)
+    // - Call eval_logic on each expression in sequence
+    // - Return result of last expression
+    Err("begin_logic not implemented yet".to_string())
+}
+
+/// And logic: short-circuit evaluation of arguments
+pub fn and_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
+    // TODO: Implement and logic
+    // - Extract all expressions from (and expr1 expr2 ...)
+    // - Call eval_logic on each expression in sequence
+    // - If any returns #f, return #f immediately
+    // - Otherwise return result of last expression
+    Err("and_logic not implemented yet".to_string())
+}
+
+/// Or logic: short-circuit evaluation of arguments
+pub fn or_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
+    // TODO: Implement or logic
+    // - Extract all expressions from (or expr1 expr2 ...)
+    // - Call eval_logic on each expression in sequence
+    // - If any returns non-#f, return that result immediately
+    // - Otherwise return #f
+    Err("or_logic not implemented yet".to_string())
+}
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/// Extract arguments from a list (cdr of a function call)
+pub fn extract_args(expr: GcRefSimple) -> Result<Vec<GcRefSimple>, String> {
+    let mut args = Vec::new();
+    let mut current = expr;
+    
+    loop {
+        match &current.value {
+            SchemeValueSimple::Nil => {
+                // End of list
+                break;
+            }
+            SchemeValueSimple::Pair(car, cdr) => {
+                // Add the car to our arguments
+                args.push(*car);
+                // Move to the cdr
+                current = *cdr;
+            }
+            _ => {
+                // Improper list - the cdr is not nil or a pair
+                return Err("Improper list in function call".to_string());
+            }
+        }
+    }
+    
+    Ok(args)
+}
+
+/// Check if a function is a special form
+pub fn is_special_form(func: GcRefSimple) -> Option<&'static str> {
+    match &func.value {
+        SchemeValueSimple::Symbol(name) => {
+            match name.as_str() {
+                "quote" | "if" | "define" | "begin" | "and" | "or" => Some(name),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Check if an expression is self-evaluating (doesn't need evaluation)
+pub fn is_self_evaluating(expr: GcRefSimple) -> bool {
+    match &expr.value {
+        SchemeValueSimple::Int(_) => true,
+        SchemeValueSimple::Float(_) => true,
+        SchemeValueSimple::Str(_) => true,
+        SchemeValueSimple::Bool(_) => true,
+        SchemeValueSimple::Nil => true,
+        _ => false,
+    }
+}
+
+// ============================================================================
+// TESTS
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gc::{new_int_simple, new_float_simple, new_string_simple, new_bool_simple, new_symbol_simple, new_nil_simple, new_pair_simple, new_primitive_simple};
+
+    #[test]
+    fn test_eval_logic_self_evaluating() {
+        let mut evaluator = Evaluator::new();
+        let int_val;
+        {
+            let heap = evaluator.heap_mut();
+            int_val = new_int_simple(heap, num_bigint::BigInt::from(42));
+        }
+        let result = eval_logic(int_val, &mut evaluator).unwrap();
+        assert_eq!(result.value, int_val.value);
+    }
+
+    #[test]
+    fn test_eval_logic_variable_lookup() {
+        let mut evaluator = Evaluator::new();
+        let value;
+        let symbol;
+        {
+            let heap = evaluator.heap_mut();
+            value = new_int_simple(heap, num_bigint::BigInt::from(99));
+            symbol = new_symbol_simple(heap, "x");
+        }
+        evaluator.env_mut().set("x".to_string(), value);
+        let result = eval_logic(symbol, &mut evaluator).unwrap();
+        assert_eq!(result.value, value.value);
+    }
+
+    #[test]
+    fn test_eval_logic_non_nested_call() {
+        use std::rc::Rc;
+        let mut evaluator = Evaluator::new();
+        let plus;
+        let a;
+        let b;
+        let plus_sym;
+        let args;
+        let expr;
+        {
+            let heap = evaluator.heap_mut();
+            plus = new_primitive_simple(
+                heap,
+                Rc::new(|heap, args| {
+                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    Ok(new_int_simple(heap, a + b))
+                }),
+                "plus".to_string(),
+                false,
+            );
+            a = new_int_simple(heap, num_bigint::BigInt::from(2));
+            b = new_int_simple(heap, num_bigint::BigInt::from(3));
+            plus_sym = new_symbol_simple(heap, "+");
+            let nil = new_nil_simple(heap);
+            let b_pair = new_pair_simple(heap, b, nil);
+            args = new_pair_simple(heap, a, b_pair);
+            expr = new_pair_simple(heap, plus_sym, args);
+        }
+        evaluator.env_mut().set("+".to_string(), plus);
+        let result = eval_logic(expr, &mut evaluator).unwrap();
+        match &result.value {
+            SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "5"),
+            _ => panic!("Expected integer result"),
+        }
+    }
+
+    #[test]
+    fn test_eval_logic_nested_call() {
+        use std::rc::Rc;
+        let mut evaluator = Evaluator::new();
+        let plus;
+        let times;
+        let two;
+        let three;
+        let four;
+        let five;
+        let plus_sym;
+        let plus_args;
+        let plus_expr;
+        let star_sym;
+        let star_args;
+        let expr;
+        {
+            let heap = evaluator.heap_mut();
+            plus = new_primitive_simple(
+                heap,
+                Rc::new(|heap, args| {
+                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    Ok(new_int_simple(heap, a + b))
+                }),
+                "plus".to_string(),
+                false,
+            );
+            times = new_primitive_simple(
+                heap,
+                Rc::new(|heap, args| {
+                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    Ok(new_int_simple(heap, a * b))
+                }),
+                "times".to_string(),
+                false,
+            );
+            two = new_int_simple(heap, num_bigint::BigInt::from(2));
+            three = new_int_simple(heap, num_bigint::BigInt::from(3));
+            four = new_int_simple(heap, num_bigint::BigInt::from(4));
+            five = new_int_simple(heap, num_bigint::BigInt::from(5));
+            plus_sym = new_symbol_simple(heap, "+");
+            let nil1 = new_nil_simple(heap);
+            let five_pair = new_pair_simple(heap, five, nil1);
+            plus_args = new_pair_simple(heap, four, five_pair);
+            plus_expr = new_pair_simple(heap, plus_sym, plus_args);
+            star_sym = new_symbol_simple(heap, "*");
+            let nil2 = new_nil_simple(heap);
+            let plus_expr_pair = new_pair_simple(heap, plus_expr, nil2);
+            let three_pair = new_pair_simple(heap, three, plus_expr_pair);
+            star_args = new_pair_simple(heap, two, three_pair);
+            expr = new_pair_simple(heap, star_sym, star_args);
+        }
+        evaluator.env_mut().set("+".to_string(), plus);
+        evaluator.env_mut().set("*".to_string(), times);
+        let result = eval_logic(expr, &mut evaluator).unwrap();
+        match &result.value {
+            SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "54"),
+            _ => panic!("Expected integer result"),
+        }
+    }
+    
+    #[test]
+    fn test_extract_args() {
+        let mut heap = crate::gc::GcHeap::new();
+        
+        // Create a list (1 2 3)
+        let arg1 = new_int_simple(&mut heap, num_bigint::BigInt::from(1));
+        let arg2 = new_int_simple(&mut heap, num_bigint::BigInt::from(2));
+        let arg3 = new_int_simple(&mut heap, num_bigint::BigInt::from(3));
+        let nil = new_nil_simple(&mut heap);
+        
+        // Build the list: (1 . (2 . (3 . nil)))
+        let list_3 = new_pair_simple(&mut heap, arg3, nil);
+        let list_2_3 = new_pair_simple(&mut heap, arg2, list_3);
+        let list_1_2_3 = new_pair_simple(&mut heap, arg1, list_2_3);
+        
+        // Extract arguments
+        let args = extract_args(list_1_2_3).unwrap();
+        assert_eq!(args.len(), 3);
+        
+        // Check the arguments
+        match &args[0].value {
+            SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "1"),
+            _ => panic!("Expected integer 1"),
+        }
+        match &args[1].value {
+            SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "2"),
+            _ => panic!("Expected integer 2"),
+        }
+        match &args[2].value {
+            SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "3"),
+            _ => panic!("Expected integer 3"),
+        }
+    }
+
+    #[test]
+    fn test_eval_logic_simple_nested_call() {
+        use std::rc::Rc;
+        let mut evaluator = Evaluator::new();
+        let times;
+        let plus;
+        let two;
+        let two2;
+        let three;
+        let plus_sym;
+        let plus_args;
+        let plus_expr;
+        let star_sym;
+        let star_args;
+        let expr;
+        {
+            let heap = evaluator.heap_mut();
+            times = new_primitive_simple(
+                heap,
+                Rc::new(|heap, args| {
+                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    Ok(new_int_simple(heap, a * b))
+                }),
+                "times".to_string(),
+                false,
+            );
+            plus = new_primitive_simple(
+                heap,
+                Rc::new(|heap, args| {
+                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    Ok(new_int_simple(heap, a + b))
+                }),
+                "plus".to_string(),
+                false,
+            );
+            two = new_int_simple(heap, num_bigint::BigInt::from(2));
+            two2 = new_int_simple(heap, num_bigint::BigInt::from(2));
+            three = new_int_simple(heap, num_bigint::BigInt::from(3));
+            plus_sym = new_symbol_simple(heap, "+");
+            let nil1 = new_nil_simple(heap);
+            let three_pair = new_pair_simple(heap, three, nil1);
+            plus_args = new_pair_simple(heap, two2, three_pair);
+            plus_expr = new_pair_simple(heap, plus_sym, plus_args);
+            star_sym = new_symbol_simple(heap, "*");
+            let nil2 = new_nil_simple(heap);
+            let plus_expr_pair = new_pair_simple(heap, plus_expr, nil2);
+            star_args = new_pair_simple(heap, two, plus_expr_pair);
+            expr = new_pair_simple(heap, star_sym, star_args);
+        }
+        evaluator.env_mut().set("*".to_string(), times);
+        evaluator.env_mut().set("+".to_string(), plus);
+        let result = eval_logic(expr, &mut evaluator).unwrap();
+        match &result.value {
+            SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "10"),
+            _ => panic!("Expected integer result"),
+        }
+    }
+
+    #[test]
+    fn test_eval_logic_nested_mixed_call() {
+        use std::rc::Rc;
+        let mut evaluator = Evaluator::new();
+        let plus;
+        let times;
+        let minus;
+        let two;
+        let three;
+        let four;
+        let five;
+        let minus_sym;
+        let minus_args;
+        let minus_expr;
+        let times_sym;
+        let times_args;
+        let times_expr;
+        let plus_sym;
+        let plus_args;
+        let expr;
+        {
+            let heap = evaluator.heap_mut();
+            plus = new_primitive_simple(
+                heap,
+                Rc::new(|heap, args| {
+                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    Ok(new_int_simple(heap, a + b))
+                }),
+                "plus".to_string(),
+                false,
+            );
+            times = new_primitive_simple(
+                heap,
+                Rc::new(|heap, args| {
+                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    Ok(new_int_simple(heap, a * b))
+                }),
+                "times".to_string(),
+                false,
+            );
+            minus = new_primitive_simple(
+                heap,
+                Rc::new(|heap, args| {
+                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    Ok(new_int_simple(heap, a - b))
+                }),
+                "minus".to_string(),
+                false,
+            );
+            two = new_int_simple(heap, num_bigint::BigInt::from(2));
+            three = new_int_simple(heap, num_bigint::BigInt::from(3));
+            four = new_int_simple(heap, num_bigint::BigInt::from(4));
+            five = new_int_simple(heap, num_bigint::BigInt::from(5));
+            minus_sym = new_symbol_simple(heap, "-");
+            let nil1 = new_nil_simple(heap);
+            let five_pair = new_pair_simple(heap, five, nil1);
+            minus_args = new_pair_simple(heap, four, five_pair);
+            minus_expr = new_pair_simple(heap, minus_sym, minus_args);
+            times_sym = new_symbol_simple(heap, "*");
+            let nil2 = new_nil_simple(heap);
+            let minus_expr_pair = new_pair_simple(heap, minus_expr, nil2);
+            times_args = new_pair_simple(heap, three, minus_expr_pair);
+            times_expr = new_pair_simple(heap, times_sym, times_args);
+            plus_sym = new_symbol_simple(heap, "+");
+            let nil3 = new_nil_simple(heap);
+            let times_expr_pair = new_pair_simple(heap, times_expr, nil3);
+            plus_args = new_pair_simple(heap, two, times_expr_pair);
+            expr = new_pair_simple(heap, plus_sym, plus_args);
+        }
+        evaluator.env_mut().set("+".to_string(), plus);
+        evaluator.env_mut().set("*".to_string(), times);
+        evaluator.env_mut().set("-".to_string(), minus);
+        let result = eval_logic(expr, &mut evaluator).unwrap();
+        match &result.value {
+            SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "-1"),
+            _ => panic!("Expected integer result"),
+        }
+    }
+} 
