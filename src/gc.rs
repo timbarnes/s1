@@ -162,65 +162,10 @@ impl PartialEq for SchemeValue {
 /// no longer reachable.
 pub type GcRef = Rc<RefCell<GcObject>>;
 
-/// New garbage-collected pointer types for improved performance.
-/// These eliminate the overhead of Rc<RefCell<T>> by using raw pointers
-/// managed entirely by the garbage collector.
-///
-/// # Safety
-/// These pointers are only valid as long as the object is reachable from
-/// the heap's root set or other reachable objects. The garbage collector
-/// ensures memory safety.
-pub type GcPtr = *mut GcObject;
-pub type GcRefNew = std::ptr::NonNull<GcObject>;
-
-/// Safe wrapper around raw GC pointers that provides a similar API to GcRef.
-/// This allows gradual migration from the old system to the new one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct GcRefSafe {
-    ptr: GcRefNew,
-}
-
-impl GcRefSafe {
-    /// Create a new safe reference from a raw pointer.
-    /// # Safety
-    /// The pointer must be valid and managed by the garbage collector.
-    pub unsafe fn from_ptr(ptr: GcPtr) -> Self {
-        Self {
-            ptr: std::ptr::NonNull::new_unchecked(ptr),
-        }
-    }
-
-    /// Get the raw pointer.
-    pub fn as_ptr(self) -> GcPtr {
-        self.ptr.as_ptr()
-    }
-
-    /// Borrow the value immutably.
-    /// # Safety
-    /// The pointer must be valid and not borrowed mutably elsewhere.
-    pub unsafe fn borrow(&self) -> &GcObject {
-        &*self.ptr.as_ptr()
-    }
-
-    /// Borrow the value mutably.
-    /// # Safety
-    /// The pointer must be valid and not borrowed elsewhere.
-    pub unsafe fn borrow_mut(&mut self) -> &mut GcObject {
-        &mut *self.ptr.as_ptr()
-    }
-}
-
-impl From<GcRefSafe> for GcRefNew {
-    fn from(gc_ref: GcRefSafe) -> Self {
-        gc_ref.ptr
-    }
-}
-
-impl From<GcRefNew> for GcRefSafe {
-    fn from(ptr: GcRefNew) -> Self {
-        Self { ptr }
-    }
-}
+/// Simple reference-based GC system.
+/// Since the garbage collector is the only mechanism for deleting GcObject instances,
+/// we can safely use &GcObject references throughout the system.
+pub type GcRefSimple = &'static GcObject;
 
 /// Wrapper for heap storage; includes a mark bit for garbage collection.
 ///
@@ -672,190 +617,6 @@ pub fn new_nil(heap: &mut GcHeap) -> GcRef {
     heap.nil()
 }
 
-// ============================================================================
-// NEW GC ALLOCATION FUNCTIONS (Phase 1 - Parallel Implementation)
-// ============================================================================
-//
-// These functions use the new GcRefSafe type which eliminates the overhead
-// of Rc<RefCell<T>> by using raw pointers managed by the garbage collector.
-//
-// # Safety
-// These functions are unsafe because they work with raw pointers. The safety
-// is guaranteed by the garbage collector's root set management.
-
-/// Allocate a new SchemeValue on the heap using the new GC system.
-/// This is the core allocation function for the new system.
-///
-/// # Safety
-/// The returned pointer is only valid as long as it's reachable from the
-/// heap's root set or other reachable objects.
-pub unsafe fn alloc_new(heap: &mut GcHeap, value: SchemeValue) -> GcRefSafe {
-    // For now, we'll use the old system but return the new type
-    // This will be replaced with proper raw pointer allocation in Phase 2
-    let old_ref = heap.alloc(value);
-    let ptr = old_ref.as_ptr() as GcPtr;
-    GcRefSafe::from_ptr(ptr)
-}
-
-/// Create a new integer value using the new GC system.
-///
-/// # Examples
-///
-/// ```rust
-/// use s1::gc::{GcHeap, new_int_new};
-///
-/// let mut heap = GcHeap::new();
-/// let x = unsafe { new_int_new(&mut heap, 42) };
-/// assert_eq!(unsafe { x.borrow().value }, SchemeValue::Int(42));
-/// ```
-pub unsafe fn new_int_new(heap: &mut GcHeap, val: BigInt) -> GcRefSafe {
-    alloc_new(heap, SchemeValue::Int(val))
-}
-
-/// Create a new boolean value using the new GC system.
-///
-/// # Examples
-///
-/// ```rust
-/// use s1::gc::{GcHeap, new_bool_new};
-///
-/// let mut heap = GcHeap::new();
-/// let t = unsafe { new_bool_new(&mut heap, true) };
-/// let f = unsafe { new_bool_new(&mut heap, false) };
-/// ```
-pub unsafe fn new_bool_new(heap: &mut GcHeap, val: bool) -> GcRefSafe {
-    alloc_new(heap, SchemeValue::Bool(val))
-}
-
-/// Create a new symbol using the new GC system.
-///
-/// # Examples
-///
-/// ```rust
-/// use s1::gc::{GcHeap, new_symbol_new};
-///
-/// let mut heap = GcHeap::new();
-/// let sym = unsafe { new_symbol_new(&mut heap, "lambda") };
-/// ```
-pub unsafe fn new_symbol_new<S: Into<String>>(heap: &mut GcHeap, name: S) -> GcRefSafe {
-    alloc_new(heap, SchemeValue::Symbol(name.into()))
-}
-
-/// Create a new string value using the new GC system.
-///
-/// # Examples
-///
-/// ```rust
-/// use s1::gc::{GcHeap, new_string_new};
-///
-/// let mut heap = GcHeap::new();
-/// let s = unsafe { new_string_new(&mut heap, "hello") };
-/// ```
-pub unsafe fn new_string_new<S: Into<String>>(heap: &mut GcHeap, val: S) -> GcRefSafe {
-    alloc_new(heap, SchemeValue::Str(val.into()))
-}
-
-/// Create a new nil value using the new GC system.
-///
-/// # Examples
-///
-/// ```rust
-/// use s1::gc::{GcHeap, new_nil_new};
-///
-/// let mut heap = GcHeap::new();
-/// let nil = unsafe { new_nil_new(&mut heap) };
-/// ```
-pub unsafe fn new_nil_new(heap: &mut GcHeap) -> GcRefSafe {
-    alloc_new(heap, SchemeValue::Nil)
-}
-
-// ============================================================================
-// CONVERSION FUNCTIONS (Phase 1 - Migration Support)
-// ============================================================================
-//
-// These functions allow gradual migration from the old system to the new one.
-
-/// Convert from old GcRef to new GcRefSafe.
-/// This allows gradual migration of existing code.
-///
-/// # Safety
-/// The GcRef must be valid and managed by the garbage collector.
-pub unsafe fn convert_to_new(old_ref: &GcRef) -> GcRefSafe {
-    let ptr = old_ref.as_ptr() as GcPtr;
-    GcRefSafe::from_ptr(ptr)
-}
-
-/// Convert from new GcRefSafe to old GcRef.
-/// This allows gradual migration of existing code.
-///
-/// # Safety
-/// The GcRefSafe must be valid and managed by the garbage collector.
-pub unsafe fn convert_to_old(new_ref: &GcRefSafe) -> GcRef {
-    // This is a temporary conversion that will be removed in later phases
-    // For now, we create a new Rc<RefCell<T>> that points to the same data
-    let obj = new_ref.borrow();
-    Rc::new(RefCell::new(GcObject {
-        value: obj.value.clone(),
-        marked: obj.marked,
-    }))
-}
-
-// ============================================================================
-// ACCESSOR HELPERS FOR NEW SYSTEM (Phase 1 - Parallel Implementation)
-// ============================================================================
-
-/// Extract an integer value from a GcRefSafe, if it contains one.
-///
-/// # Safety
-/// The GcRefSafe must be valid and not borrowed mutably elsewhere.
-pub unsafe fn as_int_new(obj: &GcRefSafe) -> Option<i64> {
-    match &obj.borrow().value {
-        SchemeValue::Int(n) => Some(n.to_i64().unwrap()),
-        _ => None,
-    }
-}
-
-/// Extract a boolean value from a GcRefSafe, if it contains one.
-///
-/// # Safety
-/// The GcRefSafe must be valid and not borrowed mutably elsewhere.
-pub unsafe fn as_bool_new(obj: &GcRefSafe) -> Option<bool> {
-    match &obj.borrow().value {
-        SchemeValue::Bool(b) => Some(*b),
-        _ => None,
-    }
-}
-
-/// Extract a symbol name from a GcRefSafe, if it contains a symbol.
-///
-/// # Safety
-/// The GcRefSafe must be valid and not borrowed mutably elsewhere.
-pub unsafe fn as_symbol_new(obj: &GcRefSafe) -> Option<String> {
-    match &obj.borrow().value {
-        SchemeValue::Symbol(s) => Some(s.clone()),
-        _ => None,
-    }
-}
-
-/// Extract a string value from a GcRefSafe, if it contains one.
-///
-/// # Safety
-/// The GcRefSafe must be valid and not borrowed mutably elsewhere.
-pub unsafe fn as_string_new(obj: &GcRefSafe) -> Option<String> {
-    match &obj.borrow().value {
-        SchemeValue::Str(s) => Some(s.clone()),
-        _ => None,
-    }
-}
-
-/// Check if a GcRefSafe is nil.
-///
-/// # Safety
-/// The GcRefSafe must be valid and not borrowed mutably elsewhere.
-pub unsafe fn is_nil_new(obj: &GcRefSafe) -> bool {
-    matches!(&obj.borrow().value, SchemeValue::Nil)
-}
-
 /// Accessor helpers (returns some inner data or None):
 
 /// Extract an integer value from a GcRef, if it contains one.
@@ -1231,111 +992,26 @@ mod tests {
         assert_eq!(env_frame_lookup(&env, "z").unwrap().borrow().value, SchemeValue::Float(3.14));
     }
 
-    // ============================================================================
-    // TESTS FOR NEW GC SYSTEM (Phase 1 - Parallel Implementation)
-    // ============================================================================
-
     #[test]
-    fn test_new_gc_allocation() {
+    fn test_pair() {
         let mut heap = GcHeap::new();
-        
-        // Test basic allocation with new system
-        let int_val = unsafe { new_int_new(&mut heap, BigInt::from(42)) };
-        let bool_val = unsafe { new_bool_new(&mut heap, true) };
-        let symbol_val = unsafe { new_symbol_new(&mut heap, "lambda") };
-        let string_val = unsafe { new_string_new(&mut heap, "hello") };
-        let nil_val = unsafe { new_nil_new(&mut heap) };
-        
-        // Test value retrieval
-        assert_eq!(unsafe { &int_val.borrow().value }, &SchemeValue::Int(BigInt::from(42)));
-        assert_eq!(unsafe { &bool_val.borrow().value }, &SchemeValue::Bool(true));
-        assert_eq!(unsafe { &symbol_val.borrow().value }, &SchemeValue::Symbol("lambda".to_string()));
-        assert_eq!(unsafe { &string_val.borrow().value }, &SchemeValue::Str("hello".to_string()));
-        assert_eq!(unsafe { &nil_val.borrow().value }, &SchemeValue::Nil);
-        
-        // Test accessor functions
-        assert_eq!(unsafe { as_int_new(&int_val) }, Some(42));
-        assert_eq!(unsafe { as_bool_new(&bool_val) }, Some(true));
-        assert_eq!(unsafe { as_symbol_new(&symbol_val) }, Some("lambda".to_string()));
-        assert_eq!(unsafe { as_string_new(&string_val) }, Some("hello".to_string()));
-        assert!(unsafe { is_nil_new(&nil_val) });
-        assert!(!unsafe { is_nil_new(&int_val) });
+        let car = new_int(&mut heap, BigInt::from(1));
+        let cdr = new_symbol(&mut heap, "foo");
+        let pair = new_pair(&mut heap, car.clone(), cdr.clone());
+
+        let (a, d) = as_pair(&pair).unwrap();
+        assert_eq!(a.borrow().value, car.borrow().value);
+        assert_eq!(d.borrow().value, cdr.borrow().value);
     }
 
     #[test]
-    fn test_new_gc_conversion() {
+    fn test_is_nil() {
         let mut heap = GcHeap::new();
-        
-        // Create objects with old system
-        let old_int = new_int(&mut heap, BigInt::from(42));
-        let old_bool = new_bool(&mut heap, true);
-        
-        // Convert to new system
-        let new_int = unsafe { convert_to_new(&old_int) };
-        let new_bool = unsafe { convert_to_new(&old_bool) };
-        
-        // Verify values are the same
-        assert_eq!(unsafe { &new_int.borrow().value }, &old_int.borrow().value);
-        assert_eq!(unsafe { &new_bool.borrow().value }, &old_bool.borrow().value);
-        
-        // Convert back to old system
-        let old_int2 = unsafe { convert_to_old(&new_int) };
-        let old_bool2 = unsafe { convert_to_old(&new_bool) };
-        
-        // Verify values are preserved
-        assert_eq!(old_int2.borrow().value, old_int.borrow().value);
-        assert_eq!(old_bool2.borrow().value, old_bool.borrow().value);
-    }
+        let nil = new_nil(&mut heap);
+        assert!(is_nil(&nil));
 
-    #[test]
-    fn test_new_gc_pointer_operations() {
-        let mut heap = GcHeap::new();
-        
-        // Test pointer operations
-        let int_val = unsafe { new_int_new(&mut heap, BigInt::from(42)) };
-        
-        // Test as_ptr
-        let ptr = int_val.as_ptr();
-        assert!(!ptr.is_null());
-        
-        // Test from_ptr
-        let int_val2 = unsafe { GcRefSafe::from_ptr(ptr) };
-        assert_eq!(int_val, int_val2);
-        
-        // Test borrowing
-        let borrowed = unsafe { int_val.borrow() };
-        assert_eq!(borrowed.value, SchemeValue::Int(BigInt::from(42)));
-        
-        // Test mutable borrowing
-        let mut int_val_mut = int_val;
-        let borrowed_mut = unsafe { int_val_mut.borrow_mut() };
-        assert_eq!(borrowed_mut.value, SchemeValue::Int(BigInt::from(42)));
-    }
-
-    #[test]
-    fn test_new_gc_derived_traits() {
-        let mut heap = GcHeap::new();
-        
-        let int_val1 = unsafe { new_int_new(&mut heap, BigInt::from(42)) };
-        let int_val2 = unsafe { new_int_new(&mut heap, BigInt::from(42)) };
-        let bool_val = unsafe { new_bool_new(&mut heap, true) };
-        
-        // Test Clone
-        let int_val1_clone = int_val1;
-        assert_eq!(int_val1, int_val1_clone);
-        
-        // Test Copy (since it's Copy)
-        let int_val1_copy = int_val1;
-        assert_eq!(int_val1, int_val1_copy);
-        
-        // Test PartialEq
-        // These are different objects (different pointers) but should have the same value
-        assert_eq!(unsafe { &int_val1.borrow().value }, unsafe { &int_val2.borrow().value });
-        assert_ne!(int_val1, bool_val); // Different types
-        
-        // Test Debug
-        let debug_str = format!("{:?}", int_val1);
-        assert!(debug_str.contains("GcRefSafe"));
+        let not_nil = new_int(&mut heap, BigInt::from(42));
+        assert!(!is_nil(&not_nil));
     }
 }
 
@@ -1347,7 +1023,7 @@ mod tests {
 /// use s1::gc::{GcHeap, new_pair, new_int, new_symbol, as_pair};
 ///
 /// let mut heap = GcHeap::new();
-/// let car = new_int(&mut heap, 1);
+/// let car = new_int(&mut heap, BigInt::from(1));
 /// let cdr = new_symbol(&mut heap, "foo");
 /// let pair = new_pair(&mut heap, car.clone(), cdr.clone());
 /// 
@@ -1373,7 +1049,7 @@ pub fn as_pair(obj: &GcRef) -> Option<(GcRef, GcRef)> {
 /// let nil = new_nil(&mut heap);
 /// assert!(is_nil(&nil));
 /// 
-/// let not_nil = new_int(&mut heap, 42);
+/// let not_nil = new_int(&mut heap, BigInt::from(42));
 /// assert!(!is_nil(&not_nil));
 /// ```
 pub fn is_nil(obj: &GcRef) -> bool {
