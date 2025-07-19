@@ -165,6 +165,10 @@ pub type GcRef = Rc<RefCell<GcObject>>;
 /// Simple reference-based GC system.
 /// Since the garbage collector is the only mechanism for deleting GcObject instances,
 /// we can safely use &GcObject references throughout the system.
+/// This eliminates the overhead of Rc<RefCell<T>> by using direct references.
+/// # Migration Path
+/// We're gradually migrating from GcRef (Rc<RefCell<GcObject>>) to GcRefSimple (&'static GcObject).
+/// This provides better performance and simpler code.
 pub type GcRefSimple = &'static GcObject;
 
 /// Wrapper for heap storage; includes a mark bit for garbage collection.
@@ -372,6 +376,25 @@ impl GcHeap {
 
     pub fn nil(&self) -> GcRef {
         self.nil.as_ref().unwrap().clone()
+    }
+
+    /// Allocate a new GcObject on the heap using the reference-based system.
+    /// Returns a static reference to the allocated object.
+    pub fn alloc_simple(&mut self, obj: GcObject) -> GcRefSimple {
+        // Allocate the object on the heap
+        let boxed_obj = Box::new(obj);
+        let ptr = Box::into_raw(boxed_obj);
+        
+        // Convert to static reference
+        unsafe { &*ptr }
+    }
+
+    /// Get the nil value using the reference-based system.
+    pub fn nil_simple(&mut self) -> GcRefSimple {
+        // For now, create a new nil object each time
+        // In a real implementation, we'd cache this
+        let nil_obj = GcObject { value: SchemeValue::Nil, marked: false };
+        self.alloc_simple(nil_obj)
     }
 }
 
@@ -615,6 +638,41 @@ pub fn new_env_frame(heap: &mut GcHeap, map: HashMap<String, GcRef>) -> GcRef {
 /// ```
 pub fn new_nil(heap: &mut GcHeap) -> GcRef {
     heap.nil()
+}
+
+// ============================================================================
+// NEW REFERENCE-BASED ALLOCATION FUNCTIONS (Migration Path)
+// ============================================================================
+// These functions return GcRefSimple (&'static GcObject) instead of GcRef (Rc<RefCell<GcObject>>)
+// for better performance and simpler code.
+
+/// Allocate a new integer on the heap using the reference-based system.
+pub fn new_int_simple(heap: &mut GcHeap, val: BigInt) -> GcRefSimple {
+    let obj = GcObject { value: SchemeValue::Int(val), marked: false };
+    heap.alloc_simple(obj)
+}
+
+/// Allocate a new boolean on the heap using the reference-based system.
+pub fn new_bool_simple(heap: &mut GcHeap, val: bool) -> GcRefSimple {
+    let obj = GcObject { value: SchemeValue::Bool(val), marked: false };
+    heap.alloc_simple(obj)
+}
+
+/// Allocate a new symbol on the heap using the reference-based system.
+pub fn new_symbol_simple(heap: &mut GcHeap, name: &str) -> GcRefSimple {
+    let obj = GcObject { value: SchemeValue::Symbol(name.to_string()), marked: false };
+    heap.alloc_simple(obj)
+}
+
+/// Allocate a new string on the heap using the reference-based system.
+pub fn new_string_simple(heap: &mut GcHeap, s: &str) -> GcRefSimple {
+    let obj = GcObject { value: SchemeValue::Str(s.to_string()), marked: false };
+    heap.alloc_simple(obj)
+}
+
+/// Get the nil value using the reference-based system.
+pub fn new_nil_simple(heap: &mut GcHeap) -> GcRefSimple {
+    heap.nil_simple()
 }
 
 /// Accessor helpers (returns some inner data or None):
