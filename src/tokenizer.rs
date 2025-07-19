@@ -8,13 +8,9 @@
 //! ```rust
 //! use s1::tokenizer::{Tokenizer, Token};
 //! use s1::{PortStack, FileTable, Port, PortKind};
-//! use std::rc::Rc;
-//! use std::cell::RefCell;
 //!
 //! // Create a string port for testing
 //! let port = Port { kind: PortKind::StringPort { content: "hello world.to_string(), pos: 0 } };
-//! let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
-//! let file_table = Rc::new(RefCell::new(FileTable::new()));
 //!
 //! let mut tokenizer = Tokenizer::new(port_stack, file_table);
 //!
@@ -26,8 +22,6 @@
 
 use crate::io::{PortKind, Port};
 use std::io::Read;
-// use std::rc::Rc;
-// use std::cell::RefCell;
 
 /// Represents a lexical token in Scheme source code.
 #[derive(Debug, Clone, PartialEq)]
@@ -297,12 +291,8 @@ impl<'a> Tokenizer<'a> {
     /// ```rust
     /// use s1::tokenizer::{Tokenizer, Token};
     /// use s1::{PortStack, FileTable, Port, PortKind};
-    /// use std::rc::Rc;
-    /// use std::cell::RefCell;
     ///
     /// let port = Port { kind: PortKind::StringPort { content: "hello123.to_string(), pos: 0;
-    /// let port_stack = Rc::new(RefCell::new(PortStack::new(port)));
-    /// let file_table = Rc::new(RefCell::new(FileTable::new()));
     /// let mut tokenizer = Tokenizer::new(port_stack, file_table);
     ///
     /// assert_eq!(tokenizer.next_token(), Some(Token::Symbol("hello.to_string())));

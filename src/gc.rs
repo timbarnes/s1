@@ -652,6 +652,12 @@ pub fn new_int_simple(heap: &mut GcHeap, val: BigInt) -> GcRefSimple {
     heap.alloc_simple(obj)
 }
 
+/// Allocate a new float on the heap using the reference-based system.
+pub fn new_float_simple(heap: &mut GcHeap, val: f64) -> GcRefSimple {
+    let obj = GcObject { value: SchemeValue::Float(val), marked: false };
+    heap.alloc_simple(obj)
+}
+
 /// Allocate a new boolean on the heap using the reference-based system.
 pub fn new_bool_simple(heap: &mut GcHeap, val: bool) -> GcRefSimple {
     let obj = GcObject { value: SchemeValue::Bool(val), marked: false };
@@ -673,6 +679,44 @@ pub fn new_string_simple(heap: &mut GcHeap, s: &str) -> GcRefSimple {
 /// Get the nil value using the reference-based system.
 pub fn new_nil_simple(heap: &mut GcHeap) -> GcRefSimple {
     heap.nil_simple()
+}
+
+// ============================================================================
+// CONVERSION FUNCTIONS (For testing and gradual migration)
+// ============================================================================
+
+/// Convert GcRefSimple to GcRef for testing and compatibility.
+/// This is a temporary function for the migration period.
+pub fn convert_simple_to_ref(simple: GcRefSimple) -> GcRef {
+    // For now, we'll create a new GcRef with the same value
+    // This is inefficient but allows testing
+    let value = &simple.value;
+    match value {
+        SchemeValue::Int(i) => new_int(&mut GcHeap::new(), i.clone()),
+        SchemeValue::Float(f) => new_float(&mut GcHeap::new(), *f),
+        SchemeValue::Symbol(s) => new_symbol(&mut GcHeap::new(), s.clone()),
+        SchemeValue::Str(s) => new_string(&mut GcHeap::new(), s.clone()),
+        SchemeValue::Bool(b) => new_bool(&mut GcHeap::new(), *b),
+        SchemeValue::Nil => new_nil(&mut GcHeap::new()),
+        _ => panic!("Conversion not implemented for this type"),
+    }
+}
+
+/// Convert GcRef to GcRefSimple for testing and compatibility.
+/// This is a temporary function for the migration period.
+pub fn convert_ref_to_simple(gcref: &GcRef) -> GcRefSimple {
+    // For now, we'll create a new GcRefSimple with the same value
+    // This is inefficient but allows testing
+    let value = &gcref.borrow().value;
+    match value {
+        SchemeValue::Int(i) => new_int_simple(&mut GcHeap::new(), i.clone()),
+        SchemeValue::Float(f) => new_float_simple(&mut GcHeap::new(), *f),
+        SchemeValue::Symbol(s) => new_symbol_simple(&mut GcHeap::new(), s),
+        SchemeValue::Str(s) => new_string_simple(&mut GcHeap::new(), s),
+        SchemeValue::Bool(b) => new_bool_simple(&mut GcHeap::new(), *b),
+        SchemeValue::Nil => new_nil_simple(&mut GcHeap::new()),
+        _ => panic!("Conversion not implemented for this type"),
+    }
 }
 
 /// Accessor helpers (returns some inner data or None):
