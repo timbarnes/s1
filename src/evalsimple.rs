@@ -93,6 +93,19 @@ pub fn eval_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefS
         }
         // 3. Pair: function call or special form
         SchemeValueSimple::Pair(car, cdr) => {
+            // Special form dispatch using match
+            match &car.value {
+                SchemeValueSimple::Symbol(name) => match name.as_str() {
+                    "quote" => return quote_logic(expr, evaluator),
+                    "begin" => return begin_logic(expr, evaluator),
+                    "define" => return define_logic(expr, evaluator),
+                    "if" => return if_logic(expr, evaluator),
+                    "and" => return and_logic(expr, evaluator),
+                    "or" => return or_logic(expr, evaluator),
+                    _ => {}
+                },
+                _ => {}
+            }
             // Recursively evaluate all arguments (cdr)
             let mut evaluated_args = Vec::new();
             let mut current = *cdr;
@@ -115,66 +128,35 @@ pub fn eval_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefS
     }
 }
 
-// ============================================================================
-// SPECIAL FORM LOGIC FUNCTIONS
-// ============================================================================
-
 /// Quote logic: return first argument unevaluated
-pub fn quote_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
-    // TODO: Implement quote logic
-    // - Extract first argument from (quote expr)
-    // - Return it unevaluated
-    // - No environment access needed
-    Err("quote_logic not implemented yet".to_string())
+pub fn quote_logic(expr: GcRefSimple, _evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
+    // (quote x) => return x unevaluated
+    match &expr.value {
+        SchemeValueSimple::Pair(_, cdr) => {
+            match &cdr.value {
+                SchemeValueSimple::Pair(arg, _) => Ok(*arg),
+                _ => Err("Malformed quote: missing argument".to_string()),
+            }
+        }
+        _ => Err("Malformed quote: not a pair".to_string()),
+    }
 }
 
-/// If logic: evaluate condition, then evaluate appropriate branch
-pub fn if_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
-    // TODO: Implement if logic
-    // - Extract condition, then-branch, and else-branch from (if test then else)
-    // - Call eval_logic on condition
-    // - Based on result, call eval_logic on appropriate branch
-    // - Return result
-    Err("if_logic not implemented yet".to_string())
+// Stubs for special forms
+pub fn begin_logic(_expr: GcRefSimple, _evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
+    Err("begin not implemented yet".to_string())
 }
-
-/// Define logic: evaluate value expression and store in environment
-pub fn define_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
-    // TODO: Implement define logic
-    // - Extract symbol and value expression from (define symbol expr)
-    // - Call eval_logic on the value expression
-    // - Store result in environment (through evaluator.env_mut())
-    // - Return the result
-    Err("define_logic not implemented yet".to_string())
+pub fn define_logic(_expr: GcRefSimple, _evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
+    Err("define not implemented yet".to_string())
 }
-
-/// Begin logic: evaluate all expressions in sequence, return last result
-pub fn begin_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
-    // TODO: Implement begin logic
-    // - Extract all expressions from (begin expr1 expr2 ...)
-    // - Call eval_logic on each expression in sequence
-    // - Return result of last expression
-    Err("begin_logic not implemented yet".to_string())
+pub fn if_logic(_expr: GcRefSimple, _evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
+    Err("if not implemented yet".to_string())
 }
-
-/// And logic: short-circuit evaluation of arguments
-pub fn and_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
-    // TODO: Implement and logic
-    // - Extract all expressions from (and expr1 expr2 ...)
-    // - Call eval_logic on each expression in sequence
-    // - If any returns #f, return #f immediately
-    // - Otherwise return result of last expression
-    Err("and_logic not implemented yet".to_string())
+pub fn and_logic(_expr: GcRefSimple, _evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
+    Err("and not implemented yet".to_string())
 }
-
-/// Or logic: short-circuit evaluation of arguments
-pub fn or_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
-    // TODO: Implement or logic
-    // - Extract all expressions from (or expr1 expr2 ...)
-    // - Call eval_logic on each expression in sequence
-    // - If any returns non-#f, return that result immediately
-    // - Otherwise return #f
-    Err("or_logic not implemented yet".to_string())
+pub fn or_logic(_expr: GcRefSimple, _evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
+    Err("or not implemented yet".to_string())
 }
 
 // ============================================================================
@@ -543,6 +525,47 @@ mod tests {
         match &result.value {
             SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "-1"),
             _ => panic!("Expected integer result"),
+        }
+    }
+
+    #[test]
+    fn test_eval_logic_quote() {
+        let mut evaluator = Evaluator::new();
+        let quoted;
+        let expr;
+        {
+            let heap = evaluator.heap_mut();
+            let sym = new_symbol_simple(heap, "foo");
+            let nil = new_nil_simple(heap);
+            let sym_list = new_pair_simple(heap, sym, nil);
+            let quote_sym = new_symbol_simple(heap, "quote");
+            expr = new_pair_simple(heap, quote_sym, sym_list);
+            quoted = sym;
+        }
+        let result = eval_logic(expr, &mut evaluator).unwrap();
+        match &result.value {
+            SchemeValueSimple::Symbol(s) => assert_eq!(s, "foo"),
+            _ => panic!("Expected quoted symbol"),
+        }
+        // Test quoting a list: '(foo bar)
+        let quoted_list;
+        let expr2;
+        {
+            let heap = evaluator.heap_mut();
+            let foo = new_symbol_simple(heap, "foo");
+            let bar = new_symbol_simple(heap, "bar");
+            let nil = new_nil_simple(heap);
+            let bar_pair = new_pair_simple(heap, bar, nil);
+            let foo_bar_list = new_pair_simple(heap, foo, bar_pair);
+            let quote_sym = new_symbol_simple(heap, "quote");
+            let foo_bar_list_pair = new_pair_simple(heap, foo_bar_list, nil);
+            expr2 = new_pair_simple(heap, quote_sym, foo_bar_list_pair);
+            quoted_list = foo_bar_list;
+        }
+        let result2 = eval_logic(expr2, &mut evaluator).unwrap();
+        match &result2.value {
+            SchemeValueSimple::Pair(_, _) => (),
+            _ => panic!("Expected quoted list"),
         }
     }
 } 
