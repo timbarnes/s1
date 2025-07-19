@@ -56,6 +56,13 @@ impl Environment {
         }
     }
 
+    /// Create an environment from an existing frame
+    pub fn from_frame(frame: Rc<RefCell<Frame>>) -> Self {
+        Self {
+            current_frame: frame,
+        }
+    }
+
     /// Get a binding by name, searching through the frame chain
     pub fn get(&self, name: &str) -> Option<GcRefSimple> {
         let mut current = Some(self.current_frame.clone());
@@ -123,6 +130,11 @@ impl Environment {
     /// Get the current frame (for closure creation)
     pub fn current_frame(&self) -> Rc<RefCell<Frame>> {
         self.current_frame.clone()
+    }
+
+    /// Set the current frame (for closure evaluation)
+    pub fn set_current_frame(&mut self, frame: Rc<RefCell<Frame>>) {
+        self.current_frame = frame;
     }
 }
 

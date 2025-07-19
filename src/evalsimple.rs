@@ -9,6 +9,8 @@ use crate::parser::ParserSimple;
 use crate::io::Port;
 use crate::env::Environment;
 use std::collections::HashMap;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 /// Evaluator that owns both heap and environment
 pub struct Evaluator {
@@ -53,10 +55,53 @@ pub fn eval_apply(func: GcRefSimple, args: &[GcRefSimple], evaluator: &mut Evalu
             // Apply primitive function
             primitive_func(&mut evaluator.heap_mut(), args)
         }
+        SchemeValueSimple::Closure { params, body, env } => {
+            // Apply closure - handle environment and evaluation
+            eval_closure_logic(params, body, env, args, evaluator)
+        }
         _ => {
-            Err("eval_apply: function is not a symbol or primitive".to_string())
+            Err("eval_apply: function is not a symbol, primitive, or closure".to_string())
         }
     }
+}
+
+/// Evaluate a closure by creating a new environment frame and evaluating the body
+fn eval_closure_logic(
+    params: &[String],
+    body: GcRefSimple,
+    env: &Rc<RefCell<crate::env::Frame>>,
+    args: &[GcRefSimple],
+    evaluator: &mut Evaluator
+) -> Result<GcRefSimple, String> {
+    // Check argument count
+    if args.len() != params.len() {
+        return Err(format!(
+            "Closure expects {} arguments, got {}",
+            params.len(),
+            args.len()
+        ));
+    }
+
+    // Create a new environment extending the captured environment
+    let captured_env = Environment::from_frame(env.clone());
+    let mut new_env = captured_env.extend();
+
+    // Bind parameters to arguments in the new environment
+    for (param, arg) in params.iter().zip(args.iter()) {
+        new_env.set(param.clone(), *arg);
+    }
+
+    // Temporarily switch the evaluator's environment to the new one
+    let original_env = evaluator.env_mut().current_frame();
+    evaluator.env_mut().set_current_frame(new_env.current_frame());
+
+    // Evaluate the body in the new environment
+    let result = eval_logic(body, evaluator);
+
+    // Restore the original environment
+    evaluator.env_mut().set_current_frame(original_env);
+
+    result
 }
 
 /// Main evaluation walker - handles self-evaluating forms, symbol resolution, and nested calls
@@ -423,6 +468,7 @@ pub fn is_self_evaluating(expr: GcRefSimple) -> bool {
         SchemeValueSimple::Bool(_) => true,
         SchemeValueSimple::Char(_) => true,
         SchemeValueSimple::Nil => true,
+        SchemeValueSimple::Closure { .. } => true,
         _ => false,
     }
 }
@@ -434,7 +480,7 @@ pub fn is_self_evaluating(expr: GcRefSimple) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gc::{new_int_simple, new_float_simple, new_string_simple, new_symbol_simple, new_pair_simple, new_primitive_simple};
+    use crate::gc::{new_int_simple, new_float_simple, new_string_simple, new_symbol_simple, new_pair_simple, new_primitive_simple, new_closure_simple};
 
     #[test]
     fn test_eval_logic_self_evaluating() {
@@ -999,52 +1045,155 @@ mod tests {
     #[test]
     fn test_eval_logic_lambda() {
         let mut evaluator = Evaluator::new();
-        let lambda_sym;
-        let params_list;
-        let body;
-        let body_rest;
-        let args;
-        let expr;
+        
+        // Set up the + function in the environment
         {
             let heap = evaluator.heap_mut();
-            lambda_sym = new_symbol_simple(heap, "lambda");
-            
-            // Create parameter list: (x)
-            let x_sym = new_symbol_simple(heap, "x");
-            let nil = heap.nil_simple();
-            params_list = new_pair_simple(heap, x_sym, nil);
-            
-            // Create body: (* x x)
-            let star_sym = new_symbol_simple(heap, "*");
-            let x_sym2 = new_symbol_simple(heap, "x");
-            let x_sym3 = new_symbol_simple(heap, "x");
-            let nil2 = heap.nil_simple();
-            let x_pair = new_pair_simple(heap, x_sym3, nil2);
-            let args_pair = new_pair_simple(heap, x_sym2, x_pair);
-            body = new_pair_simple(heap, star_sym, args_pair);
-            
-            // Create body_rest: (body . nil)
-            let nil3 = heap.nil_simple();
-            body_rest = new_pair_simple(heap, body, nil3);
-            
-            // Create args: ((params) . (body . nil))
-            args = new_pair_simple(heap, params_list, body_rest);
-            
-            // Create expr: (lambda (x) (* x x))
-            expr = new_pair_simple(heap, lambda_sym, args);
+            let plus = new_primitive_simple(
+                heap,
+                Rc::new(|heap, args| {
+                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    Ok(new_int_simple(heap, a + b))
+                }),
+                "plus".to_string(),
+                false,
+            );
+            evaluator.env_mut().set("+".to_string(), plus);
         }
         
-        let result = eval_logic(expr, &mut evaluator).unwrap();
+        let lambda_expr;
+        let add1;
+        let result;
+        {
+            let heap = evaluator.heap_mut();
+            // Create (lambda (x) (+ x 1))
+            let x_param = new_symbol_simple(heap, "x");
+            let one = new_int_simple(heap, num_bigint::BigInt::from(1));
+            let plus_sym = new_symbol_simple(heap, "+");
+            let nil = heap.nil_simple();
+            
+            // Build (+ x 1)
+            let one_pair = new_pair_simple(heap, one, nil);
+            let x_one_pair = new_pair_simple(heap, x_param, one_pair);
+            let plus_expr = new_pair_simple(heap, plus_sym, x_one_pair);
+            
+            // Build (lambda (x) (+ x 1))
+            let lambda_sym = new_symbol_simple(heap, "lambda");
+            let params_list = new_pair_simple(heap, x_param, nil);
+            let body_nil = new_pair_simple(heap, plus_expr, nil);
+            let lambda_args = new_pair_simple(heap, params_list, body_nil);
+            lambda_expr = new_pair_simple(heap, lambda_sym, lambda_args);
+        }
         
-        // Verify we got a closure
-        match &result.value {
-            SchemeValueSimple::Closure { params, body: closure_body, .. } => {
+        // Evaluate the lambda to create a closure
+        add1 = eval_logic(lambda_expr, &mut evaluator).unwrap();
+        
+        // Verify it's a closure
+        match &add1.value {
+            SchemeValueSimple::Closure { params, body, .. } => {
                 assert_eq!(params.len(), 1);
                 assert_eq!(params[0], "x");
-                // The body should be the same expression we passed in
-                assert_eq!(closure_body.value, body.value);
+                // The body should be the (+ x 1) expression
+                match &body.value {
+                    SchemeValueSimple::Pair(car, _cdr) => {
+                        match &car.value {
+                            SchemeValueSimple::Symbol(s) => assert_eq!(s, "+"),
+                            _ => panic!("Expected + symbol"),
+                        }
+                    }
+                    _ => panic!("Expected pair as body"),
+                }
             }
-            _ => panic!("Expected closure, got {:?}", result.value),
+            _ => panic!("Expected closure"),
+        }
+        
+        // Now apply the closure: (add1 5)
+        let five;
+        let apply_expr;
+        {
+            let heap = evaluator.heap_mut();
+            five = new_int_simple(heap, num_bigint::BigInt::from(5));
+            
+            // Build (add1 5)
+            let nil = heap.nil_simple();
+            let five_pair = new_pair_simple(heap, five, nil);
+            apply_expr = new_pair_simple(heap, add1, five_pair);
+        }
+        
+        // Evaluate the application
+        result = eval_logic(apply_expr, &mut evaluator).unwrap();
+        
+        // Should return 6
+        match &result.value {
+            SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "6"),
+            _ => panic!("Expected integer result"),
+        }
+    }
+
+    #[test]
+    fn test_eval_logic_closure_application() {
+        let mut evaluator = Evaluator::new();
+        
+        // Set up the + function in the environment
+        {
+            let heap = evaluator.heap_mut();
+            let plus = new_primitive_simple(
+                heap,
+                Rc::new(|heap, args| {
+                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    Ok(new_int_simple(heap, a + b))
+                }),
+                "plus".to_string(),
+                false,
+            );
+            evaluator.env_mut().set("+".to_string(), plus);
+        }
+        
+        // Create a closure manually: (lambda (x y) (+ x y))
+        let closure;
+        let captured_env = evaluator.env().current_frame();
+        {
+            let heap = evaluator.heap_mut();
+            let x_param = new_symbol_simple(heap, "x");
+            let y_param = new_symbol_simple(heap, "y");
+            let plus_sym = new_symbol_simple(heap, "+");
+            let nil = heap.nil_simple();
+            
+            // Build (+ x y)
+            let y_pair = new_pair_simple(heap, y_param, nil);
+            let x_y_pair = new_pair_simple(heap, x_param, y_pair);
+            let plus_expr = new_pair_simple(heap, plus_sym, x_y_pair);
+            
+            // Create closure with captured environment
+            closure = new_closure_simple(heap, vec!["x".to_string(), "y".to_string()], plus_expr, captured_env);
+        }
+        
+        // Apply the closure: (closure 3 4)
+        let three;
+        let four;
+        let apply_expr;
+        let result;
+        {
+            let heap = evaluator.heap_mut();
+            three = new_int_simple(heap, num_bigint::BigInt::from(3));
+            four = new_int_simple(heap, num_bigint::BigInt::from(4));
+            
+            // Build (closure 3 4)
+            let nil = heap.nil_simple();
+            let four_pair = new_pair_simple(heap, four, nil);
+            let three_four_pair = new_pair_simple(heap, three, four_pair);
+            apply_expr = new_pair_simple(heap, closure, three_four_pair);
+        }
+        
+        // Evaluate the application
+        result = eval_logic(apply_expr, &mut evaluator).unwrap();
+        
+        // Should return 7
+        match &result.value {
+            SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "7"),
+            _ => panic!("Expected integer result"),
         }
     }
 
