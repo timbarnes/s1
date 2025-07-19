@@ -548,6 +548,41 @@ pub fn deduplicate_symbols(expr: GcRefSimple, heap: &mut GcHeap) -> GcRefSimple 
     }
 }
 
+/// Parse an expression and deduplicate symbols before evaluation.
+///
+/// This wrapper function calls the parser and then runs symbol deduplication
+/// to ensure all symbols are interned. The deduplication is transparent to
+/// eval_logic, which continues to work with string comparisons.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::GcHeap;
+/// use s1::evalsimple::{parse_and_deduplicate, Evaluator};
+/// use s1::parser::ParserSimple;
+/// use s1::io::Port;
+///
+/// let mut evaluator = Evaluator::new();
+/// let mut parser = ParserSimple::new();
+/// let mut port = Port::new_string_input("(define x 42)");
+///
+/// let expr = parse_and_deduplicate(&mut parser, &mut port, &mut evaluator.heap_mut()).unwrap();
+/// // expr now has interned symbols, but eval_logic doesn't need to know
+/// ```
+pub fn parse_and_deduplicate(
+    parser: &mut ParserSimple,
+    port: &mut Port,
+    heap: &mut GcHeap,
+) -> Result<GcRefSimple, String> {
+    // Parse the expression
+    let parsed_expr = parser.parse(heap, port)?;
+    
+    // Deduplicate symbols in the parsed expression
+    let deduplicated_expr = deduplicate_symbols(parsed_expr, heap);
+    
+    Ok(deduplicated_expr)
+}
+
 // ============================================================================
 // TESTS
 // ============================================================================
@@ -1417,5 +1452,81 @@ mod tests {
             }
             _ => panic!("Expected function call structure"),
         }
+    }
+
+    #[test]
+    fn test_parse_and_deduplicate() {
+        let mut evaluator = Evaluator::new();
+        let mut parser = ParserSimple::new();
+        
+        // Test parsing and deduplicating a simple expression
+        let mut port = Port {
+            kind: crate::io::PortKind::StringPortInput {
+                content: "(define x 42)".to_string(),
+                pos: 0,
+            },
+        };
+        
+        let expr = parse_and_deduplicate(&mut parser, &mut port, &mut evaluator.heap_mut()).unwrap();
+        
+        // Verify the expression structure is preserved
+        match &expr.value {
+            SchemeValueSimple::Pair(car, cdr) => {
+                // Should be (define x 42)
+                match &car.value {
+                    SchemeValueSimple::Symbol(name) => assert_eq!(name, "define"),
+                    _ => panic!("Expected define symbol"),
+                }
+                match &cdr.value {
+                    SchemeValueSimple::Pair(sym, rest) => {
+                        match &sym.value {
+                            SchemeValueSimple::Symbol(name) => assert_eq!(name, "x"),
+                            _ => panic!("Expected x symbol"),
+                        }
+                        match &rest.value {
+                            SchemeValueSimple::Pair(val, nil) => {
+                                match &val.value {
+                                    SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "42"),
+                                    _ => panic!("Expected integer 42"),
+                                }
+                                match &nil.value {
+                                    SchemeValueSimple::Nil => {},
+                                    _ => panic!("Expected nil"),
+                                }
+                            }
+                            _ => panic!("Expected value pair"),
+                        }
+                    }
+                    _ => panic!("Expected symbol-value pair"),
+                }
+            }
+            _ => panic!("Expected define expression"),
+        }
+        
+        // Test that symbols are interned by parsing the same expression again
+        let mut port2 = Port {
+            kind: crate::io::PortKind::StringPortInput {
+                content: "(define x 42)".to_string(),
+                pos: 0,
+            },
+        };
+        
+        let expr2 = parse_and_deduplicate(&mut parser, &mut port2, &mut evaluator.heap_mut()).unwrap();
+        
+        // Extract the define symbols from both expressions
+        let define1 = match &expr.value {
+            SchemeValueSimple::Pair(car, _) => car,
+            _ => panic!("Expected pair"),
+        };
+        let define2 = match &expr2.value {
+            SchemeValueSimple::Pair(car, _) => car,
+            _ => panic!("Expected pair"),
+        };
+        
+        // Verify they are the same interned symbol
+        assert!(std::ptr::eq(*define1, *define2), "Define symbols should be interned");
+        
+        // Test symbol table statistics
+        assert!(evaluator.heap_mut().symbol_table_stats() > 0, "Symbol table should contain symbols");
     }
 } 

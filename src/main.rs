@@ -13,7 +13,7 @@ use crate::parser::ParserSimple;
 use crate::eval::EvaluatorSimple;
 use crate::builtin::register_all_simple_frames;
 use crate::io::{Port, PortKind};
-use crate::evalsimple::{Evaluator, eval_logic};
+use crate::evalsimple::{Evaluator, eval_logic, parse_and_deduplicate};
 use crate::env::Environment;
 use argh::FromArgs;
 use num_bigint::BigInt;
@@ -146,7 +146,7 @@ fn repl(
             stdio::stdout().flush().unwrap();
         }
         
-        let parse_result = parser.parse(heap, port_stack.current_mut());
+        let parse_result = parse_and_deduplicate(parser, port_stack.current_mut(), &mut evaluator.heap_mut());
         match parse_result {
             Ok(expr) => {
                 match eval_logic(expr, evaluator) {
