@@ -340,8 +340,9 @@ mod tests {
     use super::*;
     use crate::io::{Port, PortKind};
     use crate::gc::{as_int, as_symbol, as_string, is_nil, as_pair, as_bool, as_char, as_vector, as_float, SchemeValue};
-    // use crate::builtin::{register_all};
+    use crate::gc::SchemeValueSimple;
     use std::collections::HashMap;
+    use num_traits::ToPrimitive;
 
     #[test]
     fn parse_number() {
@@ -577,9 +578,11 @@ mod tests {
         let mut port = Port { kind: PortKind::StringPortInput { content: "42".to_string(), pos: 0 } };
         let mut parser = ParserSimple::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
-        // Convert GcRefSimple to GcRef for testing
-        let expr_gcref = unsafe { std::mem::transmute(expr) };
-        assert_eq!(as_int(&expr_gcref), Some(42));
+        // Test directly with GcRefSimple
+        match &expr.value {
+            crate::gc::SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "42"),
+            _ => panic!("Expected integer, got {:?}", expr.value),
+        }
     }
 
     #[test]
@@ -588,8 +591,10 @@ mod tests {
         let mut port = Port { kind: PortKind::StringPortInput { content: "hello".to_string(), pos: 0 } };
         let mut parser = ParserSimple::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
-        let expr_gcref = unsafe { std::mem::transmute(expr) };
-        assert_eq!(as_symbol(&expr_gcref), Some("hello".to_string()));
+        match &expr.value {
+            crate::gc::SchemeValueSimple::Symbol(s) => assert_eq!(s, "hello"),
+            _ => panic!("Expected symbol, got {:?}", expr.value),
+        }
     }
 
     #[test]
@@ -598,8 +603,10 @@ mod tests {
         let mut port = Port { kind: PortKind::StringPortInput { content: "\"hello world\"".to_string(), pos: 0 } };
         let mut parser = ParserSimple::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
-        let expr_gcref = unsafe { std::mem::transmute(expr) };
-        assert_eq!(as_string(&expr_gcref), Some("hello world".to_string()));
+        match &expr.value {
+            crate::gc::SchemeValueSimple::Str(s) => assert_eq!(s, "hello world"),
+            _ => panic!("Expected string, got {:?}", expr.value),
+        }
     }
 
     #[test]
@@ -608,8 +615,10 @@ mod tests {
         let mut port = Port { kind: PortKind::StringPortInput { content: "nil".to_string(), pos: 0 } };
         let mut parser = ParserSimple::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
-        let expr_gcref = unsafe { std::mem::transmute(expr) };
-        assert!(is_nil(&expr_gcref));
+        match &expr.value {
+            crate::gc::SchemeValueSimple::Nil => assert!(true), // Success
+            _ => panic!("Expected nil, got {:?}", expr.value),
+        }
     }
 
     #[test]
@@ -618,7 +627,9 @@ mod tests {
         let mut port = Port { kind: PortKind::StringPortInput { content: "3.14".to_string(), pos: 0 } };
         let mut parser = ParserSimple::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
-        let expr_gcref = unsafe { std::mem::transmute(expr) };
-        assert_eq!(as_float(&expr_gcref), Some(3.14));
+        match &expr.value {
+            crate::gc::SchemeValueSimple::Float(f) => assert_eq!(*f, 3.14),
+            _ => panic!("Expected float, got {:?}", expr.value),
+        }
     }
 } 
