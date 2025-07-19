@@ -5,9 +5,9 @@
 //! while the apply layer handles function calls with pre-evaluated arguments.
 
 use crate::gc::{GcHeap, GcRefSimple, SchemeValueSimple, new_pair_simple, new_vector_simple, new_closure_simple, new_symbol_simple};
+use crate::env::Environment;
 use crate::parser::ParserSimple;
 use crate::io::Port;
-use crate::env::Environment;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -393,22 +393,33 @@ pub fn lambda_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRe
                         SchemeValueSimple::Pair(body, tail) => {
                             match &tail.value {
                                 SchemeValueSimple::Nil => {
+                                    // Create a mapping from parameter names to their interned symbols
+                                    let mut param_map = HashMap::new();
+                                    for param in &params {
+                                        match &param.value {
+                                            SchemeValueSimple::Symbol(name) => {
+                                                param_map.insert(name.clone(), *param);
+                                            }
+                                            _ => return Err("Lambda parameter must be a symbol".to_string()),
+                                        }
+                                    }
+                                    
+                                    // Deduplicate the body, but preserve parameter symbols
+                                    let deduplicated_body = deduplicate_symbols_preserve_params(*body, evaluator.heap_mut(), &param_map);
+                                    
                                     // Create a new environment that extends the current one
                                     // This captures the current environment for the closure
                                     let captured_env = evaluator.env().extend();
+                                    let captured_frame = captured_env.current_frame();
                                     
-                                    // Create and return the closure
-                                    Ok(new_closure_simple(
-                                        evaluator.heap_mut(),
-                                        params,
-                                        *body,
-                                        captured_env.current_frame(),
-                                    ))
+                                    // Create the closure with the deduplicated body
+                                    let closure = new_closure_simple(evaluator.heap_mut(), params, deduplicated_body, captured_frame);
+                                    Ok(closure)
                                 }
-                                _ => Err("lambda: body must be a single expression".to_string()),
+                                _ => Err("lambda: too many arguments".to_string()),
                             }
                         }
-                        _ => Err("lambda: missing body expression".to_string()),
+                        _ => Err("lambda: missing body".to_string()),
                     }
                 }
                 _ => Err("lambda: malformed arguments".to_string()),
@@ -533,6 +544,91 @@ pub fn deduplicate_symbols(expr: GcRefSimple, heap: &mut GcHeap) -> GcRefSimple 
         SchemeValueSimple::Closure { params, body, env } => {
             // Deduplicate the body, but params are already symbols (interned)
             let new_body = deduplicate_symbols(*body, heap);
+            
+            if std::ptr::eq(*body, new_body) {
+                expr // No change, return original
+            } else {
+                new_closure_simple(heap, params.clone(), new_body, env.clone())
+            }
+        }
+        // Self-evaluating forms and other types return unchanged
+        SchemeValueSimple::Int(_) |
+        SchemeValueSimple::Float(_) |
+        SchemeValueSimple::Str(_) |
+        SchemeValueSimple::Bool(_) |
+        SchemeValueSimple::Char(_) |
+        SchemeValueSimple::Nil |
+        SchemeValueSimple::Primitive { .. } => expr,
+    }
+}
+
+/// Recursively deduplicate symbols in an expression tree, preserving parameter symbols.
+///
+/// This function is used when creating a closure to ensure that the parameter symbols
+/// in the body are the same as those in the parameter list, avoiding potential
+/// symbol mismatch issues.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::GcHeap;
+/// use s1::evalsimple::deduplicate_symbols_preserve_params;
+///
+/// let mut heap = GcHeap::new();
+/// let expr = heap.intern_symbol("foo"); // Already interned
+/// let param_map = HashMap::new(); // No parameters
+/// let deduplicated = deduplicate_symbols_preserve_params(expr, &mut heap, &param_map);
+/// assert!(std::ptr::eq(expr, deduplicated)); // Same object
+/// ```
+pub fn deduplicate_symbols_preserve_params(
+    expr: GcRefSimple,
+    heap: &mut GcHeap,
+    param_map: &HashMap<String, GcRefSimple>,
+) -> GcRefSimple {
+    match &expr.value {
+        SchemeValueSimple::Symbol(name) => {
+            // If the symbol is a parameter, return it directly
+            if let Some(param_sym) = param_map.get(name) {
+                *param_sym
+            } else {
+                // Otherwise, deduplicate it
+                heap.intern_symbol(name)
+            }
+        }
+        SchemeValueSimple::Pair(car, cdr) => {
+            // Recursively deduplicate car and cdr
+            let new_car = deduplicate_symbols_preserve_params(*car, heap, param_map);
+            let new_cdr = deduplicate_symbols_preserve_params(*cdr, heap, param_map);
+            
+            // Only create new pair if something changed
+            if std::ptr::eq(*car, new_car) && std::ptr::eq(*cdr, new_cdr) {
+                expr // No change, return original
+            } else {
+                new_pair_simple(heap, new_car, new_cdr)
+            }
+        }
+        SchemeValueSimple::Vector(elements) => {
+            // Recursively deduplicate all vector elements
+            let mut new_elements = Vec::new();
+            let mut changed = false;
+            
+            for element in elements {
+                let new_element = deduplicate_symbols_preserve_params(*element, heap, param_map);
+                new_elements.push(new_element);
+                if !std::ptr::eq(*element, new_element) {
+                    changed = true;
+                }
+            }
+            
+            if changed {
+                new_vector_simple(heap, new_elements)
+            } else {
+                expr // No change, return original
+            }
+        }
+        SchemeValueSimple::Closure { params, body, env } => {
+            // Deduplicate the body, but params are already symbols (interned)
+            let new_body = deduplicate_symbols_preserve_params(*body, heap, param_map);
             
             if std::ptr::eq(*body, new_body) {
                 expr // No change, return original
@@ -1537,5 +1633,74 @@ mod tests {
         
         // Test symbol table statistics
         assert!(evaluator.heap_mut().symbol_table_stats() > 0, "Symbol table should contain symbols");
+    }
+
+    #[test]
+    fn test_symbol_interning_in_lambda() {
+        let mut evaluator = Evaluator::new();
+        
+        // Create a symbol and bind it to the environment
+        {
+            let heap = evaluator.heap_mut();
+            let plus_sym = heap.intern_symbol("+");
+            let plus_func = new_primitive_simple(
+                heap,
+                Rc::new(|heap, args| {
+                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
+                    Ok(new_int_simple(heap, a + b))
+                }),
+                "plus".to_string(),
+                false,
+            );
+            evaluator.env_mut().set_symbol(plus_sym, plus_func);
+        }
+        
+        // Now create a lambda that uses the + symbol
+        let x_param;
+        let plus_sym;
+        let one;
+        let nil;
+        let plus_expr;
+        {
+            let heap = evaluator.heap_mut();
+            x_param = heap.intern_symbol("x");
+            plus_sym = heap.intern_symbol("+");
+            one = new_int_simple(heap, num_bigint::BigInt::from(1));
+            nil = heap.nil_simple();
+            
+            // Build (+ x 1) - using the same plus_sym that was bound
+            let one_pair = new_pair_simple(heap, one, nil);
+            let x_one_pair = new_pair_simple(heap, x_param, one_pair);
+            plus_expr = new_pair_simple(heap, plus_sym, x_one_pair);
+        }
+        
+        // Create closure manually with the deduplicated body
+        let deduplicated_body;
+        let captured_env = evaluator.env().current_frame();
+        let closure;
+        {
+            let heap = evaluator.heap_mut();
+            deduplicated_body = deduplicate_symbols(plus_expr, heap);
+            closure = new_closure_simple(heap, vec![x_param], deduplicated_body, captured_env);
+        }
+        
+        // Apply the closure: (closure 5)
+        let five;
+        let five_pair;
+        let apply_expr;
+        {
+            let heap = evaluator.heap_mut();
+            five = new_int_simple(heap, num_bigint::BigInt::from(5));
+            five_pair = new_pair_simple(heap, five, nil);
+            apply_expr = new_pair_simple(heap, closure, five_pair);
+        }
+        
+        // This should work because we're using the same interned symbol
+        let result = eval_logic(apply_expr, &mut evaluator).unwrap();
+        match &result.value {
+            SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "6"),
+            _ => panic!("Expected integer result"),
+        }
     }
 } 
