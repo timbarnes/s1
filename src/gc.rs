@@ -61,8 +61,8 @@ pub enum SchemeValueSimple {
     },
     /// Closures (functions with captured environment)
     Closure {
-        /// Parameter names
-        params: Vec<String>,
+        /// Parameter symbols (interned symbol pointers)
+        params: Vec<GcRefSimple>,
         /// Function body expression
         body: GcRefSimple,
         /// Captured environment frame
@@ -96,7 +96,15 @@ impl PartialEq for SchemeValueSimple {
             (SchemeValueSimple::Primitive { .. }, SchemeValueSimple::Primitive { .. }) => true,
             // For Closure, compare params and body (not env since it's captured)
             (SchemeValueSimple::Closure { params: p1, body: b1, .. }, SchemeValueSimple::Closure { params: p2, body: b2, .. }) => {
-                p1 == p2 && b1.value == b2.value
+                if p1.len() != p2.len() {
+                    return false;
+                }
+                for (param1, param2) in p1.iter().zip(p2.iter()) {
+                    if param1.value != param2.value {
+                        return false;
+                    }
+                }
+                b1.value == b2.value
             }
             (SchemeValueSimple::Nil, SchemeValueSimple::Nil) => true,
             _ => false,
@@ -117,7 +125,15 @@ impl std::fmt::Debug for SchemeValueSimple {
             SchemeValueSimple::Bool(b) => write!(f, "Bool({})", b),
             SchemeValueSimple::Char(c) => write!(f, "Char({:?})", c),
             SchemeValueSimple::Primitive { doc, .. } => write!(f, "Primitive({})", doc),
-            SchemeValueSimple::Closure { params, body, .. } => write!(f, "Closure({:?}, {:?})", params, &body.value),
+            SchemeValueSimple::Closure { params, body, .. } => {
+                let param_names: Vec<String> = params.iter()
+                    .map(|p| match &p.value {
+                        SchemeValueSimple::Symbol(name) => name.clone(),
+                        _ => "?".to_string(),
+                    })
+                    .collect();
+                write!(f, "Closure({:?}, {:?})", param_names, &body.value)
+            }
             SchemeValueSimple::Nil => write!(f, "Nil"),
         }
     }
@@ -918,7 +934,7 @@ pub fn new_primitive_simple(
 /// Create a new closure (lambda function) using GcRefSimple references.
 pub fn new_closure_simple(
     heap: &mut GcHeap,
-    params: Vec<String>,
+    params: Vec<GcRefSimple>,
     body: GcRefSimple,
     env: Rc<RefCell<crate::env::Frame>>,
 ) -> GcRefSimple {

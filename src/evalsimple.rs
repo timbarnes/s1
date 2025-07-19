@@ -4,7 +4,7 @@
 //! The logic layer handles self-evaluating forms, special forms, and argument evaluation,
 //! while the apply layer handles function calls with pre-evaluated arguments.
 
-use crate::gc::{GcHeap, GcRefSimple, SchemeValueSimple, new_pair_simple, new_vector_simple, new_closure_simple};
+use crate::gc::{GcHeap, GcRefSimple, SchemeValueSimple, new_pair_simple, new_vector_simple, new_closure_simple, new_symbol_simple};
 use crate::parser::ParserSimple;
 use crate::io::Port;
 use crate::env::Environment;
@@ -47,8 +47,9 @@ impl Evaluator {
 pub fn eval_apply(func: GcRefSimple, args: &[GcRefSimple], evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
     match &func.value {
         SchemeValueSimple::Symbol(name) => {
-            // Symbol lookup - check environment
-            evaluator.env().get(name)
+            // Symbol lookup - check environment using symbol-based lookup
+            // Since we're working with deduplicated symbols, we can use the symbol directly
+            evaluator.env().get_symbol(func)
                 .ok_or_else(|| format!("Unbound variable: {}", name))
         }
         SchemeValueSimple::Primitive { func: primitive_func, .. } => {
@@ -67,7 +68,7 @@ pub fn eval_apply(func: GcRefSimple, args: &[GcRefSimple], evaluator: &mut Evalu
 
 /// Evaluate a closure by creating a new environment frame and evaluating the body
 fn eval_closure_logic(
-    params: &[String],
+    params: &[GcRefSimple],
     body: GcRefSimple,
     env: &Rc<RefCell<crate::env::Frame>>,
     args: &[GcRefSimple],
@@ -86,9 +87,9 @@ fn eval_closure_logic(
     let captured_env = Environment::from_frame(env.clone());
     let mut new_env = captured_env.extend();
 
-    // Bind parameters to arguments in the new environment
+    // Bind parameters to arguments in the new environment using symbol-based binding
     for (param, arg) in params.iter().zip(args.iter()) {
-        new_env.set(param.clone(), *arg);
+        new_env.set_symbol(*param, *arg);
     }
 
     // Temporarily switch the evaluator's environment to the new one
@@ -198,25 +199,26 @@ pub fn define_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRe
             // cdr should be (symbol . rest)
             match &cdr.value {
                 SchemeValueSimple::Pair(sym, rest) => {
-                    // sym should be a symbol
-                    let name = match &sym.value {
-                        SchemeValueSimple::Symbol(s) => s.clone(),
-                        _ => return Err("define: first argument must be a symbol".to_string()),
-                    };
-                    // rest should be (expr . nil)
-                    match &rest.value {
-                        SchemeValueSimple::Pair(expr_val, tail) => {
-                            match &tail.value {
-                                SchemeValueSimple::Nil => {
-                                    // Evaluate expr_val
-                                    let value = eval_logic(*expr_val, evaluator)?;
-                                    evaluator.env_mut().set(name, value);
-                                    Ok(value)
+                    // sym should be a symbol - use it directly for symbol-based operations
+                    match &sym.value {
+                        SchemeValueSimple::Symbol(_) => {
+                            // rest should be (expr . nil)
+                            match &rest.value {
+                                SchemeValueSimple::Pair(expr_val, tail) => {
+                                    match &tail.value {
+                                        SchemeValueSimple::Nil => {
+                                            // Evaluate expr_val
+                                            let value = eval_logic(*expr_val, evaluator)?;
+                                            evaluator.env_mut().set_symbol(*sym, value);
+                                            Ok(value)
+                                        }
+                                        _ => Err("define: too many arguments".to_string()),
+                                    }
                                 }
-                                _ => Err("define: too many arguments".to_string()),
+                                _ => Err("define: missing value expression".to_string()),
                             }
                         }
-                        _ => Err("define: missing value expression".to_string()),
+                        _ => Err("define: first argument must be a symbol".to_string()),
                     }
                 }
                 _ => Err("define: malformed arguments".to_string()),
@@ -322,28 +324,29 @@ pub fn set_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSi
             // cdr should be (symbol . rest)
             match &cdr.value {
                 SchemeValueSimple::Pair(sym, rest) => {
-                    // sym should be a symbol
-                    let name = match &sym.value {
-                        SchemeValueSimple::Symbol(s) => s.clone(),
-                        _ => return Err("set!: first argument must be a symbol".to_string()),
-                    };
-                    // rest should be (expr . nil)
-                    match &rest.value {
-                        SchemeValueSimple::Pair(expr_val, tail) => {
-                            match &tail.value {
-                                SchemeValueSimple::Nil => {
-                                    let value = eval_logic(*expr_val, evaluator)?;
-                                    if evaluator.env().get(&name).is_some() {
-                                        evaluator.env_mut().set(name, value);
-                                        Ok(value)
-                                    } else {
-                                        Err("set!: unbound variable".to_string())
+                    // sym should be a symbol - use it directly for symbol-based operations
+                    match &sym.value {
+                        SchemeValueSimple::Symbol(_) => {
+                            // rest should be (expr . nil)
+                            match &rest.value {
+                                SchemeValueSimple::Pair(expr_val, tail) => {
+                                    match &tail.value {
+                                        SchemeValueSimple::Nil => {
+                                            let value = eval_logic(*expr_val, evaluator)?;
+                                            if evaluator.env().get_symbol(*sym).is_some() {
+                                                evaluator.env_mut().set_symbol(*sym, value);
+                                                Ok(value)
+                                            } else {
+                                                Err("set!: unbound variable".to_string())
+                                            }
+                                        }
+                                        _ => Err("set!: too many arguments".to_string()),
                                     }
                                 }
-                                _ => Err("set!: too many arguments".to_string()),
+                                _ => Err("set!: missing value expression".to_string()),
                             }
                         }
-                        _ => Err("set!: missing value expression".to_string()),
+                        _ => Err("set!: first argument must be a symbol".to_string()),
                     }
                 }
                 _ => Err("set!: missing symbol argument".to_string()),
@@ -375,7 +378,7 @@ pub fn lambda_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRe
                             SchemeValueSimple::Pair(param, next) => {
                                 match &param.value {
                                     SchemeValueSimple::Symbol(name) => {
-                                        params.push(name.clone());
+                                        params.push(new_symbol_simple(evaluator.heap_mut(), name));
                                     }
                                     _ => return Err("lambda: parameter must be a symbol".to_string()),
                                 }
@@ -528,7 +531,7 @@ pub fn deduplicate_symbols(expr: GcRefSimple, heap: &mut GcHeap) -> GcRefSimple 
             }
         }
         SchemeValueSimple::Closure { params, body, env } => {
-            // Deduplicate the body, but params are strings (will be handled later)
+            // Deduplicate the body, but params are already symbols (interned)
             let new_body = deduplicate_symbols(*body, heap);
             
             if std::ptr::eq(*body, new_body) {
@@ -614,7 +617,7 @@ mod tests {
             value = new_int_simple(heap, num_bigint::BigInt::from(99));
             symbol = new_symbol_simple(heap, "x");
         }
-        evaluator.env_mut().set("x".to_string(), value);
+        evaluator.env_mut().set_symbol(symbol, value);
         let result = eval_logic(symbol, &mut evaluator).unwrap();
         assert_eq!(result.value, value.value);
     }
@@ -649,7 +652,7 @@ mod tests {
             args = new_pair_simple(heap, a, b_pair);
             expr = new_pair_simple(heap, plus_sym, args);
         }
-        evaluator.env_mut().set("+".to_string(), plus);
+        evaluator.env_mut().set_symbol(plus_sym, plus);
         let result = eval_logic(expr, &mut evaluator).unwrap();
         match &result.value {
             SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "5"),
@@ -704,8 +707,8 @@ mod tests {
             star_args = new_pair_simple(heap, two, three_pair);
             expr = new_pair_simple(heap, star_sym, star_args);
         }
-        evaluator.env_mut().set("+".to_string(), plus);
-        evaluator.env_mut().set("*".to_string(), times);
+        evaluator.env_mut().set_symbol(plus_sym, plus);
+        evaluator.env_mut().set_symbol(star_sym, times);
         let result = eval_logic(expr, &mut evaluator).unwrap();
         match &result.value {
             SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "54"),
@@ -798,8 +801,8 @@ mod tests {
             star_args = new_pair_simple(heap, two, plus_expr_pair);
             expr = new_pair_simple(heap, star_sym, star_args);
         }
-        evaluator.env_mut().set("*".to_string(), times);
-        evaluator.env_mut().set("+".to_string(), plus);
+        evaluator.env_mut().set_symbol(star_sym, times);
+        evaluator.env_mut().set_symbol(plus_sym, plus);
         let result = eval_logic(expr, &mut evaluator).unwrap();
         match &result.value {
             SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "10"),
@@ -879,9 +882,9 @@ mod tests {
             plus_args = new_pair_simple(heap, two, times_expr_pair);
             expr = new_pair_simple(heap, plus_sym, plus_args);
         }
-        evaluator.env_mut().set("+".to_string(), plus);
-        evaluator.env_mut().set("*".to_string(), times);
-        evaluator.env_mut().set("-".to_string(), minus);
+        evaluator.env_mut().set_symbol(plus_sym, plus);
+        evaluator.env_mut().set_symbol(times_sym, times);
+        evaluator.env_mut().set_symbol(minus_sym, minus);
         let result = eval_logic(expr, &mut evaluator).unwrap();
         match &result.value {
             SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "-1"),
@@ -970,7 +973,7 @@ mod tests {
             begin_args = plus_expr_pair;
             expr = new_pair_simple(heap, begin_sym, begin_args);
         }
-        evaluator.env_mut().set("+".to_string(), plus);
+        evaluator.env_mut().set_symbol(plus_sym, plus);
         let result = eval_logic(expr, &mut evaluator).unwrap();
         match &result.value {
             SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "3"),
@@ -999,7 +1002,7 @@ mod tests {
             _ => panic!("Expected integer result"),
         }
         // Check that the variable is now bound
-        let bound = evaluator.env().get("y").unwrap();
+        let bound = evaluator.env().get_symbol(symbol).unwrap();
         match &bound.value {
             SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "42"),
             _ => panic!("Expected integer result in env"),
@@ -1169,7 +1172,8 @@ mod tests {
                 "plus".to_string(),
                 false,
             );
-            evaluator.env_mut().set("+".to_string(), plus);
+            let plus_sym = new_symbol_simple(heap, "+");
+            evaluator.env_mut().set_symbol(plus_sym, plus);
         }
         
         let lambda_expr;
@@ -1203,7 +1207,11 @@ mod tests {
         match &add1.value {
             SchemeValueSimple::Closure { params, body, .. } => {
                 assert_eq!(params.len(), 1);
-                assert_eq!(params[0], "x");
+                // Check that the parameter is a symbol with the right name
+                match &params[0].value {
+                    SchemeValueSimple::Symbol(name) => assert_eq!(name, "x"),
+                    _ => panic!("Expected symbol parameter"),
+                }
                 // The body should be the (+ x 1) expression
                 match &body.value {
                     SchemeValueSimple::Pair(car, _cdr) => {
@@ -1258,7 +1266,8 @@ mod tests {
                 "plus".to_string(),
                 false,
             );
-            evaluator.env_mut().set("+".to_string(), plus);
+            let plus_sym = new_symbol_simple(heap, "+");
+            evaluator.env_mut().set_symbol(plus_sym, plus);
         }
         
         // Create a closure manually: (lambda (x y) (+ x y))
@@ -1277,7 +1286,7 @@ mod tests {
             let plus_expr = new_pair_simple(heap, plus_sym, x_y_pair);
             
             // Create closure with captured environment
-            closure = new_closure_simple(heap, vec!["x".to_string(), "y".to_string()], plus_expr, captured_env);
+            closure = new_closure_simple(heap, vec![x_param, y_param], plus_expr, captured_env);
         }
         
         // Apply the closure: (closure 3 4)
@@ -1332,13 +1341,13 @@ mod tests {
         }
         
         // First define x
-        evaluator.env_mut().set("x".to_string(), value);
+        evaluator.env_mut().set_symbol(symbol, value);
         
         // Then set! it
         let result = eval_logic(set_expr, &mut evaluator).unwrap();
         
         // Verify the value was set
-        let new_value = evaluator.env().get("x").unwrap();
+        let new_value = evaluator.env().get_symbol(symbol).unwrap();
         match &new_value.value {
             SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "123"),
             _ => panic!("Expected integer"),
