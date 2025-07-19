@@ -57,6 +57,15 @@ pub enum SchemeValueSimple {
         doc: String,
         is_special_form: bool,
     },
+    /// Closures (functions with captured environment)
+    Closure {
+        /// Parameter names
+        params: Vec<String>,
+        /// Function body expression
+        body: GcRefSimple,
+        /// Captured environment frame
+        env: Rc<RefCell<crate::env::Frame>>,
+    },
     /// Empty list (nil)
     Nil,
     // Extend with more types as needed.
@@ -83,6 +92,10 @@ impl PartialEq for SchemeValueSimple {
             (SchemeValueSimple::Char(a), SchemeValueSimple::Char(b)) => a == b,
             // For Primitive, just compare type (not function pointer)
             (SchemeValueSimple::Primitive { .. }, SchemeValueSimple::Primitive { .. }) => true,
+            // For Closure, compare params and body (not env since it's captured)
+            (SchemeValueSimple::Closure { params: p1, body: b1, .. }, SchemeValueSimple::Closure { params: p2, body: b2, .. }) => {
+                p1 == p2 && b1.value == b2.value
+            }
             (SchemeValueSimple::Nil, SchemeValueSimple::Nil) => true,
             _ => false,
         }
@@ -102,6 +115,7 @@ impl std::fmt::Debug for SchemeValueSimple {
             SchemeValueSimple::Bool(b) => write!(f, "Bool({})", b),
             SchemeValueSimple::Char(c) => write!(f, "Char({:?})", c),
             SchemeValueSimple::Primitive { doc, .. } => write!(f, "Primitive({})", doc),
+            SchemeValueSimple::Closure { params, body, .. } => write!(f, "Closure({:?}, {:?})", params, &body.value),
             SchemeValueSimple::Nil => write!(f, "Nil"),
         }
     }
@@ -284,6 +298,10 @@ pub struct GcHeap {
     nil_simple: Option<GcRefSimple>,
     true_simple: Option<GcRefSimple>,
     false_simple: Option<GcRefSimple>,
+    // Free list for GcRefSimple objects
+    free_list_simple: Vec<GcObjectSimple>,
+    // All allocated GcRefSimple objects (for potential future GC)
+    objects_simple: Vec<GcRefSimple>,
 }
 
 impl GcHeap {
@@ -305,7 +323,12 @@ impl GcHeap {
             nil_simple: None,
             true_simple: None,
             false_simple: None,
+            free_list_simple: Vec::new(),
+            objects_simple: Vec::new(),
         };
+        
+        // Pre-allocate objects for the free list
+        heap.pre_allocate_simple_objects();
         // Allocate singletons for the new system
         let nil_simple = heap.alloc_simple(GcObjectSimple {
             value: SchemeValueSimple::Nil,
@@ -487,12 +510,35 @@ impl GcHeap {
     }
 
     /// Allocate a new GcObjectSimple on the heap and return a GcRefSimple.
+    /// Pre-allocate objects for the free list
+    fn pre_allocate_simple_objects(&mut self) {
+        const INITIAL_ALLOCATION: usize = 1000;
+        for _ in 0..INITIAL_ALLOCATION {
+            self.free_list_simple.push(GcObjectSimple {
+                value: SchemeValueSimple::Nil, // Placeholder value
+                marked: false,
+            });
+        }
+    }
+
+    /// Allocate a new GcObjectSimple using the free list
     pub fn alloc_simple(&mut self, obj: GcObjectSimple) -> GcRefSimple {
-        // For now, we'll use a static allocation strategy
-        // This is a simplified version for testing
-        let boxed = Box::new(obj);
-        let leaked = Box::leak(boxed);
-        leaked
+        // Try to get an object from the free list first
+        if let Some(mut free_obj) = self.free_list_simple.pop() {
+            // Reuse the free object by updating its value
+            free_obj.value = obj.value;
+            free_obj.marked = false;
+            let boxed = Box::new(free_obj);
+            let leaked = Box::leak(boxed);
+            self.objects_simple.push(leaked);
+            leaked
+        } else {
+            // Free list is empty, allocate a new object
+            let boxed = Box::new(obj);
+            let leaked = Box::leak(boxed);
+            self.objects_simple.push(leaked);
+            leaked
+        }
     }
 
     /// Get the nil value using the reference-based system.
@@ -504,6 +550,11 @@ impl GcHeap {
     }
     pub fn false_simple(&self) -> GcRefSimple {
         self.false_simple.expect("false_simple not initialized")
+    }
+
+    /// Get statistics about the simple allocation system
+    pub fn simple_stats(&self) -> (usize, usize) {
+        (self.objects_simple.len(), self.free_list_simple.len())
     }
 }
 
@@ -792,6 +843,20 @@ pub fn new_primitive_simple(
 ) -> GcRefSimple {
     let obj = GcObjectSimple { 
         value: SchemeValueSimple::Primitive { func: f, doc, is_special_form }, 
+        marked: false 
+    };
+    heap.alloc_simple(obj)
+}
+
+/// Create a new closure (lambda function) using GcRefSimple references.
+pub fn new_closure_simple(
+    heap: &mut GcHeap,
+    params: Vec<String>,
+    body: GcRefSimple,
+    env: Rc<RefCell<crate::env::Frame>>,
+) -> GcRefSimple {
+    let obj = GcObjectSimple { 
+        value: SchemeValueSimple::Closure { params, body, env }, 
         marked: false 
     };
     heap.alloc_simple(obj)
@@ -1189,6 +1254,41 @@ mod tests {
 
         let not_nil = new_int(&mut heap, BigInt::from(42));
         assert!(!is_nil(&not_nil));
+    }
+
+    #[test]
+    fn test_free_list_allocation() {
+        let mut heap = GcHeap::new();
+        
+        // Check initial stats
+        let (allocated, free) = heap.simple_stats();
+        assert_eq!(allocated, 3); // nil, true, false singletons
+        assert_eq!(free, 997); // 1000 pre-allocated - 3 used for singletons
+        
+        // Allocate some objects
+        let obj1 = heap.alloc_simple(GcObjectSimple {
+            value: SchemeValueSimple::Int(BigInt::from(42)),
+            marked: false,
+        });
+        let obj2 = heap.alloc_simple(GcObjectSimple {
+            value: SchemeValueSimple::Str("hello".to_string()),
+            marked: false,
+        });
+        
+        // Check stats after allocation
+        let (allocated, free) = heap.simple_stats();
+        assert_eq!(allocated, 5); // 3 singletons + 2 new objects
+        assert_eq!(free, 995); // 997 - 2 used objects
+        
+        // Verify the objects work correctly
+        match &obj1.value {
+            SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "42"),
+            _ => panic!("Expected integer"),
+        }
+        match &obj2.value {
+            SchemeValueSimple::Str(s) => assert_eq!(s, "hello"),
+            _ => panic!("Expected string"),
+        }
     }
 
     #[test]

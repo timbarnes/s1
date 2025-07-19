@@ -13,7 +13,7 @@ use crate::gc::GcRefSimple;
 
 /// A single environment frame containing variable bindings
 #[derive(Debug)]
-struct Frame {
+pub struct Frame {
     bindings: HashMap<String, GcRefSimple>,
     parent: Option<Rc<RefCell<Frame>>>,
 }
@@ -118,6 +118,11 @@ impl Environment {
     /// Check if a binding exists anywhere in the frame chain
     pub fn has(&self, name: &str) -> bool {
         self.get(name).is_some()
+    }
+
+    /// Get the current frame (for closure creation)
+    pub fn current_frame(&self) -> Rc<RefCell<Frame>> {
+        self.current_frame.clone()
     }
 }
 

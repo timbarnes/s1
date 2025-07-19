@@ -83,6 +83,7 @@ pub fn eval_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefS
                     "and" => return and_logic(expr, evaluator),
                     "or" => return or_logic(expr, evaluator),
                     "set!" => return set_logic(expr, evaluator),
+                    "lambda" => return lambda_logic(expr, evaluator),
                     _ => {}
                 },
                 _ => {}
@@ -307,6 +308,68 @@ pub fn set_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSi
     }
 }
 
+/// Lambda logic: create a closure with captured environment
+/// (lambda (params...) body) => return closure
+pub fn lambda_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
+    use crate::gc::new_closure_simple;
+    use std::rc::Rc;
+    use std::cell::RefCell;
+    
+    // Extract the arguments: (lambda (params...) body)
+    match &expr.value {
+        SchemeValueSimple::Pair(_, cdr) => {
+            // cdr should be ((params...) . (body . nil))
+            match &cdr.value {
+                SchemeValueSimple::Pair(params_list, body_rest) => {
+                    // Extract parameter names from params_list
+                    let mut params = Vec::new();
+                    let mut current = *params_list;
+                    loop {
+                        match &current.value {
+                            SchemeValueSimple::Nil => break,
+                            SchemeValueSimple::Pair(param, next) => {
+                                match &param.value {
+                                    SchemeValueSimple::Symbol(name) => {
+                                        params.push(name.clone());
+                                    }
+                                    _ => return Err("lambda: parameter must be a symbol".to_string()),
+                                }
+                                current = *next;
+                            }
+                            _ => return Err("lambda: parameter list must be a proper list".to_string()),
+                        }
+                    }
+                    
+                    // Extract body from body_rest
+                    match &body_rest.value {
+                        SchemeValueSimple::Pair(body, tail) => {
+                            match &tail.value {
+                                SchemeValueSimple::Nil => {
+                                    // Create a new environment that extends the current one
+                                    // This captures the current environment for the closure
+                                    let captured_env = evaluator.env().extend();
+                                    
+                                    // Create and return the closure
+                                    Ok(new_closure_simple(
+                                        evaluator.heap_mut(),
+                                        params,
+                                        *body,
+                                        captured_env.current_frame(),
+                                    ))
+                                }
+                                _ => Err("lambda: body must be a single expression".to_string()),
+                            }
+                        }
+                        _ => Err("lambda: missing body expression".to_string()),
+                    }
+                }
+                _ => Err("lambda: malformed arguments".to_string()),
+            }
+        }
+        _ => Err("lambda: not a pair".to_string()),
+    }
+}
+
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
@@ -343,7 +406,7 @@ pub fn is_special_form(func: GcRefSimple) -> Option<&'static str> {
     match &func.value {
         SchemeValueSimple::Symbol(name) => {
             match name.as_str() {
-                "quote" | "if" | "define" | "begin" | "and" | "or" | "set!" => Some(name),
+                "quote" | "if" | "define" | "begin" | "and" | "or" | "set!" | "lambda" => Some(name),
                 _ => None,
             }
         }
@@ -937,6 +1000,58 @@ mod tests {
             let or_expr3 = new_pair_simple(heap, or_sym, f_pair3);
             let result = eval_logic(or_expr3, &mut evaluator).unwrap();
             assert!(matches!(&result.value, SchemeValueSimple::Bool(false)));
+        }
+    }
+
+    #[test]
+    fn test_eval_logic_lambda() {
+        let mut evaluator = Evaluator::new();
+        let lambda_sym;
+        let params_list;
+        let body;
+        let body_rest;
+        let args;
+        let expr;
+        {
+            let heap = evaluator.heap_mut();
+            lambda_sym = new_symbol_simple(heap, "lambda");
+            
+            // Create parameter list: (x)
+            let x_sym = new_symbol_simple(heap, "x");
+            let nil = heap.nil_simple();
+            params_list = new_pair_simple(heap, x_sym, nil);
+            
+            // Create body: (* x x)
+            let star_sym = new_symbol_simple(heap, "*");
+            let x_sym2 = new_symbol_simple(heap, "x");
+            let x_sym3 = new_symbol_simple(heap, "x");
+            let nil2 = heap.nil_simple();
+            let x_pair = new_pair_simple(heap, x_sym3, nil2);
+            let args_pair = new_pair_simple(heap, x_sym2, x_pair);
+            body = new_pair_simple(heap, star_sym, args_pair);
+            
+            // Create body_rest: (body . nil)
+            let nil3 = heap.nil_simple();
+            body_rest = new_pair_simple(heap, body, nil3);
+            
+            // Create args: ((params) . (body . nil))
+            args = new_pair_simple(heap, params_list, body_rest);
+            
+            // Create expr: (lambda (x) (* x x))
+            expr = new_pair_simple(heap, lambda_sym, args);
+        }
+        
+        let result = eval_logic(expr, &mut evaluator).unwrap();
+        
+        // Verify we got a closure
+        match &result.value {
+            SchemeValueSimple::Closure { params, body: closure_body, .. } => {
+                assert_eq!(params.len(), 1);
+                assert_eq!(params[0], "x");
+                // The body should be the same expression we passed in
+                assert_eq!(closure_body.value, body.value);
+            }
+            _ => panic!("Expected closure, got {:?}", result.value),
         }
     }
 
