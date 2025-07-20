@@ -1,10 +1,12 @@
 pub mod number;
 pub mod predicate;
+pub mod list;
 
 use crate::gc::{GcHeap, GcRefSimple, new_string_simple, new_bool_simple, SchemeValueSimple};
 // use num_bigint::BigInt;
 //  use crate::gc::SchemeValue;
 use number::{plus_builtin, minus_builtin, times_builtin, div_builtin, mod_builtin, eq_builtin, lt_builtin, gt_builtin};
+use list::{car_builtin, cdr_builtin, cons_builtin, list_builtin, append_builtin};
 // use crate::printer::scheme_display;
 
 /// Macro to register builtin functions in the environment
@@ -151,6 +153,11 @@ pub fn register_builtins(heap: &mut GcHeap, env: &mut crate::env::Environment) {
         "=" => eq_builtin,
         "<" => lt_builtin,
         ">" => gt_builtin,
+        "car" => car_builtin,
+        "cdr" => cdr_builtin,
+        "cons" => cons_builtin,
+        "list" => list_builtin,
+        "append" => append_builtin,
         "display" => display_builtin_simple,
         "newline" => newline_builtin_simple,
         "quit" => quit_builtin_simple,
