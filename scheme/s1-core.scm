@@ -1,16 +1,17 @@
 ;; s1-core.scm: Scheme-level core predicates and utilities
 
-;; (define (number? x) (eq? (type-of x) 'integer) (or (eq? (type-of x) 'float)))
-;; (define (symbol? x) (eq? (type-of x) 'symbol))
-;; (define (pair? x) (eq? (type-of x) 'pair))
-;; (define (string? x) (eq? (type-of x) 'string))
-;; (define (vector? x) (eq? (type-of x) 'vector))
-;; (define (closure? x) (eq? (type-of x) 'closure))
-;; (define (boolean? x) (eq? (type-of x) 'boolean))
-;; (define (char? x) (eq? (type-of x) 'char))
-;; (define (primitive? x) (eq? (type-of x) 'primitive))
-;; (define (env-frame? x) (eq? (type-of x) 'env-frame))
-;; (define (nil? x) (eq? (type-of x) 'nil)) 
+;; Type predicates using type-of function
+(define number? (lambda (x) (or (eq? (type-of x) 'integer) (eq? (type-of x) 'float))))
+(define symbol? (lambda (x) (eq? (type-of x) 'symbol)))
+(define pair? (lambda (x) (eq? (type-of x) 'pair)))
+(define string? (lambda (x) (eq? (type-of x) 'string)))
+(define vector? (lambda (x) (eq? (type-of x) 'vector)))
+(define closure? (lambda (x) (eq? (type-of x) 'closure)))
+(define boolean? (lambda (x) (eq? (type-of x) 'boolean)))
+(define char? (lambda (x) (eq? (type-of x) 'char)))
+(define primitive? (lambda (x) (eq? (type-of x) 'primitive)))
+(define env-frame? (lambda (x) (eq? (type-of x) 'env-frame)))
+(define nil? (lambda (x) (eq? x '()))) 
 
 ;; List accessor functions (compositions of car and cdr)
 ;; These provide convenient access to nested list elements
