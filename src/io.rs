@@ -86,6 +86,13 @@ pub struct PortStack {
     stack: Vec<Port>,
 }
 
+/// Scheme-based port stack that uses a vector of port objects.
+/// This is the new implementation that stores ports as Scheme objects.
+pub struct SchemePortStack {
+    /// The stack of ports as Scheme objects, with the current port at the top
+    stack: Vec<crate::gc::GcRefSimple>,
+}
+
 impl PortStack {
     /// Create a new port stack with an initial port.
     ///
@@ -208,6 +215,71 @@ impl PortStack {
                 pos: 0,
             },
         });
+        Ok(())
+    }
+}
+
+impl SchemePortStack {
+    /// Create a new scheme port stack with an initial port.
+    ///
+    /// The initial port is typically stdin for interactive use.
+    pub fn new(heap: &mut crate::gc::GcHeap, initial: crate::gc::GcRefSimple) -> Self {
+        Self { stack: vec![initial] }
+    }
+
+    /// Get the current port (the top of the stack).
+    pub fn current(&self) -> crate::gc::GcRefSimple {
+        *self.stack.last().unwrap()
+    }
+
+    /// Get a mutable reference to the current port.
+    /// This is useful for updating port state (like string port position).
+    pub fn current_mut(&mut self) -> &mut crate::gc::GcRefSimple {
+        self.stack.last_mut().unwrap()
+    }
+
+    /// Push a new port onto the stack, making it the current port.
+    pub fn push(&mut self, port: crate::gc::GcRefSimple) {
+        self.stack.push(port);
+    }
+
+    /// Pop the current port from the stack, returning to the previous port.
+    ///
+    /// Returns `true` if a port was popped, `false` if the stack would become empty.
+    /// The stack always maintains at least one port (typically stdin).
+    pub fn pop(&mut self) -> bool {
+        if self.stack.len() > 1 {
+            self.stack.pop();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Load a Scheme file and push it onto the port stack for reading.
+    ///
+    /// This method reads the entire file content and creates a string port
+    /// that can be used by the parser. The file content is pushed onto the
+    /// port stack, so when the file is exhausted, the previous port is restored.
+    ///
+    /// # Arguments
+    ///
+    /// * `filename` - The path to the Scheme file to load
+    /// * `heap` - The garbage collection heap for allocating the new port
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or an error message on failure.
+    pub fn load_scheme_file(&mut self, filename: &str, heap: &mut crate::gc::GcHeap) -> Result<(), String> {
+        let file = File::open(filename).map_err(|e| format!("could not open {}: {}", filename, e))?;
+        let mut content = String::new();
+        StdBufReader::new(file).read_to_string(&mut content).map_err(|e| format!("could not read {}: {}", filename, e))?;
+        
+        let port = crate::gc::new_port_simple(heap, PortKind::StringPortInput {
+            content,
+            pos: 0,
+        });
+        self.push(port);
         Ok(())
     }
 }
@@ -740,6 +812,21 @@ pub fn get_output_string(port: &Port) -> String {
     }
 }
 
+/// Convert a Rust Port to a Scheme port object.
+pub fn port_to_scheme_port(port: Port, heap: &mut crate::gc::GcHeap) -> crate::gc::GcRefSimple {
+    crate::gc::new_port_simple(heap, port.kind)
+}
+
+/// Convert a Scheme port object to a Rust Port.
+pub fn scheme_port_to_port(scheme_port: crate::gc::GcRefSimple) -> Port {
+    match &scheme_port.value {
+        crate::gc::SchemeValueSimple::Port { kind } => Port {
+            kind: kind.clone(),
+        },
+        _ => panic!("Expected port object"),
+    }
+}
+
 
 
 #[cfg(test)]
@@ -852,5 +939,43 @@ mod tests {
         // the initial content from an output string port.
         let content = get_output_string(&output_port);
         assert_eq!(content, "");
+    }
+
+    #[test]
+    fn test_scheme_port_stack() {
+        use crate::gc::GcHeap;
+        
+        let mut heap = GcHeap::new();
+        let stdin_port = port_to_scheme_port(Port { kind: PortKind::Stdin }, &mut heap);
+        let file_port = port_to_scheme_port(Port { kind: PortKind::File { name: "test.scm".to_string(), write: false, file_id: Some(1) } }, &mut heap);
+        
+        let mut stack = SchemePortStack::new(&mut heap, stdin_port);
+        assert!(matches!(&stack.current().value, crate::gc::SchemeValueSimple::Port { kind: PortKind::Stdin }));
+        
+        stack.push(file_port);
+        match &stack.current().value {
+            crate::gc::SchemeValueSimple::Port { kind: PortKind::File { name, .. } } => {
+                assert_eq!(name, "test.scm");
+            }
+            _ => panic!("Expected file port"),
+        }
+        
+        assert!(stack.pop());
+        assert!(matches!(&stack.current().value, crate::gc::SchemeValueSimple::Port { kind: PortKind::Stdin }));
+        
+        assert!(!stack.pop()); // Cannot pop the last port
+    }
+
+    #[test]
+    fn test_port_conversion() {
+        use crate::gc::GcHeap;
+        
+        let mut heap = GcHeap::new();
+        let original_port = Port { kind: PortKind::StringPortInput { content: "hello".to_string(), pos: 0 } };
+        
+        let scheme_port = port_to_scheme_port(original_port.clone(), &mut heap);
+        let converted_port = scheme_port_to_port(scheme_port);
+        
+        assert_eq!(original_port.kind, converted_port.kind);
     }
 } 
