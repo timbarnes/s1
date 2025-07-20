@@ -1,7 +1,7 @@
 ;; s1-core.scm: Scheme-level core predicates and utilities
 
 ;; Type predicates using type-of function
-(define number? (lambda (x) (or (eq? (type-of x) 'integer) (eq? (type-of x) 'float))))
+;; (define number? (lambda (x) (or (eq? (type-of x) 'integer) (eq? (type-of x) 'float))))
 (define symbol? (lambda (x) (eq? (type-of x) 'symbol)))
 (define pair? (lambda (x) (eq? (type-of x) 'pair)))
 (define string? (lambda (x) (eq? (type-of x) 'string)))
@@ -43,4 +43,5 @@
 (define cdddr (lambda (l) (cdr (cdr (cdr l)))))      ;; Cdr of cdr of cdr
 (define cddddr (lambda (l) (cdr (cdr (cdr (cdr l)))))) ;; Cdr of cdr of cdr of cdr
 
-(display "loaded ok\n")
+(display "s1-core loaded")
+(newline)

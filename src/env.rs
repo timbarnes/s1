@@ -9,12 +9,12 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
-use crate::gc::GcRefSimple;
+use crate::gc::GcRef;
 
 /// A single environment frame containing variable bindings
 #[derive(Debug)]
 pub struct Frame {
-    bindings: HashMap<GcRefSimple, GcRefSimple>,
+    bindings: HashMap<GcRef, GcRef>,
     parent: Option<Rc<RefCell<Frame>>>,
 }
 
@@ -28,17 +28,17 @@ impl Frame {
     }
 
     /// Get a binding from this frame using a symbol key (doesn't search parent)
-    fn get_local(&self, symbol: GcRefSimple) -> Option<GcRefSimple> {
+    fn get_local(&self, symbol: GcRef) -> Option<GcRef> {
         self.bindings.get(&symbol).copied()
     }
 
     /// Set a binding in this frame using a symbol key
-    fn set_local(&mut self, symbol: GcRefSimple, value: GcRefSimple) {
+    fn set_local(&mut self, symbol: GcRef, value: GcRef) {
         self.bindings.insert(symbol, value);
     }
 
     /// Check if this frame has a local binding using a symbol key
-    fn has_local(&self, symbol: GcRefSimple) -> bool {
+    fn has_local(&self, symbol: GcRef) -> bool {
         self.bindings.contains_key(&symbol)
     }
 }
@@ -74,17 +74,17 @@ impl Environment {
     }
 
     /// Add a binding to the current frame using a symbol key (for builtin registration)
-    pub fn add_binding(&mut self, symbol: GcRefSimple, value: GcRefSimple) {
+    pub fn add_binding(&mut self, symbol: GcRef, value: GcRef) {
         self.set_symbol(symbol, value);
     }
 
     /// Check if a binding exists in the current frame only (not parent frames)
-    pub fn has_local(&self, symbol: GcRefSimple) -> bool {
+    pub fn has_local(&self, symbol: GcRef) -> bool {
         self.current_frame.borrow().has_local(symbol)
     }
 
     /// Check if a binding exists anywhere in the frame chain
-    pub fn has(&self, symbol: GcRefSimple) -> bool {
+    pub fn has(&self, symbol: GcRef) -> bool {
         self.get_symbol(symbol).is_some()
     }
 
@@ -99,7 +99,7 @@ impl Environment {
     }
 
     /// Get a binding by symbol, searching through the frame chain
-    pub fn get_symbol(&self, symbol: GcRefSimple) -> Option<GcRefSimple> {
+    pub fn get_symbol(&self, symbol: GcRef) -> Option<GcRef> {
         let mut current = Some(self.current_frame.clone());
         
         while let Some(frame_rc) = current {
@@ -113,13 +113,13 @@ impl Environment {
     }
 
     /// Set a binding in the current frame using a symbol key
-    pub fn set_symbol(&mut self, symbol: GcRefSimple, value: GcRefSimple) {
+    pub fn set_symbol(&mut self, symbol: GcRef, value: GcRef) {
         let mut frame = self.current_frame.borrow_mut();
         frame.set_local(symbol, value);
     }
 
     /// Set a binding in the global frame (root of the chain) using a symbol key
-    pub fn set_global_symbol(&mut self, symbol: GcRefSimple, value: GcRefSimple) {
+    pub fn set_global_symbol(&mut self, symbol: GcRef, value: GcRef) {
         let mut current = self.current_frame.clone();
         
         // Find the root frame (the one with no parent)
@@ -140,12 +140,12 @@ impl Environment {
     }
 
     /// Check if a binding exists in the current frame only (not parent frames) using a symbol key
-    pub fn has_local_symbol(&self, symbol: GcRefSimple) -> bool {
+    pub fn has_local_symbol(&self, symbol: GcRef) -> bool {
         self.current_frame.borrow().has_local(symbol)
     }
 
     /// Check if a binding exists anywhere in the frame chain using a symbol key
-    pub fn has_symbol(&self, symbol: GcRefSimple) -> bool {
+    pub fn has_symbol(&self, symbol: GcRef) -> bool {
         self.get_symbol(symbol).is_some()
     }
 }
@@ -155,7 +155,7 @@ impl Environment {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gc::{GcHeap, new_int_simple, new_string_simple};
+    use crate::gc::{GcHeap, new_int, new_string};
     use num_bigint::BigInt;
 
     #[test]
@@ -171,14 +171,14 @@ mod tests {
         let extended_sym = heap.intern_symbol("extended_var");
         
         // Set a global binding
-        let global_val = new_int_simple(&mut heap, BigInt::from(42));
+        let global_val = new_int(&mut heap, BigInt::from(42));
         env.set_global_symbol(global_sym, global_val);
         
         // Verify we can get the global binding
         assert!(env.get_symbol(global_sym).is_some());
         
         // Set a local binding in current frame
-        let local_val = new_string_simple(&mut heap, "local");
+        let local_val = new_string(&mut heap, "local");
         env.set_symbol(local_sym, local_val);
         
         // Verify we can get the local binding
@@ -188,7 +188,7 @@ mod tests {
         let mut extended_env = env.extend();
         
         // Set a binding in the new frame
-        let extended_val = new_int_simple(&mut heap, BigInt::from(99));
+        let extended_val = new_int(&mut heap, BigInt::from(99));
         extended_env.set_symbol(extended_sym, extended_val);
         
         // Verify we can get the extended binding
@@ -204,7 +204,7 @@ mod tests {
         assert!(env.get_symbol(extended_sym).is_none());
         
         // Test that local bindings shadow global ones
-        let shadow_val = new_string_simple(&mut heap, "shadowed");
+        let shadow_val = new_string(&mut heap, "shadowed");
         extended_env.set_symbol(global_sym, shadow_val);
         assert!(extended_env.get_symbol(global_sym).is_some());
     }
@@ -222,14 +222,14 @@ mod tests {
         let extended_sym = heap.intern_symbol("extended_var");
         
         // Set a global binding using symbol
-        let global_val = new_int_simple(&mut heap, BigInt::from(42));
+        let global_val = new_int(&mut heap, BigInt::from(42));
         env.set_global_symbol(global_sym, global_val);
         
         // Verify we can get the global binding using symbol
         assert!(env.get_symbol(global_sym).is_some());
         
         // Set a local binding in current frame using symbol
-        let local_val = new_string_simple(&mut heap, "local");
+        let local_val = new_string(&mut heap, "local");
         env.set_symbol(local_sym, local_val);
         
         // Verify we can get the local binding using symbol
@@ -239,7 +239,7 @@ mod tests {
         let mut extended_env = env.extend();
         
         // Set a binding in the new frame using symbol
-        let extended_val = new_int_simple(&mut heap, BigInt::from(99));
+        let extended_val = new_int(&mut heap, BigInt::from(99));
         extended_env.set_symbol(extended_sym, extended_val);
         
         // Verify we can get the extended binding using symbol
@@ -256,7 +256,7 @@ mod tests {
         assert!(env.get_symbol(extended_sym).is_none());
         
         // Test that local bindings shadow global ones using symbols
-        let shadow_val = new_string_simple(&mut heap, "shadowed");
+        let shadow_val = new_string(&mut heap, "shadowed");
         extended_env.set_symbol(global_sym, shadow_val);
         assert!(extended_env.get_symbol(global_sym).is_some());
         

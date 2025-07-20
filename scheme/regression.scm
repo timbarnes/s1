@@ -229,6 +229,7 @@
 (test-equal 6 (add1 5) "Simple lambda application")
 (test-equal 7 ((lambda (x y) (+ x y)) 3 4) "Immediate lambda application")
 (test-equal 8 (add5 3) "Closure application")
+(test-equal 720 ((lambda (n) (if (= n 0) 1 (* n (fact (- n 1))))) 6) "Factorial test")
 
 ;; Test 13: List Accessors
 (display "=== Testing List Accessors ===")

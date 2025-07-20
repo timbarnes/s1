@@ -4,13 +4,14 @@ mod io;
 mod tokenizer;
 mod parser;
 
-mod evalsimple;
+mod eval;
+mod printer;
 mod builtin;
 mod env;
 
 use crate::parser::Parser;
 use crate::io::{Port, PortKind, PortStack};
-use crate::evalsimple::{Evaluator, eval_logic, parse_and_deduplicate};
+use crate::eval::{Evaluator, eval_logic, parse_and_deduplicate};
 use argh::FromArgs;
 use std::io as stdio;
 use stdio::Write;
@@ -43,25 +44,25 @@ fn main() {
     }
 
     // Execute startup commands as Scheme code
-    let mut startup_commands = Vec::new();
+    // let mut startup_commands = Vec::new();
     
     // Load core file unless --no-core
-    if !args.no_core {
-        startup_commands.push(format!("(load \"scheme/s1-core.scm\")"));
-    }
+    // if !args.no_core {
+    //     startup_commands.push(format!("(load \"scheme/s1-core.scm\")"));
+    // }
     
     // Load each file in order
-    for filename in &args.file {
-        startup_commands.push(format!("(load \"{}\")", filename));
-    }
+    // for filename in &args.file {
+    //     startup_commands.push(format!("(load \"{}\")", filename));
+    // }
     
     // Execute startup commands
-    for command in startup_commands {
-        if let Err(e) = evaluator.eval_string(&command) {
-            eprintln!("Error executing startup command '{}': {}", command, e);
-            std::process::exit(1);
-        }
-    }
+    // for command in startup_commands {
+    //     if let Err(e) = evaluator.eval_string(&command) {
+    //         eprintln!("Error executing startup command '{}': {}", command, e);
+    //         std::process::exit(1);
+    //     }
+    // }
     
     if args.quit {
         return;
@@ -74,7 +75,7 @@ fn main() {
 
 
 fn repl(evaluator: &mut Evaluator) {
-    use crate::gc::SchemeValueSimple;
+    use crate::gc::SchemeValue;
     use crate::io::{Port, PortKind};
     // use crate::tokenizer::Tokenizer;
     use crate::parser::Parser;
@@ -98,19 +99,25 @@ fn repl(evaluator: &mut Evaluator) {
             }
         };
         match &port_stack_val.value {
-            SchemeValueSimple::Nil => {
+            SchemeValue::Nil => {
                 // Port stack is empty: exit cleanly
                 break;
             }
-            SchemeValueSimple::Pair(car, _cdr) => {
+            SchemeValue::Pair(car, _cdr) => {
                 // car should be a port object
                 let port_val = &car.value;
                 let mut port = match port_val {
-                    SchemeValueSimple::Port { kind } => Port { kind: kind.clone() },
+                    SchemeValue::Port { kind } => Port { kind: kind.clone() },
                     _ => {
                         println!("Error: car of **port-stack** is not a port");
                         break;
                     }
+                };
+                
+                // Store the original port kind to update it later
+                let original_kind = match port_val {
+                    SchemeValue::Port { kind } => kind.clone(),
+                    _ => unreachable!(),
                 };
                 interactive = matches!(port.kind, PortKind::Stdin);
                 if interactive {
@@ -120,6 +127,7 @@ fn repl(evaluator: &mut Evaluator) {
                 let parse_result = parse_and_deduplicate(&mut parser, &mut port, evaluator.heap_mut());
                 match parse_result {
                     Ok(expr) => {
+                        println!("Parsed: {}", print_scheme_value(&expr.value));
                         match eval_logic(expr, evaluator) {
                             Ok(result) => {
                                 if interactive {
@@ -127,20 +135,6 @@ fn repl(evaluator: &mut Evaluator) {
                                 }
                             }
                             Err(e) => println!("Evaluation error: {}", e),
-                        }
-                    }
-                    Err(e) if e.contains("end of input") => {
-                        // Pop the port from **port-stack**
-                        // (Scheme code should provide a pop-port! function, but for now, we can do it here)
-                        // Get cdr of port-stack and set it
-                        match &port_stack_val.value {
-                            SchemeValueSimple::Pair(_car, cdr) => {
-                                evaluator.env_mut().set_symbol(port_stack_sym, *cdr);
-                            }
-                            _ => {
-                                println!("Error: **port-stack** is not a proper list");
-                                break;
-                            }
                         }
                     }
                     Err(e) => {
@@ -151,7 +145,7 @@ fn repl(evaluator: &mut Evaluator) {
                                 // EOF on stdin
                                 // Pop the port from **port-stack**
                                 match &port_stack_val.value {
-                                    SchemeValueSimple::Pair(_car, cdr) => {
+                                    SchemeValue::Pair(_car, cdr) => {
                                         evaluator.env_mut().set_symbol(port_stack_sym, *cdr);
                                     }
                                     _ => {
@@ -168,7 +162,18 @@ fn repl(evaluator: &mut Evaluator) {
                                 pos: 0,
                             };
                         } else {
+                            // For non-stdin ports, pop on any parse error and continue
                             println!("Parse error: {}", e);
+                            match &port_stack_val.value {
+                                SchemeValue::Pair(_car, cdr) => {
+                                    evaluator.env_mut().set_symbol(port_stack_sym, *cdr);
+                                    continue;
+                                }
+                                _ => {
+                                    println!("Error: **port-stack** is not a proper list");
+                                    break;
+                                }
+                            }
                         }
                     }
                 }

@@ -19,8 +19,8 @@
 //! ```
 
 use crate::gc::{
-    GcHeap, GcRefSimple, new_int_simple, new_float_simple, new_symbol_simple, new_string_simple, 
-    new_bool_simple, new_char_simple, new_nil_simple, new_pair_simple, new_vector_simple
+    GcHeap, GcRef, new_int, new_float, new_symbol, new_string, 
+    new_bool, new_char, new_nil, new_pair, new_vector
 };
 use crate::tokenizer::{Tokenizer, Token};
 use num_bigint::BigInt;
@@ -46,7 +46,7 @@ impl Parser {
     /// # Arguments
     /// * `heap` - The GC heap for allocating Scheme values
     /// * `port` - The input port to read from
-    pub fn parse(&mut self, heap: &mut GcHeap, port: &mut Port) -> Result<GcRefSimple, String> {
+    pub fn parse(&mut self, heap: &mut GcHeap, port: &mut Port) -> Result<GcRef, String> {
         let mut tokenizer = Tokenizer::new(port);
         let token = tokenizer.next_token();
         match token {
@@ -57,39 +57,39 @@ impl Parser {
     }
 
     /// Parse a quoted expression (after encountering a quote token).
-    fn parse_quoted_expression(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<GcRefSimple, String> {
+    fn parse_quoted_expression(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<GcRef, String> {
         // Get the next token
         let next_token = tokenizer.next_token();
         // Parse the quoted expression first and ensure the borrow is dropped
         let quoted = Self::parse_from_token(heap, next_token, tokenizer)?;
         // Now create the quote structure with a fresh borrow
-        let quote_sym = new_symbol_simple(heap, "quote");
-        let nil = new_nil_simple(heap);
-        let quoted_list = new_pair_simple(heap, quoted, nil);
-        Ok(new_pair_simple(heap, quote_sym, quoted_list))
+        let quote_sym = new_symbol(heap, "quote");
+        let nil = new_nil(heap);
+        let quoted_list = new_pair(heap, quoted, nil);
+        Ok(new_pair(heap, quote_sym, quoted_list))
     }
 
-    fn parse_number_token(heap: &mut GcHeap, s: &str) -> Result<GcRefSimple, String> {
+    fn parse_number_token(heap: &mut GcHeap, s: &str) -> Result<GcRef, String> {
         if s.contains('.') || s.contains('e') || s.contains('E') {
             // Parse as float if it looks like a float
             if let Ok(f) = s.parse::<f64>() {
-                Ok(new_float_simple(heap, f))
+                Ok(new_float(heap, f))
             } else {
                 Err(format!("Invalid float literal: {}", s))
             }
         } else {
             // Parse as BigInt
             if let Some(i) = BigInt::parse_bytes(s.as_bytes(), 10) {
-                Ok(new_int_simple(heap, i))
+                Ok(new_int(heap, i))
             } else {
                 Err(format!("Invalid integer literal: {}", s))
             }
         }
     }
 
-    fn parse_symbol_token(heap: &mut GcHeap, s: &str) -> Result<GcRefSimple, String> {
+    fn parse_symbol_token(heap: &mut GcHeap, s: &str) -> Result<GcRef, String> {
         if s == "nil" || s == "()" {
-            Ok(new_nil_simple(heap))
+            Ok(new_nil(heap))
         } else if s.starts_with("#\\") {
             let ch = match &s[2..] {
                 "space" => Some(' '),
@@ -98,16 +98,16 @@ impl Parser {
                 _ => None,
             };
             if let Some(c) = ch {
-                Ok(new_char_simple(heap, c))
+                Ok(new_char(heap, c))
             } else {
                 Err(format!("Invalid character literal: {}", s))
             }
         } else {
-            Ok(new_symbol_simple(heap, s))
+            Ok(new_symbol(heap, s))
         }
     }
 
-    fn parse_vector_token(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<GcRefSimple, String> {
+    fn parse_vector_token(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<GcRef, String> {
         let mut vec_elems = Vec::new();
         loop {
             let t = tokenizer.next_token();
@@ -119,16 +119,16 @@ impl Parser {
             }
             vec_elems.push(Self::parse_from_token(heap, t, tokenizer)?);
         }
-        Ok(new_vector_simple(heap, vec_elems))
+        Ok(new_vector(heap, vec_elems))
     }
 
     /// Parse an s-expression from a given token (used for list elements and recursive parsing).
-    fn parse_from_token(heap: &mut GcHeap, token: Option<Token>, tokenizer: &mut Tokenizer) -> Result<GcRefSimple, String> {
+    fn parse_from_token(heap: &mut GcHeap, token: Option<Token>, tokenizer: &mut Tokenizer) -> Result<GcRef, String> {
         match token {
             Some(Token::Number(s)) => Self::parse_number_token(heap, &s),
-            Some(Token::String(s)) => Ok(new_string_simple(heap, &s)),
-            Some(Token::Boolean(b)) => Ok(new_bool_simple(heap, b)),
-            Some(Token::Character(c)) => Ok(new_char_simple(heap, c)),
+            Some(Token::String(s)) => Ok(new_string(heap, &s)),
+            Some(Token::Boolean(b)) => Ok(new_bool(heap, b)),
+            Some(Token::Character(c)) => Ok(new_char(heap, c)),
             Some(Token::Symbol(s)) => Self::parse_symbol_token(heap, &s),
             Some(Token::LeftParen) => Self::parse_list(heap, tokenizer),
             Some(Token::RightParen) => Err("Unexpected ')'".to_string()),
@@ -142,16 +142,16 @@ impl Parser {
     }
 
     /// Parse a Scheme list (after encountering a left parenthesis).
-    fn parse_list(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<GcRefSimple, String> {
+    fn parse_list(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<GcRef, String> {
         let mut elements = Vec::new();
         loop {
             let token = tokenizer.next_token();
             match token {
                 Some(Token::RightParen) => {
                     // End of list
-                    let mut list = new_nil_simple(heap);
+                    let mut list = new_nil(heap);
                     for elem in elements.into_iter().rev() {
-                        list = new_pair_simple(heap, elem, list);
+                        list = new_pair(heap, elem, list);
                     }
                     return Ok(list);
                 }
@@ -162,7 +162,7 @@ impl Parser {
                     if let Some(Token::RightParen) = tokenizer.next_token() {
                         let mut list = tail;
                         for elem in elements.into_iter().rev() {
-                            list = new_pair_simple(heap, elem, list);
+                            list = new_pair(heap, elem, list);
                         }
                         return Ok(list);
                     } else {
@@ -182,7 +182,7 @@ impl Parser {
 mod tests {
     use super::*;
     use crate::io::{Port, PortKind};
-    use crate::gc::SchemeValueSimple;
+    use crate::gc::SchemeValue;
 
     #[test]
     fn parse_number() {
@@ -191,7 +191,7 @@ mod tests {
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {
-            SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "42"),
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "42"),
             _ => panic!("Expected integer, got {:?}", expr.value),
         }
     }
@@ -203,7 +203,7 @@ mod tests {
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {
-            SchemeValueSimple::Symbol(s) => assert_eq!(s, "hello"),
+            SchemeValue::Symbol(s) => assert_eq!(s, "hello"),
             _ => panic!("Expected symbol, got {:?}", expr.value),
         }
     }
@@ -215,7 +215,7 @@ mod tests {
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {
-            SchemeValueSimple::Str(s) => assert_eq!(s, "hello world"),
+            SchemeValue::Str(s) => assert_eq!(s, "hello world"),
             _ => panic!("Expected string, got {:?}", expr.value),
         }
     }
@@ -227,7 +227,7 @@ mod tests {
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {
-            SchemeValueSimple::Nil => assert!(true), // Success
+            SchemeValue::Nil => assert!(true), // Success
             _ => panic!("Expected nil, got {:?}", expr.value),
         }
     }
@@ -240,25 +240,25 @@ mod tests {
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         
         match &expr.value {
-            SchemeValueSimple::Pair(car, cdr) => {
+            SchemeValue::Pair(car, cdr) => {
                 match &car.value {
-                    SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "1"),
+                    SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
                     _ => panic!("Expected integer 1, got {:?}", car.value),
                 }
                 match &cdr.value {
-                    SchemeValueSimple::Pair(car2, cdr2) => {
+                    SchemeValue::Pair(car2, cdr2) => {
                         match &car2.value {
-                            SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "2"),
+                            SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
                             _ => panic!("Expected integer 2, got {:?}", car2.value),
                         }
                         match &cdr2.value {
-                            SchemeValueSimple::Pair(car3, cdr3) => {
+                            SchemeValue::Pair(car3, cdr3) => {
                                 match &car3.value {
-                                    SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "3"),
+                                    SchemeValue::Int(i) => assert_eq!(i.to_string(), "3"),
                                     _ => panic!("Expected integer 3, got {:?}", car3.value),
                                 }
                                 match &cdr3.value {
-                                    SchemeValueSimple::Nil => assert!(true), // Success
+                                    SchemeValue::Nil => assert!(true), // Success
                                     _ => panic!("Expected nil, got {:?}", cdr3.value),
                                 }
                             }
@@ -280,13 +280,13 @@ mod tests {
         
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {
-            SchemeValueSimple::Bool(b) => assert_eq!(*b, true),
+            SchemeValue::Bool(b) => assert_eq!(*b, true),
             _ => panic!("Expected true, got {:?}", expr.value),
         }
         
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {
-            SchemeValueSimple::Bool(b) => assert_eq!(*b, false),
+            SchemeValue::Bool(b) => assert_eq!(*b, false),
             _ => panic!("Expected false, got {:?}", expr.value),
         }
     }
@@ -299,13 +299,13 @@ mod tests {
         
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {
-            SchemeValueSimple::Char(c) => assert_eq!(*c, 'a'),
+            SchemeValue::Char(c) => assert_eq!(*c, 'a'),
             _ => panic!("Expected character 'a', got {:?}", expr.value),
         }
         
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {
-            SchemeValueSimple::Char(c) => assert_eq!(*c, ' '),
+            SchemeValue::Char(c) => assert_eq!(*c, ' '),
             _ => panic!("Expected character ' ', got {:?}", expr.value),
         }
     }
@@ -318,19 +318,19 @@ mod tests {
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         
         match &expr.value {
-            SchemeValueSimple::Pair(quote_sym, quoted_expr) => {
+            SchemeValue::Pair(quote_sym, quoted_expr) => {
                 match &quote_sym.value {
-                    SchemeValueSimple::Symbol(s) => assert_eq!(s, "quote"),
+                    SchemeValue::Symbol(s) => assert_eq!(s, "quote"),
                     _ => panic!("Expected symbol 'quote', got {:?}", quote_sym.value),
                 }
                 match &quoted_expr.value {
-                    SchemeValueSimple::Pair(hello_sym, nil) => {
+                    SchemeValue::Pair(hello_sym, nil) => {
                         match &hello_sym.value {
-                            SchemeValueSimple::Symbol(s) => assert_eq!(s, "hello"),
+                            SchemeValue::Symbol(s) => assert_eq!(s, "hello"),
                             _ => panic!("Expected symbol 'hello', got {:?}", hello_sym.value),
                         }
                         match &nil.value {
-                            SchemeValueSimple::Nil => assert!(true), // Success
+                            SchemeValue::Nil => assert!(true), // Success
                             _ => panic!("Expected nil, got {:?}", nil.value),
                         }
                     }
@@ -349,13 +349,13 @@ mod tests {
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         
         match &expr.value {
-            SchemeValueSimple::Pair(car, cdr) => {
+            SchemeValue::Pair(car, cdr) => {
                 match &car.value {
-                    SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "1"),
+                    SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
                     _ => panic!("Expected integer 1, got {:?}", car.value),
                 }
                 match &cdr.value {
-                    SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "2"),
+                    SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
                     _ => panic!("Expected integer 2, got {:?}", cdr.value),
                 }
             }
@@ -371,18 +371,18 @@ mod tests {
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         
         match &expr.value {
-            SchemeValueSimple::Vector(v) => {
+            SchemeValue::Vector(v) => {
                 assert_eq!(v.len(), 3);
                 match &v[0].value {
-                    SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "1"),
+                    SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
                     _ => panic!("Expected integer 1, got {:?}", v[0].value),
                 }
                 match &v[1].value {
-                    SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "2"),
+                    SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
                     _ => panic!("Expected integer 2, got {:?}", v[1].value),
                 }
                 match &v[2].value {
-                    SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "3"),
+                    SchemeValue::Int(i) => assert_eq!(i.to_string(), "3"),
                     _ => panic!("Expected integer 3, got {:?}", v[2].value),
                 }
             }
@@ -397,7 +397,7 @@ mod tests {
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {
-            SchemeValueSimple::Float(f) => assert_eq!(*f, 3.14),
+            SchemeValue::Float(f) => assert_eq!(*f, 3.14),
             _ => panic!("Expected float, got {:?}", expr.value),
         }
     }
