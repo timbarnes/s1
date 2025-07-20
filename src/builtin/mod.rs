@@ -7,81 +7,10 @@ use std::rc::Rc;
 //  use crate::gc::SchemeValue;
 use number::{plus_builtin, minus_builtin, times_builtin, div_builtin, mod_builtin};
 // use crate::printer::scheme_display;
-use crate::evalsimple::Evaluator;
 
 // ============================================================================
-// SIMPLE BUILTINS (Reference-based GC system)
+// BUILTIN FUNCTIONS
 // ============================================================================
-
-/// Simple quote handler using Evaluator interface
-pub fn quote_handler_simple(_evaluator: &mut Evaluator, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
-    if args.len() != 1 {
-        Err("quote: expected exactly 1 argument".to_string())
-    } else {
-        Ok(args[0])
-    }
-}
-
-/// Simple and handler using Evaluator interface
-pub fn and_handler_simple(_evaluator: &mut Evaluator, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
-    if args.is_empty() {
-        // (and) returns #t
-        return Ok(_evaluator.heap.true_simple());
-    }
-    Ok(args[0])
-}
-
-/// Simple or handler using Evaluator interface
-pub fn or_handler_simple(_evaluator: &mut Evaluator, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
-    if args.is_empty() {
-        // (or) returns #f
-        return Ok(_evaluator.heap.false_simple());
-    }
-    Ok(args[0])
-}
-
-/// Simple define handler using Evaluator interface
-pub fn define_handler_simple(_evaluator: &mut Evaluator, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
-    if args.len() != 2 {
-        return Err("define: expected exactly 2 arguments (symbol expr)".to_string());
-    }
-    
-    // First argument should be a symbol
-    let symbol = &args[0];
-    match &symbol.value {
-        SchemeValueSimple::Symbol(name) => name.clone(),
-        _ => return Err("define: first argument must be a symbol".to_string()),
-    };
-    
-    // Second argument is the expression to evaluate
-    let expr = &args[1];
-    
-    // For now, just return the expression unevaluated
-    // TODO: Implement proper evaluation with environment
-    Ok(*expr)
-}
-
-/// Simple if handler using Evaluator interface
-pub fn if_handler_simple(_evaluator: &mut Evaluator, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
-    if args.len() != 2 && args.len() != 3 {
-        return Err("if: expected 2 or 3 arguments".to_string());
-    }
-    
-    // For now, just return the test expression
-    // TODO: Implement proper evaluation with environment
-    Ok(args[0])
-}
-
-/// Simple begin handler using Evaluator interface
-pub fn begin_handler_simple(_evaluator: &mut Evaluator, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
-    if args.is_empty() {
-        return Err("begin: expected at least 1 argument".to_string());
-    }
-    
-    // For now, just return the last expression
-    // TODO: Implement proper evaluation with environment
-    Ok(args[args.len()-1])
-}
 
 pub fn display_builtin_simple(_heap: &mut GcHeap, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if args.len() < 1 || args.len() > 2 {
