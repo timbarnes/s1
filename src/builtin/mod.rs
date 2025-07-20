@@ -8,6 +8,7 @@ use crate::gc::{GcHeap, GcRefSimple, new_string_simple, new_bool_simple, SchemeV
 use number::{plus_builtin, minus_builtin, times_builtin, div_builtin, mod_builtin, eq_builtin, lt_builtin, gt_builtin};
 use list::{car_builtin, cdr_builtin, cons_builtin, list_builtin, append_builtin};
 // use crate::printer::scheme_display;
+use crate::printer::print_scheme_value;
 
 /// Macro to register builtin functions in the environment
 /// 
@@ -31,16 +32,15 @@ pub fn display_builtin_simple(_heap: &mut GcHeap, args: &[GcRefSimple]) -> Resul
     if args.len() < 1 || args.len() > 2 {
         return Err("display: expected 1 or 2 arguments".to_string());
     }
-    
     let val = &args[0];
-    // let s = scheme_display(&val.value);
-    let s = format!("{:?}", &val.value);
-    
+    use crate::gc::SchemeValueSimple;
+    let s = match &val.value {
+        SchemeValueSimple::Str(s) => s.clone(), // Print raw string, no quotes
+        _ => print_scheme_value(&val.value),    // Use pretty-printer for other types
+    };
     // If a port is provided as the second argument, write to it
     if args.len() == 2 {
-        let _port_arg = &args[1];
-        // For now, we'll just write to stdout since we don't have port objects in GC yet
-        // In a full implementation, we'd check if port_arg is a port and write to it
+        // For now, just write to stdout
         print!("{}", s);
         use std::io::Write;
         std::io::stdout().flush().unwrap();
@@ -50,7 +50,6 @@ pub fn display_builtin_simple(_heap: &mut GcHeap, args: &[GcRefSimple]) -> Resul
         use std::io::Write;
         std::io::stdout().flush().unwrap();
     }
-    
     Ok(*val)
 }
 
@@ -110,9 +109,20 @@ pub fn load_builtin_simple(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result<Gc
         _ => return Err("load: argument must be a string".to_string()),
     };
     
-    // For now, just return a placeholder
-    // TODO: Implement actual file loading with evaluator's port stack
-    Ok(new_string_simple(heap, &format!("Loaded file: {}", filename)))
+    // Read the file content
+    let content = match std::fs::read_to_string(&filename) {
+        Ok(content) => content,
+        Err(e) => return Err(format!("load: could not read file '{}': {}", filename, e)),
+    };
+    
+    // Create a temporary evaluator to evaluate the file content
+    let mut evaluator = crate::evalsimple::Evaluator::new();
+    
+    // Evaluate the file content
+    match evaluator.eval_string(&content) {
+        Ok(_) => Ok(new_string_simple(heap, &format!("Loaded file: {}", filename))),
+        Err(e) => Err(format!("load: error evaluating file '{}': {}", filename, e)),
+    }
 }
 
 /// Builtin function: (load filename) - evaluator-aware version
@@ -134,8 +144,6 @@ pub fn load_builtin_evaluator(evaluator: &mut crate::evalsimple::Evaluator, args
     // TODO: Implement actual file loading with proper port stack integration
     Ok(crate::gc::new_string_simple(evaluator.heap_mut(), &format!("Loaded file: {}", filename)))
 }
-
-
 
 /// Register all builtin functions in the environment
 pub fn register_builtins(heap: &mut GcHeap, env: &mut crate::env::Environment) {

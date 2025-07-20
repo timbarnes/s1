@@ -1,4 +1,4 @@
-use crate::gc::SchemeValue;
+use crate::gc::{SchemeValue, SchemeValueSimple};
 
 pub fn scheme_display(val: &SchemeValue) -> String {
     match val {
@@ -56,5 +56,45 @@ pub fn scheme_display(val: &SchemeValue) -> String {
         SchemeValue::Closure { .. } => "#<closure>".to_string(),
         SchemeValue::EnvFrame(_) => "#<env-frame>".to_string(),
         SchemeValue::SpecialForm { .. } => "#<special-form>".to_string(),
+    }
+}
+
+pub fn print_scheme_value(val: &SchemeValueSimple) -> String {
+    match val {
+        SchemeValueSimple::Pair(_, _) => {
+            let mut s = String::from("(");
+            let mut first = true;
+            let mut current = val;
+            loop {
+                match current {
+                    SchemeValueSimple::Pair(car, cdr) => {
+                        if !first { s.push(' '); }
+                        s.push_str(&print_scheme_value(&car.value));
+                        current = &cdr.value;
+                        first = false;
+                    }
+                    SchemeValueSimple::Nil => {
+                        s.push(')');
+                        break;
+                    }
+                    _ => {
+                        s.push_str(" . ");
+                        s.push_str(&print_scheme_value(current));
+                        s.push(')');
+                        break;
+                    }
+                }
+            }
+            s
+        }
+        SchemeValueSimple::Symbol(s) => s.clone(),
+        SchemeValueSimple::Int(i) => i.to_string(),
+        SchemeValueSimple::Float(f) => f.to_string(),
+        SchemeValueSimple::Str(s) => s.clone(), // raw string, no quotes
+        SchemeValueSimple::Bool(true) => "#t".to_string(),
+        SchemeValueSimple::Bool(false) => "#f".to_string(),
+        SchemeValueSimple::Char(c) => format!("#\\{}", c),
+        SchemeValueSimple::Nil => "nil".to_string(),
+        _ => format!("{:?}", val),
     }
 } 

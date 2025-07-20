@@ -14,47 +14,7 @@ use crate::evalsimple::{Evaluator, eval_logic, parse_and_deduplicate};
 use argh::FromArgs;
 use std::io as stdio;
 use stdio::Write;
-
-fn print_scheme_value(val: &crate::gc::SchemeValueSimple) -> String {
-    use crate::gc::SchemeValueSimple;
-    match val {
-        SchemeValueSimple::Pair(_, _) => {
-            let mut s = String::from("(");
-            let mut first = true;
-            let mut current = val;
-            loop {
-                match current {
-                    SchemeValueSimple::Pair(car, cdr) => {
-                        if !first { s.push(' '); }
-                        s.push_str(&print_scheme_value(&car.value));
-                        current = &cdr.value;
-                        first = false;
-                    }
-                    SchemeValueSimple::Nil => {
-                        s.push(')');
-                        break;
-                    }
-                    _ => {
-                        s.push_str(" . ");
-                        s.push_str(&print_scheme_value(current));
-                        s.push(')');
-                        break;
-                    }
-                }
-            }
-            s
-        }
-        SchemeValueSimple::Symbol(s) => s.clone(),
-        SchemeValueSimple::Int(i) => i.to_string(),
-        SchemeValueSimple::Float(f) => f.to_string(),
-        SchemeValueSimple::Str(s) => format!("\"{}\"", s),
-        SchemeValueSimple::Bool(true) => "#t".to_string(),
-        SchemeValueSimple::Bool(false) => "#f".to_string(),
-        SchemeValueSimple::Char(c) => format!("#\\{}", c),
-        SchemeValueSimple::Nil => "nil".to_string(),
-        _ => format!("{:?}", val),
-    }
-}
+use crate::printer::print_scheme_value;
 
 #[derive(FromArgs)]
 /// A simple Scheme interpreter
