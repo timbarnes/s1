@@ -16,14 +16,39 @@ use std::cell::RefCell;
 pub struct Evaluator {
     pub heap: GcHeap,
     env: Environment,
+    port_stack: crate::io::PortStack,
 }
 
 impl Evaluator {
     pub fn new() -> Self {
-        Self {
+        let mut evaluator = Self {
             heap: GcHeap::new(),
             env: Environment::new(),
-        }
+            port_stack: crate::io::PortStack::new(crate::io::Port {
+                kind: crate::io::PortKind::Stdin,
+            }),
+        };
+        
+        // Register built-ins in the evaluator's heap and environment
+        crate::builtin::register_all_simple_frames(&mut evaluator.heap, &mut evaluator.env);
+        
+        evaluator
+    }
+
+    /// Create an evaluator with a specific heap
+    pub fn with_heap(heap: GcHeap) -> Self {
+        let mut evaluator = Self {
+            heap,
+            env: Environment::new(),
+            port_stack: crate::io::PortStack::new(crate::io::Port {
+                kind: crate::io::PortKind::Stdin,
+            }),
+        };
+        
+        // Register built-ins in the evaluator's heap and environment
+        crate::builtin::register_all_simple_frames(&mut evaluator.heap, &mut evaluator.env);
+        
+        evaluator
     }
 
     /// Get a reference to the heap for allocation
@@ -39,6 +64,35 @@ impl Evaluator {
     /// Get a mutable reference to the environment (for eval_apply only)
     pub fn env_mut(&mut self) -> &mut Environment {
         &mut self.env
+    }
+
+    /// Get a reference to the port stack
+    pub fn port_stack(&self) -> &crate::io::PortStack {
+        &self.port_stack
+    }
+
+    /// Get a mutable reference to the port stack
+    pub fn port_stack_mut(&mut self) -> &mut crate::io::PortStack {
+        &mut self.port_stack
+    }
+
+    /// Evaluate a string of Scheme code
+    pub fn eval_string(&mut self, code: &str) -> Result<GcRefSimple, String> {
+        use crate::parser::ParserSimple;
+        use crate::io::{Port, PortKind};
+        
+        // Create a temporary port for parsing
+        let mut port = Port {
+            kind: PortKind::StringPortInput {
+                content: code.to_string(),
+                pos: 0,
+            },
+        };
+        
+        // Parse and evaluate
+        let mut parser = ParserSimple::new();
+        let expr = parse_and_deduplicate(&mut parser, &mut port, &mut self.heap)?;
+        eval_logic(expr, self)
     }
 }
 
@@ -378,7 +432,7 @@ pub fn lambda_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRe
                             SchemeValueSimple::Pair(param, next) => {
                                 match &param.value {
                                     SchemeValueSimple::Symbol(name) => {
-                                        params.push(new_symbol_simple(evaluator.heap_mut(), name));
+                                        params.push(evaluator.heap_mut().intern_symbol(name));
                                     }
                                     _ => return Err("lambda: parameter must be a symbol".to_string()),
                                 }
@@ -407,10 +461,9 @@ pub fn lambda_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRe
                                     // Deduplicate the body, but preserve parameter symbols
                                     let deduplicated_body = deduplicate_symbols_preserve_params(*body, evaluator.heap_mut(), &param_map);
                                     
-                                    // Create a new environment that extends the current one
-                                    // This captures the current environment for the closure
-                                    let captured_env = evaluator.env().extend();
-                                    let captured_frame = captured_env.current_frame();
+                                    // Capture the current environment for the closure
+                                    // This ensures the closure has access to all bindings in the current environment
+                                    let captured_frame = evaluator.env().current_frame();
                                     
                                     // Create the closure with the deduplicated body
                                     let closure = new_closure_simple(evaluator.heap_mut(), params, deduplicated_body, captured_frame);

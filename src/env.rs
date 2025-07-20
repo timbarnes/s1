@@ -136,6 +136,11 @@ impl Environment {
         self.set(name, value);
     }
 
+    /// Add a binding to the current frame using a symbol key (for builtin registration)
+    pub fn add_binding_symbol(&mut self, symbol: GcRefSimple, value: GcRefSimple) {
+        self.set_symbol(symbol, value);
+    }
+
     /// Check if a binding exists in the current frame only (not parent frames)
     pub fn has_local(&self, name: &str) -> bool {
         self.current_frame.borrow().has_local(name)

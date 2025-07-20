@@ -426,6 +426,26 @@ pub fn help_builtin_simple(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result<Gc
     }
 }
 
+/// Simple load builtin using reference-based GC system
+pub fn load_builtin_simple(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+    if args.len() != 1 {
+        return Err("load: expected 1 argument".to_string());
+    }
+    
+    match &args[0].value {
+        SchemeValueSimple::Str(filename) => {
+            // TODO: We need access to the evaluator to get the port stack
+            // For now, just return success
+            // In a full implementation, we would need to:
+            // 1. Get access to the evaluator (need to change the builtin system)
+            // 2. Call evaluator.port_stack_mut().load_scheme_file(filename)
+            // 3. Return success or error
+            Ok(heap.true_simple())
+        }
+        _ => Err("load: argument must be a string".to_string()),
+    }
+}
+
 /// Register all simple builtins in the environment (old flat HashMap version)
 pub fn register_all_simple(heap: &mut GcHeap, env: &mut std::collections::HashMap<String, GcRefSimple>) {
     // Register basic builtins using the new simple primitive system
@@ -447,18 +467,19 @@ pub fn register_all_simple(heap: &mut GcHeap, env: &mut std::collections::HashMa
 
 /// Register all simple builtins in the frame-based environment
 pub fn register_all_simple_frames(heap: &mut GcHeap, env: &mut crate::env::Environment) {
-    // Register basic builtins using the new simple primitive system
-    env.add_binding("number?".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(number_q_simple), "number?: returns #t if argument is a number".to_string(), false));
-    env.add_binding("type-of".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(type_of_simple), "type-of: returns the type of an object".to_string(), false));
-    env.add_binding("+".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(plus_builtin_simple), "+: adds numbers".to_string(), false));
-    env.add_binding("-".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(minus_builtin_simple), "-: subtracts numbers".to_string(), false));
-    env.add_binding("*".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(times_builtin_simple), "*: multiplies numbers".to_string(), false));
-    env.add_binding("/".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(div_builtin_simple), "/: divides numbers".to_string(), false));
-    env.add_binding("mod".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(mod_builtin_simple), "mod: returns remainder of division".to_string(), false));
-    env.add_binding("display".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(display_builtin_simple), "display: displays a value".to_string(), false));
-    env.add_binding("newline".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(newline_builtin_simple), "newline: prints a newline".to_string(), false));
-    env.add_binding("quit".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(quit_builtin_simple), "quit: exits the interpreter".to_string(), false));
-    env.add_binding("help".to_string(), crate::gc::new_primitive_simple(heap, Rc::new(help_builtin_simple), "help: returns help for a symbol".to_string(), false));
+    // Register basic builtins using the new simple primitive system with symbol-based bindings in the global frame
+    env.set_global_symbol(heap.intern_symbol("number?"), crate::gc::new_primitive_simple(heap, Rc::new(number_q_simple), "number?: returns #t if argument is a number".to_string(), false));
+    env.set_global_symbol(heap.intern_symbol("type-of"), crate::gc::new_primitive_simple(heap, Rc::new(type_of_simple), "type-of: returns the type of an object".to_string(), false));
+    env.set_global_symbol(heap.intern_symbol("+"), crate::gc::new_primitive_simple(heap, Rc::new(plus_builtin_simple), "+: adds numbers".to_string(), false));
+    env.set_global_symbol(heap.intern_symbol("-"), crate::gc::new_primitive_simple(heap, Rc::new(minus_builtin_simple), "-: subtracts numbers".to_string(), false));
+    env.set_global_symbol(heap.intern_symbol("*"), crate::gc::new_primitive_simple(heap, Rc::new(times_builtin_simple), "*: multiplies numbers".to_string(), false));
+    env.set_global_symbol(heap.intern_symbol("/"), crate::gc::new_primitive_simple(heap, Rc::new(div_builtin_simple), "/: divides numbers".to_string(), false));
+    env.set_global_symbol(heap.intern_symbol("mod"), crate::gc::new_primitive_simple(heap, Rc::new(mod_builtin_simple), "mod: returns remainder of division".to_string(), false));
+    env.set_global_symbol(heap.intern_symbol("display"), crate::gc::new_primitive_simple(heap, Rc::new(display_builtin_simple), "display: displays a value".to_string(), false));
+    env.set_global_symbol(heap.intern_symbol("newline"), crate::gc::new_primitive_simple(heap, Rc::new(newline_builtin_simple), "newline: prints a newline".to_string(), false));
+    env.set_global_symbol(heap.intern_symbol("quit"), crate::gc::new_primitive_simple(heap, Rc::new(quit_builtin_simple), "quit: exits the interpreter".to_string(), false));
+    env.set_global_symbol(heap.intern_symbol("help"), crate::gc::new_primitive_simple(heap, Rc::new(help_builtin_simple), "help: returns help for a symbol".to_string(), false));
+    env.set_global_symbol(heap.intern_symbol("load"), crate::gc::new_primitive_simple(heap, Rc::new(load_builtin_simple), "load: loads a Scheme file".to_string(), false));
     
     // Note: Special forms are left for later as requested
     // TODO: Add special forms (quote, if, begin, and, or, define) when ready

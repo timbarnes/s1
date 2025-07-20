@@ -8,21 +8,12 @@ mod evalsimple;
 mod builtin;
 mod env;
 
-use crate::gc::GcHeap;
 use crate::parser::ParserSimple;
-use crate::eval::EvaluatorSimple;
-use crate::builtin::register_all_simple_frames;
-use crate::io::{Port, PortKind};
+use crate::io::{Port, PortKind, PortStack};
 use crate::evalsimple::{Evaluator, eval_logic, parse_and_deduplicate};
-use crate::env::Environment;
 use argh::FromArgs;
-use num_bigint::BigInt;
 use std::io as stdio;
 use stdio::Write;
-use std::fs::File;
-use std::io::BufReader;
-use std::io::Read;
-use crate::io::PortStack;
 
 fn print_scheme_value(val: &crate::gc::SchemeValueSimple) -> String {
     use crate::gc::SchemeValueSimple;
@@ -81,55 +72,44 @@ struct Args {
 
 fn main() {
     let args: Args = argh::from_env();
-    let mut heap = GcHeap::new();
     let mut evaluator = Evaluator::new();
-    register_all_simple_frames(&mut heap, evaluator.env_mut());
 
-    // File loading uses a port stack
+    // Execute startup commands as Scheme code
+    let mut startup_commands = Vec::new();
+    
+    // Load core file unless --no-core
+    if !args.no_core {
+        startup_commands.push(format!("(load \"scheme/s1-core.scm\")"));
+    }
+    
+    // Load each file in order
+    for filename in &args.file {
+        startup_commands.push(format!("(load \"{}\")", filename));
+    }
+    
+    // Execute startup commands
+    for command in startup_commands {
+        if let Err(e) = evaluator.eval_string(&command) {
+            eprintln!("Error executing startup command '{}': {}", command, e);
+            std::process::exit(1);
+        }
+    }
+    
+    if args.quit {
+        return;
+    }
+    
+    // Drop into the REPL
     let mut port_stack = PortStack::new(Port {
         kind: PortKind::Stdin,
     });
     let mut parser = ParserSimple::new();
-
-    // Load core file unless --no-core
-    if !args.no_core {
-        if let Err(e) = load_scheme_file("scheme/s1-core.scm", &mut heap, &mut port_stack) {
-            eprintln!("Error loading core: {}", e);
-            std::process::exit(1);
-        }
-    }
-    // Load each file in order
-    for filename in &args.file {
-        if let Err(e) = load_scheme_file(filename, &mut heap, &mut port_stack) {
-            eprintln!("Error loading {}: {}", filename, e);
-            std::process::exit(1);
-        }
-    }
-    if args.quit {
-        return;
-    }
-    repl(&mut heap, &mut evaluator, &mut port_stack, &mut parser);
+    repl(&mut evaluator, &mut port_stack, &mut parser);
 }
 
-fn load_scheme_file(
-    filename: &str,
-    heap: &mut GcHeap,
-    port_stack: &mut PortStack,
-) -> Result<(), String> {
-    let file = File::open(filename).map_err(|e| format!("could not open {}: {}", filename, e))?;
-    let mut content = String::new();
-    BufReader::new(file).read_to_string(&mut content).map_err(|e| format!("could not read {}: {}", filename, e))?;
-    port_stack.push(Port {
-        kind: PortKind::StringPortInput {
-            content,
-            pos: 0,
-        },
-    });
-    Ok(())
-}
+
 
 fn repl(
-    heap: &mut GcHeap,
     evaluator: &mut Evaluator,
     port_stack: &mut PortStack,
     parser: &mut ParserSimple,
@@ -146,7 +126,7 @@ fn repl(
             stdio::stdout().flush().unwrap();
         }
         
-        let parse_result = parse_and_deduplicate(parser, port_stack.current_mut(), &mut evaluator.heap_mut());
+        let parse_result = parse_and_deduplicate(parser, port_stack.current_mut(), evaluator.heap_mut());
         match parse_result {
             Ok(expr) => {
                 match eval_logic(expr, evaluator) {

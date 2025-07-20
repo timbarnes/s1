@@ -25,6 +25,7 @@
 use std::io::{self, Write, Read, BufRead, BufReader, BufWriter};
 use std::collections::HashMap;
 use std::fs::File;
+use std::io::BufReader as StdBufReader;
 
 /// The different types of ports supported by the I/O system.
 ///
@@ -172,6 +173,42 @@ impl PortStack {
         } else {
             false
         }
+    }
+
+    /// Load a Scheme file and push it onto the port stack for reading.
+    ///
+    /// This method reads the entire file content and creates a string port
+    /// that can be used by the parser. The file content is pushed onto the
+    /// port stack, so when the file is exhausted, the previous port is restored.
+    ///
+    /// # Arguments
+    ///
+    /// * `filename` - The path to the Scheme file to load
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or an error message on failure.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use s1::io::{PortStack, Port, PortKind};
+    ///
+    /// let mut port_stack = PortStack::new(Port { kind: PortKind::Stdin });
+    /// let result = port_stack.load_scheme_file("scheme/s1-core.scm");
+    /// assert!(result.is_ok());
+    /// ```
+    pub fn load_scheme_file(&mut self, filename: &str) -> Result<(), String> {
+        let file = File::open(filename).map_err(|e| format!("could not open {}: {}", filename, e))?;
+        let mut content = String::new();
+        StdBufReader::new(file).read_to_string(&mut content).map_err(|e| format!("could not read {}: {}", filename, e))?;
+        self.push(Port {
+            kind: PortKind::StringPortInput {
+                content,
+                pos: 0,
+            },
+        });
+        Ok(())
     }
 }
 
@@ -702,6 +739,8 @@ pub fn get_output_string(port: &Port) -> String {
         _ => String::new(),
     }
 }
+
+
 
 #[cfg(test)]
 mod tests {
