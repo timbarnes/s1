@@ -2,11 +2,24 @@ pub mod number;
 pub mod predicate;
 
 use crate::gc::{GcHeap, GcRefSimple, new_string_simple, new_bool_simple, SchemeValueSimple};
-use std::rc::Rc;
 // use num_bigint::BigInt;
 //  use crate::gc::SchemeValue;
 use number::{plus_builtin, minus_builtin, times_builtin, div_builtin, mod_builtin};
 // use crate::printer::scheme_display;
+
+/// Macro to register builtin functions in the environment
+/// 
+/// Usage: register_builtin!(heap, env, 
+///     "name" => function,
+///     "another" => another_function,
+/// );
+macro_rules! register_builtin {
+    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
+        $(
+            $env.set_symbol($heap.intern_symbol($name), crate::gc::new_primitive_simple($heap, $func, concat!($name, ": builtin function").to_string(), false));
+        )*
+    };
+}
 
 // ============================================================================
 // BUILTIN FUNCTIONS
@@ -122,20 +135,23 @@ pub fn load_builtin_evaluator(evaluator: &mut crate::evalsimple::Evaluator, args
 
 
 
-pub fn register_all_simple_frames(heap: &mut GcHeap, env: &mut crate::env::Environment) {
-    // Register builtins in the environment frame using symbol keys
-    env.set_symbol(heap.intern_symbol("number?"), crate::gc::new_primitive_simple(heap, Rc::new(predicate::number_q), "number?: returns #t if argument is a number".to_string(), false));
-    env.set_symbol(heap.intern_symbol("help"), crate::gc::new_primitive_simple(heap, Rc::new(help_builtin_simple), "help: returns help for a symbol".to_string(), false));
-    env.set_symbol(heap.intern_symbol("type-of"), crate::gc::new_primitive_simple(heap, Rc::new(predicate::type_of), "type-of: returns the type of an object".to_string(), false));
-    env.set_symbol(heap.intern_symbol("+"), crate::gc::new_primitive_simple(heap, Rc::new(plus_builtin), "+: adds numbers".to_string(), false));
-    env.set_symbol(heap.intern_symbol("-"), crate::gc::new_primitive_simple(heap, Rc::new(minus_builtin), "-: subtracts numbers".to_string(), false));
-    env.set_symbol(heap.intern_symbol("*"), crate::gc::new_primitive_simple(heap, Rc::new(times_builtin), "*: multiplies numbers".to_string(), false));
-    env.set_symbol(heap.intern_symbol("/"), crate::gc::new_primitive_simple(heap, Rc::new(div_builtin), "/: divides numbers".to_string(), false));
-    env.set_symbol(heap.intern_symbol("mod"), crate::gc::new_primitive_simple(heap, Rc::new(mod_builtin), "mod: returns remainder of division".to_string(), false));
-    env.set_symbol(heap.intern_symbol("display"), crate::gc::new_primitive_simple(heap, Rc::new(display_builtin_simple), "display: displays a value".to_string(), false));
-    env.set_symbol(heap.intern_symbol("newline"), crate::gc::new_primitive_simple(heap, Rc::new(newline_builtin_simple), "newline: prints a newline".to_string(), false));
-    env.set_symbol(heap.intern_symbol("quit"), crate::gc::new_primitive_simple(heap, Rc::new(quit_builtin_simple), "quit: exits the interpreter".to_string(), false));
-    env.set_symbol(heap.intern_symbol("load"), crate::gc::new_evaluator_primitive_simple(heap, Rc::new(load_builtin_evaluator), "load: loads a Scheme file".to_string(), false));
+/// Register all builtin functions in the environment
+pub fn register_builtins(heap: &mut GcHeap, env: &mut crate::env::Environment) {
+    // Register builtins using the macro for cleaner syntax
+    register_builtin!(heap, env,
+        "number?" => predicate::number_q,
+        "help" => help_builtin_simple,
+        "type-of" => predicate::type_of,
+        "+" => plus_builtin,
+        "-" => minus_builtin,
+        "*" => times_builtin,
+        "/" => div_builtin,
+        "mod" => mod_builtin,
+        "display" => display_builtin_simple,
+        "newline" => newline_builtin_simple,
+        "quit" => quit_builtin_simple,
+        "load" => load_builtin_simple,
+    );
 }
 
  

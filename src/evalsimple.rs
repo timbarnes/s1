@@ -42,7 +42,7 @@ impl Evaluator {
         };
         
         // Register built-ins in the evaluator's heap and environment
-        crate::builtin::register_all_simple_frames(&mut evaluator.heap, &mut evaluator.env);
+        crate::builtin::register_builtins(&mut evaluator.heap, &mut evaluator.env);
         
         evaluator
     }
@@ -60,7 +60,7 @@ impl Evaluator {
         };
         
         // Register built-ins in the evaluator's heap and environment
-        crate::builtin::register_all_simple_frames(&mut evaluator.heap, &mut evaluator.env);
+        crate::builtin::register_builtins(&mut evaluator.heap, &mut evaluator.env);
         
         evaluator
     }
@@ -123,10 +123,6 @@ pub fn eval_apply(func: GcRefSimple, args: &[GcRefSimple], evaluator: &mut Evalu
         SchemeValueSimple::Primitive { func: primitive_func, .. } => {
             // Apply primitive function
             primitive_func(&mut evaluator.heap_mut(), args)
-        }
-        SchemeValueSimple::EvaluatorPrimitive { func: primitive_func, .. } => {
-            // Apply evaluator-aware primitive function
-            primitive_func(evaluator, args)
         }
         SchemeValueSimple::Closure { params, body, env } => {
             // Apply closure - handle environment and evaluation
@@ -653,7 +649,6 @@ pub fn deduplicate_symbols(expr: GcRefSimple, heap: &mut GcHeap) -> GcRefSimple 
         SchemeValueSimple::Char(_) |
         SchemeValueSimple::Nil |
         SchemeValueSimple::Primitive { .. } |
-        SchemeValueSimple::EvaluatorPrimitive { .. } |
         SchemeValueSimple::Port { .. } => expr,
     }
 }
@@ -740,7 +735,6 @@ pub fn deduplicate_symbols_preserve_params(
         SchemeValueSimple::Char(_) |
         SchemeValueSimple::Nil |
         SchemeValueSimple::Primitive { .. } |
-        SchemeValueSimple::EvaluatorPrimitive { .. } |
         SchemeValueSimple::Port { .. } => expr,
     }
 }
@@ -818,7 +812,6 @@ mod tests {
 
     #[test]
     fn test_eval_logic_non_nested_call() {
-        use std::rc::Rc;
         let mut evaluator = Evaluator::new();
         let plus;
         let a;
@@ -830,11 +823,11 @@ mod tests {
             let heap = evaluator.heap_mut();
             plus = new_primitive_simple(
                 heap,
-                Rc::new(|heap, args| {
+                |heap, args| {
                     let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
                     let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
                     Ok(new_int_simple(heap, a + b))
-                }),
+                },
                 "plus".to_string(),
                 false,
             );
@@ -856,7 +849,6 @@ mod tests {
 
     #[test]
     fn test_eval_logic_nested_call() {
-        use std::rc::Rc;
         use crate::builtin::number::{plus_builtin, times_builtin};
         let mut evaluator = Evaluator::new();
         let plus;
@@ -875,13 +867,13 @@ mod tests {
             let heap = evaluator.heap_mut();
             plus = new_primitive_simple(
                 heap,
-                Rc::new(plus_builtin),
+                plus_builtin,
                 "plus".to_string(),
                 false,
             );
             times = new_primitive_simple(
                 heap,
-                Rc::new(times_builtin),
+                times_builtin,
                 "times".to_string(),
                 false,
             );
@@ -946,7 +938,7 @@ mod tests {
 
     #[test]
     fn test_eval_logic_simple_nested_call() {
-        use std::rc::Rc;
+        use crate::builtin::number::{plus_builtin, times_builtin};
         let mut evaluator = Evaluator::new();
         let times;
         let plus;
@@ -963,21 +955,13 @@ mod tests {
             let heap = evaluator.heap_mut();
             times = new_primitive_simple(
                 heap,
-                Rc::new(|heap, args| {
-                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
-                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
-                    Ok(new_int_simple(heap, a * b))
-                }),
+                times_builtin,
                 "times".to_string(),
                 false,
             );
             plus = new_primitive_simple(
                 heap,
-                Rc::new(|heap, args| {
-                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
-                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
-                    Ok(new_int_simple(heap, a + b))
-                }),
+                plus_builtin,
                 "plus".to_string(),
                 false,
             );
@@ -1006,7 +990,7 @@ mod tests {
 
     #[test]
     fn test_eval_logic_nested_mixed_call() {
-        use std::rc::Rc;
+        use crate::builtin::number::{plus_builtin, times_builtin, minus_builtin};
         let mut evaluator = Evaluator::new();
         let plus;
         let times;
@@ -1028,31 +1012,19 @@ mod tests {
             let heap = evaluator.heap_mut();
             plus = new_primitive_simple(
                 heap,
-                Rc::new(|heap, args| {
-                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
-                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
-                    Ok(new_int_simple(heap, a + b))
-                }),
+                plus_builtin,
                 "plus".to_string(),
                 false,
             );
             times = new_primitive_simple(
                 heap,
-                Rc::new(|heap, args| {
-                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
-                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
-                    Ok(new_int_simple(heap, a * b))
-                }),
+                times_builtin,
                 "times".to_string(),
                 false,
             );
             minus = new_primitive_simple(
                 heap,
-                Rc::new(|heap, args| {
-                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
-                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
-                    Ok(new_int_simple(heap, a - b))
-                }),
+                minus_builtin,
                 "minus".to_string(),
                 false,
             );
@@ -1129,7 +1101,7 @@ mod tests {
 
     #[test]
     fn test_eval_logic_begin() {
-        use std::rc::Rc;
+        use crate::builtin::number::plus_builtin;
         let mut evaluator = Evaluator::new();
         let plus;
         let a;
@@ -1145,11 +1117,7 @@ mod tests {
             let heap = evaluator.heap_mut();
             plus = new_primitive_simple(
                 heap,
-                Rc::new(|heap, args| {
-                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
-                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
-                    Ok(new_int_simple(heap, a + b))
-                }),
+                plus_builtin,
                 "plus".to_string(),
                 false,
             );
@@ -1358,11 +1326,7 @@ mod tests {
             let heap = evaluator.heap_mut();
             let plus = new_primitive_simple(
                 heap,
-                Rc::new(|heap, args| {
-                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
-                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
-                    Ok(new_int_simple(heap, a + b))
-                }),
+                crate::builtin::number::plus_builtin,
                 "plus".to_string(),
                 false,
             );
@@ -1452,11 +1416,7 @@ mod tests {
             let heap = evaluator.heap_mut();
             let plus = new_primitive_simple(
                 heap,
-                Rc::new(|heap, args| {
-                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
-                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
-                    Ok(new_int_simple(heap, a + b))
-                }),
+                crate::builtin::number::plus_builtin,
                 "plus".to_string(),
                 false,
             );
@@ -1742,11 +1702,7 @@ mod tests {
             let plus_sym = heap.intern_symbol("+");
             let plus_func = new_primitive_simple(
                 heap,
-                Rc::new(|heap, args| {
-                    let a = match &args[0].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
-                    let b = match &args[1].value { SchemeValueSimple::Int(i) => i.clone(), _ => return Err("not int".to_string()) };
-                    Ok(new_int_simple(heap, a + b))
-                }),
+                crate::builtin::number::plus_builtin,
                 "plus".to_string(),
                 false,
             );

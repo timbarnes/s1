@@ -50,16 +50,11 @@ pub enum SchemeValueSimple {
     Char(char),
     /// Built-in procedures (native Rust functions) with doc string
     Primitive {
-        func: Rc<dyn Fn(&mut GcHeap, &[GcRefSimple]) -> Result<GcRefSimple, String>>,
+        func: fn(&mut GcHeap, &[GcRefSimple]) -> Result<GcRefSimple, String>,
         doc: String,
         is_special_form: bool,
     },
-    /// Built-in procedures that need access to the evaluator
-    EvaluatorPrimitive {
-        func: Rc<dyn Fn(&mut crate::evalsimple::Evaluator, &[GcRefSimple]) -> Result<GcRefSimple, String>>,
-        doc: String,
-        is_special_form: bool,
-    },
+
     /// Closures (functions with captured environment)
     Closure {
         /// Parameter symbols (interned symbol pointers)
@@ -100,8 +95,6 @@ impl PartialEq for SchemeValueSimple {
             (SchemeValueSimple::Char(a), SchemeValueSimple::Char(b)) => a == b,
             // For Primitive, just compare type (not function pointer)
             (SchemeValueSimple::Primitive { .. }, SchemeValueSimple::Primitive { .. }) => true,
-            // For EvaluatorPrimitive, just compare type (not function pointer)
-            (SchemeValueSimple::EvaluatorPrimitive { .. }, SchemeValueSimple::EvaluatorPrimitive { .. }) => true,
             // For Closure, compare params and body (not env since it's captured)
             (SchemeValueSimple::Closure { params: p1, body: b1, .. }, SchemeValueSimple::Closure { params: p2, body: b2, .. }) => {
                 if p1.len() != p2.len() {
@@ -134,7 +127,6 @@ impl std::fmt::Debug for SchemeValueSimple {
             SchemeValueSimple::Bool(b) => write!(f, "Bool({})", b),
             SchemeValueSimple::Char(c) => write!(f, "Char({:?})", c),
             SchemeValueSimple::Primitive { doc, .. } => write!(f, "Primitive({})", doc),
-            SchemeValueSimple::EvaluatorPrimitive { doc, .. } => write!(f, "EvaluatorPrimitive({})", doc),
             SchemeValueSimple::Closure { params, body, .. } => {
                 let param_names: Vec<String> = params.iter()
                     .map(|p| match &p.value {
@@ -378,7 +370,7 @@ pub fn new_vector_simple(heap: &mut GcHeap, elements: Vec<GcRefSimple>) -> GcRef
 /// Create a new primitive function.
 pub fn new_primitive_simple(
     heap: &mut GcHeap,
-    f: Rc<dyn Fn(&mut GcHeap, &[GcRefSimple]) -> Result<GcRefSimple, String>>,
+    f: fn(&mut GcHeap, &[GcRefSimple]) -> Result<GcRefSimple, String>,
     doc: String,
     is_special_form: bool,
 ) -> GcRefSimple {
@@ -411,23 +403,7 @@ pub fn new_closure_simple(
     heap.alloc_simple(obj)
 }
 
-/// Create a new evaluator-aware primitive function.
-pub fn new_evaluator_primitive_simple(
-    heap: &mut GcHeap,
-    f: Rc<dyn Fn(&mut crate::evalsimple::Evaluator, &[GcRefSimple]) -> Result<GcRefSimple, String>>,
-    doc: String,
-    is_special_form: bool,
-) -> GcRefSimple {
-    let obj = GcObjectSimple {
-        value: SchemeValueSimple::EvaluatorPrimitive {
-            func: f,
-            doc,
-            is_special_form,
-        },
-        marked: false,
-    };
-    heap.alloc_simple(obj)
-}
+
 
 /// Create a new port value.
 pub fn new_port_simple(heap: &mut GcHeap, kind: crate::io::PortKind) -> GcRefSimple {
