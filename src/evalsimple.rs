@@ -6,7 +6,7 @@
 
 use crate::gc::{GcHeap, GcRefSimple, SchemeValueSimple, new_pair_simple, new_vector_simple, new_closure_simple, new_symbol_simple};
 use crate::env::Environment;
-use crate::parser::ParserSimple;
+use crate::parser::Parser;
 use crate::io::Port;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -78,7 +78,7 @@ impl Evaluator {
 
     /// Evaluate a string of Scheme code
     pub fn eval_string(&mut self, code: &str) -> Result<GcRefSimple, String> {
-        use crate::parser::ParserSimple;
+        use crate::parser::Parser;
         use crate::io::{Port, PortKind};
         
         // Create a temporary port for parsing
@@ -90,7 +90,7 @@ impl Evaluator {
         };
         
         // Parse and evaluate
-        let mut parser = ParserSimple::new();
+        let mut parser = Parser::new();
         let expr = parse_and_deduplicate(&mut parser, &mut port, &mut self.heap)?;
         eval_logic(expr, self)
     }
@@ -722,7 +722,7 @@ pub fn deduplicate_symbols_preserve_params(
 /// // expr now has interned symbols, but eval_logic doesn't need to know
 /// ```
 pub fn parse_and_deduplicate(
-    parser: &mut ParserSimple,
+    parser: &mut Parser,
     port: &mut Port,
     heap: &mut GcHeap,
 ) -> Result<GcRefSimple, String> {
@@ -812,7 +812,7 @@ mod tests {
     #[test]
     fn test_eval_logic_nested_call() {
         use std::rc::Rc;
-        use crate::builtin::number::{plus_builtin_simple, times_builtin_simple};
+        use crate::builtin::number::{plus_builtin, times_builtin};
         let mut evaluator = Evaluator::new();
         let plus;
         let times;
@@ -830,13 +830,13 @@ mod tests {
             let heap = evaluator.heap_mut();
             plus = new_primitive_simple(
                 heap,
-                Rc::new(plus_builtin_simple),
+                Rc::new(plus_builtin),
                 "plus".to_string(),
                 false,
             );
             times = new_primitive_simple(
                 heap,
-                Rc::new(times_builtin_simple),
+                Rc::new(times_builtin),
                 "times".to_string(),
                 false,
             );
@@ -1615,7 +1615,7 @@ mod tests {
     #[test]
     fn test_parse_and_deduplicate() {
         let mut evaluator = Evaluator::new();
-        let mut parser = ParserSimple::new();
+        let mut parser = Parser::new();
         
         // Test parsing and deduplicating a simple expression
         let mut port = Port {

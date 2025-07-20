@@ -3,12 +3,12 @@ mod gc;
 mod io;
 mod tokenizer;
 mod parser;
-mod eval;
+
 mod evalsimple;
 mod builtin;
 mod env;
 
-use crate::parser::ParserSimple;
+use crate::parser::Parser;
 use crate::io::{Port, PortKind, PortStack};
 use crate::evalsimple::{Evaluator, eval_logic, parse_and_deduplicate};
 use argh::FromArgs;
@@ -103,7 +103,7 @@ fn main() {
     let mut port_stack = PortStack::new(Port {
         kind: PortKind::Stdin,
     });
-    let mut parser = ParserSimple::new();
+    let mut parser = Parser::new();
     repl(&mut evaluator, &mut port_stack, &mut parser);
 }
 
@@ -112,7 +112,7 @@ fn main() {
 fn repl(
     evaluator: &mut Evaluator,
     port_stack: &mut PortStack,
-    parser: &mut ParserSimple,
+    parser: &mut Parser,
 ) {
     let stdin = stdio::stdin();
     let mut interactive = matches!(port_stack.current().kind, PortKind::Stdin);
