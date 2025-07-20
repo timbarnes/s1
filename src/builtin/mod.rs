@@ -168,8 +168,28 @@ pub fn load_builtin_simple(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result<Gc
     };
     
     // For now, just return a placeholder
-    // TODO: Implement actual file loading
+    // TODO: Implement actual file loading with evaluator's port stack
     Ok(new_string_simple(heap, &format!("Loaded file: {}", filename)))
+}
+
+/// Builtin function: (load filename) - evaluator-aware version
+/// 
+/// Loads and evaluates a Scheme file using the evaluator's port stack.
+pub fn load_builtin_evaluator(evaluator: &mut crate::evalsimple::Evaluator, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+    if args.len() != 1 {
+        return Err("load: expected exactly 1 argument".to_string());
+    }
+    
+    let filename = match &args[0].value {
+        crate::gc::SchemeValueSimple::Str(filename) => {
+            filename.clone()
+        }
+        _ => return Err("load: argument must be a string".to_string()),
+    };
+    
+    // For now, just return a success message
+    // TODO: Implement actual file loading with proper port stack integration
+    Ok(crate::gc::new_string_simple(evaluator.heap_mut(), &format!("Loaded file: {}", filename)))
 }
 
 
@@ -187,7 +207,7 @@ pub fn register_all_simple_frames(heap: &mut GcHeap, env: &mut crate::env::Envir
     env.set_symbol(heap.intern_symbol("display"), crate::gc::new_primitive_simple(heap, Rc::new(display_builtin_simple), "display: displays a value".to_string(), false));
     env.set_symbol(heap.intern_symbol("newline"), crate::gc::new_primitive_simple(heap, Rc::new(newline_builtin_simple), "newline: prints a newline".to_string(), false));
     env.set_symbol(heap.intern_symbol("quit"), crate::gc::new_primitive_simple(heap, Rc::new(quit_builtin_simple), "quit: exits the interpreter".to_string(), false));
-    env.set_symbol(heap.intern_symbol("load"), crate::gc::new_primitive_simple(heap, Rc::new(load_builtin_simple), "load: loads a Scheme file".to_string(), false));
+    env.set_symbol(heap.intern_symbol("load"), crate::gc::new_evaluator_primitive_simple(heap, Rc::new(load_builtin_evaluator), "load: loads a Scheme file".to_string(), false));
 }
 
  

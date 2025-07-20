@@ -16,17 +16,19 @@ use std::cell::RefCell;
 pub struct Evaluator {
     pub heap: GcHeap,
     env: Environment,
-    port_stack: crate::io::PortStack,
+    port_stack: crate::io::SchemePortStack,
 }
 
 impl Evaluator {
     pub fn new() -> Self {
+        let mut heap = GcHeap::new();
+        let stdin_port = crate::gc::new_port_simple(&mut heap, crate::io::PortKind::Stdin);
+        let port_stack = crate::io::SchemePortStack::new(&mut heap, stdin_port);
+        
         let mut evaluator = Self {
-            heap: GcHeap::new(),
+            heap,
             env: Environment::new(),
-            port_stack: crate::io::PortStack::new(crate::io::Port {
-                kind: crate::io::PortKind::Stdin,
-            }),
+            port_stack,
         };
         
         // Register built-ins in the evaluator's heap and environment
@@ -36,13 +38,14 @@ impl Evaluator {
     }
 
     /// Create an evaluator with a specific heap
-    pub fn with_heap(heap: GcHeap) -> Self {
+    pub fn with_heap(mut heap: GcHeap) -> Self {
+        let stdin_port = crate::gc::new_port_simple(&mut heap, crate::io::PortKind::Stdin);
+        let port_stack = crate::io::SchemePortStack::new(&mut heap, stdin_port);
+        
         let mut evaluator = Self {
             heap,
             env: Environment::new(),
-            port_stack: crate::io::PortStack::new(crate::io::Port {
-                kind: crate::io::PortKind::Stdin,
-            }),
+            port_stack,
         };
         
         // Register built-ins in the evaluator's heap and environment
@@ -67,12 +70,12 @@ impl Evaluator {
     }
 
     /// Get a reference to the port stack
-    pub fn port_stack(&self) -> &crate::io::PortStack {
+    pub fn port_stack(&self) -> &crate::io::SchemePortStack {
         &self.port_stack
     }
 
     /// Get a mutable reference to the port stack
-    pub fn port_stack_mut(&mut self) -> &mut crate::io::PortStack {
+    pub fn port_stack_mut(&mut self) -> &mut crate::io::SchemePortStack {
         &mut self.port_stack
     }
 
@@ -109,6 +112,10 @@ pub fn eval_apply(func: GcRefSimple, args: &[GcRefSimple], evaluator: &mut Evalu
         SchemeValueSimple::Primitive { func: primitive_func, .. } => {
             // Apply primitive function
             primitive_func(&mut evaluator.heap_mut(), args)
+        }
+        SchemeValueSimple::EvaluatorPrimitive { func: primitive_func, .. } => {
+            // Apply evaluator-aware primitive function
+            primitive_func(evaluator, args)
         }
         SchemeValueSimple::Closure { params, body, env } => {
             // Apply closure - handle environment and evaluation
@@ -612,6 +619,7 @@ pub fn deduplicate_symbols(expr: GcRefSimple, heap: &mut GcHeap) -> GcRefSimple 
         SchemeValueSimple::Char(_) |
         SchemeValueSimple::Nil |
         SchemeValueSimple::Primitive { .. } |
+        SchemeValueSimple::EvaluatorPrimitive { .. } |
         SchemeValueSimple::Port { .. } => expr,
     }
 }
@@ -698,6 +706,7 @@ pub fn deduplicate_symbols_preserve_params(
         SchemeValueSimple::Char(_) |
         SchemeValueSimple::Nil |
         SchemeValueSimple::Primitive { .. } |
+        SchemeValueSimple::EvaluatorPrimitive { .. } |
         SchemeValueSimple::Port { .. } => expr,
     }
 }
