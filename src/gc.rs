@@ -65,6 +65,11 @@ pub enum SchemeValueSimple {
     },
     /// Empty list (nil)
     Nil,
+    /// Port objects for input/output operations
+    Port {
+        /// Port type and configuration
+        kind: crate::io::PortKind,
+    },
     // Extend with more types as needed.
 }
 
@@ -102,6 +107,7 @@ impl PartialEq for SchemeValueSimple {
                 b1.value == b2.value
             }
             (SchemeValueSimple::Nil, SchemeValueSimple::Nil) => true,
+            (SchemeValueSimple::Port { kind: k1 }, SchemeValueSimple::Port { kind: k2 }) => k1 == k2,
             _ => false,
         }
     }
@@ -130,6 +136,7 @@ impl std::fmt::Debug for SchemeValueSimple {
                 write!(f, "Closure({:?}, {:?})", param_names, &body.value)
             }
             SchemeValueSimple::Nil => write!(f, "Nil"),
+            SchemeValueSimple::Port { kind } => write!(f, "Port({:?})", kind),
         }
     }
 }
@@ -395,6 +402,15 @@ pub fn new_closure_simple(
     heap.alloc_simple(obj)
 }
 
+/// Create a new port value.
+pub fn new_port_simple(heap: &mut GcHeap, kind: crate::io::PortKind) -> GcRefSimple {
+    let obj = GcObjectSimple {
+        value: SchemeValueSimple::Port { kind },
+        marked: false,
+    };
+    heap.alloc_simple(obj)
+}
+
 mod tests {
     use super::*;
     use num_bigint::BigInt;
@@ -467,6 +483,15 @@ mod tests {
                 assert!(std::ptr::eq(*cdr, str_val));
             }
             _ => panic!("Expected pair"),
+        }
+        
+        // Test port allocation
+        let port = new_port_simple(&mut heap, crate::io::PortKind::Stdin);
+        match &port.value {
+            SchemeValueSimple::Port { kind } => {
+                assert!(matches!(kind, crate::io::PortKind::Stdin));
+            }
+            _ => panic!("Expected port"),
         }
     }
 }

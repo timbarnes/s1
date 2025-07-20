@@ -611,7 +611,8 @@ pub fn deduplicate_symbols(expr: GcRefSimple, heap: &mut GcHeap) -> GcRefSimple 
         SchemeValueSimple::Bool(_) |
         SchemeValueSimple::Char(_) |
         SchemeValueSimple::Nil |
-        SchemeValueSimple::Primitive { .. } => expr,
+        SchemeValueSimple::Primitive { .. } |
+        SchemeValueSimple::Port { .. } => expr,
     }
 }
 
@@ -696,7 +697,8 @@ pub fn deduplicate_symbols_preserve_params(
         SchemeValueSimple::Bool(_) |
         SchemeValueSimple::Char(_) |
         SchemeValueSimple::Nil |
-        SchemeValueSimple::Primitive { .. } => expr,
+        SchemeValueSimple::Primitive { .. } |
+        SchemeValueSimple::Port { .. } => expr,
     }
 }
 
