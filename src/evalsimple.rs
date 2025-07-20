@@ -17,6 +17,15 @@ pub struct Evaluator {
     pub heap: GcHeap,
     env: Environment,
     port_stack: crate::io::SchemePortStack,
+    /// Tail call optimization state
+    tail_call: Option<TailCall>,
+}
+
+/// Represents a tail call that should be optimized
+#[derive(Clone)]
+pub struct TailCall {
+    pub func: GcRefSimple,
+    pub args: Vec<GcRefSimple>,
 }
 
 impl Evaluator {
@@ -29,6 +38,7 @@ impl Evaluator {
             heap,
             env: Environment::new(),
             port_stack,
+            tail_call: None,
         };
         
         // Register built-ins in the evaluator's heap and environment
@@ -46,6 +56,7 @@ impl Evaluator {
             heap,
             env: Environment::new(),
             port_stack,
+            tail_call: None,
         };
         
         // Register built-ins in the evaluator's heap and environment
@@ -157,6 +168,19 @@ fn eval_closure_logic(
     let original_env = evaluator.env_mut().current_frame();
     evaluator.env_mut().set_current_frame(new_env.current_frame());
 
+    // Check if the body is a tail call
+    if is_tail_call(body) {
+        // Set up tail call optimization
+        evaluator.tail_call = Some(TailCall {
+            func: body,
+            args: Vec::new(),
+        });
+        // Restore the original environment
+        evaluator.env_mut().set_current_frame(original_env);
+        // Return a placeholder - the actual evaluation will happen in the next eval_logic call
+        return Ok(evaluator.heap.nil_simple());
+    }
+
     // Evaluate the body in the new environment
     let result = eval_logic(body, evaluator);
 
@@ -168,6 +192,11 @@ fn eval_closure_logic(
 
 /// Main evaluation walker - handles self-evaluating forms, symbol resolution, and nested calls
 pub fn eval_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
+    // Check for pending tail call
+    if let Some(tail_call) = evaluator.tail_call.take() {
+        return eval_apply(tail_call.func, &tail_call.args, evaluator);
+    }
+
     // 1. Self-evaluating forms
     if is_self_evaluating(expr) {
         return Ok(expr);
@@ -545,6 +574,13 @@ pub fn is_self_evaluating(expr: GcRefSimple) -> bool {
         SchemeValueSimple::Closure { .. } => true,
         _ => false,
     }
+}
+
+/// Check if an expression is a tail call (function call in tail position)
+/// For now, we'll be conservative and not treat any calls as tail calls
+/// until we implement proper tail position detection
+pub fn is_tail_call(expr: GcRefSimple) -> bool {
+    false // Conservative approach - no tail call optimization for now
 }
 
 /// Recursively deduplicate symbols in an expression tree.
@@ -1766,5 +1802,24 @@ mod tests {
             SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "6"),
             _ => panic!("Expected integer result"),
         }
+    }
+
+    #[test]
+    fn test_tail_call_infrastructure() {
+        let mut evaluator = Evaluator::new();
+        
+        // Test that tail call infrastructure is in place
+        assert!(evaluator.tail_call.is_none());
+        
+        // Test that is_tail_call is conservative (returns false)
+        let test_expr = new_int_simple(evaluator.heap_mut(), num_bigint::BigInt::from(42));
+        assert!(!is_tail_call(test_expr));
+        
+        // Test that we can set a tail call (even though it's not used)
+        evaluator.tail_call = Some(TailCall {
+            func: test_expr,
+            args: vec![],
+        });
+        assert!(evaluator.tail_call.is_some());
     }
 } 
