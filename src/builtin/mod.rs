@@ -140,6 +140,7 @@ pub fn register_builtins(heap: &mut GcHeap, env: &mut crate::env::Environment) {
     // Register builtins using the macro for cleaner syntax
     register_builtin!(heap, env,
         "number?" => predicate::number_q,
+        "eq?" => predicate::eq_q,
         "help" => help_builtin_simple,
         "type-of" => predicate::type_of,
         "+" => plus_builtin,
