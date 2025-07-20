@@ -90,23 +90,65 @@ impl Evaluator {
         &mut self.port_stack
     }
 
-    /// Evaluate a string of Scheme code
+    /// Initialize Scheme-level I/O globals: **stdin**, **stdout**, **port-stack**
+    ///
+    /// This should be called after creating the Evaluator, before loading files or starting the REPL.
+    pub fn initialize_scheme_io_globals(&mut self) -> Result<(), String> {
+        // Create stdin and stdout ports
+        let stdin_port = crate::gc::new_port_simple(&mut self.heap, crate::io::PortKind::Stdin);
+        let stdout_port = crate::gc::new_port_simple(&mut self.heap, crate::io::PortKind::Stdout);
+        let stderr_port = crate::gc::new_port_simple(&mut self.heap, crate::io::PortKind::Stderr);
+        // Bind **stdin** and **stdout** as Scheme globals
+        let stdin_sym = self.heap.intern_symbol("**stdin**");
+        let stdout_sym = self.heap.intern_symbol("**stdout**");
+        let stderr_sym = self.heap.intern_symbol("**stderr**");
+        self.env_mut().set_symbol(stdin_sym, stdin_port);
+        self.env_mut().set_symbol(stdout_sym, stdout_port);
+        self.env_mut().set_symbol(stderr_sym, stderr_port);
+        // Bind **port-stack** as the empty list
+        let port_stack_sym = self.heap.intern_symbol("**port-stack**");
+        let nil = self.heap.nil_simple();
+        self.env_mut().set_symbol(port_stack_sym, nil);
+        // Cons **stdin** onto **port-stack**
+        let port_stack_with_stdin = crate::gc::new_pair_simple(&mut self.heap, stdin_port, nil);
+        self.env_mut().set_symbol(port_stack_sym, port_stack_with_stdin);
+        Ok(())
+    }
+
+    /// Evaluate a string of Scheme code (all expressions, return last result)
     pub fn eval_string(&mut self, code: &str) -> Result<GcRefSimple, String> {
         use crate::parser::Parser;
         use crate::io::{Port, PortKind};
-        
-        // Create a temporary port for parsing
+
         let mut port = Port {
             kind: PortKind::StringPortInput {
                 content: code.to_string(),
                 pos: 0,
             },
         };
-        
-        // Parse and evaluate
         let mut parser = Parser::new();
-        let expr = parse_and_deduplicate(&mut parser, &mut port, &mut self.heap)?;
-        eval_logic(expr, self)
+        let mut last_result = self.heap.nil_simple();
+        let mut parsed_any = false;
+        loop {
+            match parser.parse(&mut self.heap, &mut port) {
+                Ok(expr) => {
+                    let expr = crate::evalsimple::deduplicate_symbols(expr, &mut self.heap);
+                    last_result = eval_logic(expr, self)?;
+                    parsed_any = true;
+                }
+                Err(e) => {
+                    if !parsed_any {
+                        return Err(e);
+                    }
+                    if e.contains("end of input") || e.contains("unexpected EOF") || e.contains("Unclosed list") {
+                        break;
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+        Ok(last_result)
     }
 }
 
@@ -1774,5 +1816,49 @@ mod tests {
             args: vec![],
         });
         assert!(evaluator.tail_call.is_some());
+    }
+
+    #[test]
+    fn test_eval_string_basic_builtins() {
+        let mut evaluator = Evaluator::new();
+        // Simple arithmetic
+        let result = evaluator.eval_string("(+ 1 2)").unwrap();
+        match &result.value {
+            SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "3"),
+            _ => panic!("Expected integer result"),
+        }
+        // Multiple expressions, last result returned
+        let result = evaluator.eval_string("(+ 1 2) (* 2 3)").unwrap();
+        match &result.value {
+            SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "6"),
+            _ => panic!("Expected integer result"),
+        }
+        // Variable definition and use
+        evaluator.eval_string("(define x 42)").unwrap();
+        let result = evaluator.eval_string("(+ x 1)").unwrap();
+        match &result.value {
+            SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "43"),
+            _ => panic!("Expected integer result"),
+        }
+    }
+
+    #[test]
+    fn test_eval_string_error_handling() {
+        let mut evaluator = Evaluator::new();
+        // Syntax error
+        let err = evaluator.eval_string("(+ 1 2").unwrap_err();
+        assert!(
+            err.contains("end of input") ||
+            err.contains("unexpected EOF") ||
+            err.contains("Unclosed list"),
+            "Unexpected error message: {}", err
+        );
+        // Unbound variable
+        let err = evaluator.eval_string("(+ y 1)").unwrap_err();
+        println!("{:?}", err);
+        assert!(err.contains("Unbound variable") || err.contains("unbound variable"));
+        // Wrong argument type
+        let err = evaluator.eval_string("(+ 1 'foo)").unwrap_err();
+        assert!(err.contains("not int") || err.contains("number"));
     }
 } 
