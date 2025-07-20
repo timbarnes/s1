@@ -30,27 +30,25 @@ pub fn type_of(heap: &mut GcHeap, args: &[GcRefSimple]) -> Result<GcRefSimple, S
 
 mod tests {
     use super::*;
-    use crate::gc::{new_int_simple, new_float_simple, new_symbol_simple, new_pair_simple, new_string_simple, new_vector_simple, new_bool_simple, new_char_simple, new_nil_simple};
-    use num_bigint::BigInt;
-    
+
     #[test]
     fn test_number_q() {
         let mut heap = GcHeap::new();
         
         // Test with integer
-        let int_val = new_int_simple(&mut heap, BigInt::from(42));
+        let int_val = crate::gc::new_int_simple(&mut heap, num_bigint::BigInt::from(42));
         let result = number_q(&mut heap, &[int_val]);
         assert!(result.is_ok());
         assert!(matches!(&result.unwrap().value, SchemeValueSimple::Bool(true)));
         
         // Test with float
-        let float_val = new_float_simple(&mut heap, 3.14);
+        let float_val = crate::gc::new_float_simple(&mut heap, 3.14);
         let result = number_q(&mut heap, &[float_val]);
         assert!(result.is_ok());
         assert!(matches!(&result.unwrap().value, SchemeValueSimple::Bool(true)));
         
         // Test with non-number
-        let sym_val = new_symbol_simple(&mut heap, "foo");
+        let sym_val = crate::gc::new_symbol_simple(&mut heap, "foo");
         let result = number_q(&mut heap, &[sym_val]);
         assert!(result.is_ok());
         assert!(matches!(&result.unwrap().value, SchemeValueSimple::Bool(false)));
@@ -66,58 +64,58 @@ mod tests {
         let mut heap = GcHeap::new();
         
         // Test with integer
-        let int_val = new_int_simple(&mut heap, BigInt::from(42));
+        let int_val = crate::gc::new_int_simple(&mut heap, num_bigint::BigInt::from(42));
         let result = type_of(&mut heap, &[int_val]);
         assert!(result.is_ok());
         assert_eq!(as_type(&result.unwrap()), "integer");
         
         // Test with float
-        let float_val = new_float_simple(&mut heap, 3.14);
+        let float_val = crate::gc::new_float_simple(&mut heap, 3.14);
         let result = type_of(&mut heap, &[float_val]);
         assert!(result.is_ok());
         assert_eq!(as_type(&result.unwrap()), "float");
         
         // Test with symbol
-        let sym_val = new_symbol_simple(&mut heap, "foo");
+        let sym_val = crate::gc::new_symbol_simple(&mut heap, "foo");
         let result = type_of(&mut heap, &[sym_val]);
         assert!(result.is_ok());
         assert_eq!(as_type(&result.unwrap()), "symbol");
         
         // Test with pair
-        let car = new_int_simple(&mut heap, BigInt::from(1));
-        let cdr = new_int_simple(&mut heap, BigInt::from(2));
-        let pair_val = new_pair_simple(&mut heap, car, cdr);
+        let car = crate::gc::new_int_simple(&mut heap, num_bigint::BigInt::from(1));
+        let cdr = crate::gc::new_int_simple(&mut heap, num_bigint::BigInt::from(2));
+        let pair_val = crate::gc::new_pair_simple(&mut heap, car, cdr);
         let result = type_of(&mut heap, &[pair_val]);
         assert!(result.is_ok());
         assert_eq!(as_type(&result.unwrap()), "pair");
         
         // Test with string
-        let str_val = new_string_simple(&mut heap, "hello");
+        let str_val = crate::gc::new_string_simple(&mut heap, "hello");
         let result = type_of(&mut heap, &[str_val]);
         assert!(result.is_ok());
         assert_eq!(as_type(&result.unwrap()), "string");
         
         // Test with vector
-        let vec_elem = new_int_simple(&mut heap, BigInt::from(1));
-        let vec_val = new_vector_simple(&mut heap, vec![vec_elem]);
+        let vec_elem = crate::gc::new_int_simple(&mut heap, num_bigint::BigInt::from(1));
+        let vec_val = crate::gc::new_vector_simple(&mut heap, vec![vec_elem]);
         let result = type_of(&mut heap, &[vec_val]);
         assert!(result.is_ok());
         assert_eq!(as_type(&result.unwrap()), "vector");
         
         // Test with boolean
-        let bool_val = new_bool_simple(&mut heap, true);
+        let bool_val = crate::gc::new_bool_simple(&mut heap, true);
         let result = type_of(&mut heap, &[bool_val]);
         assert!(result.is_ok());
         assert_eq!(as_type(&result.unwrap()), "boolean");
         
         // Test with character
-        let char_val = new_char_simple(&mut heap, 'a');
+        let char_val = crate::gc::new_char_simple(&mut heap, 'a');
         let result = type_of(&mut heap, &[char_val]);
         assert!(result.is_ok());
         assert_eq!(as_type(&result.unwrap()), "char");
         
         // Test with nil
-        let nil_val = new_nil_simple(&mut heap);
+        let nil_val = crate::gc::new_nil_simple(&mut heap);
         let result = type_of(&mut heap, &[nil_val]);
         assert!(result.is_ok());
         assert_eq!(as_type(&result.unwrap()), "nil");

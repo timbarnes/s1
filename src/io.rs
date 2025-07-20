@@ -223,7 +223,7 @@ impl SchemePortStack {
     /// Create a new scheme port stack with an initial port.
     ///
     /// The initial port is typically stdin for interactive use.
-    pub fn new(heap: &mut crate::gc::GcHeap, initial: crate::gc::GcRefSimple) -> Self {
+    pub fn new(_heap: &mut crate::gc::GcHeap, initial: crate::gc::GcRefSimple) -> Self {
         Self { stack: vec![initial] }
     }
 
@@ -932,7 +932,7 @@ mod tests {
     #[test]
     fn test_output_string_port() {
         let output_port = new_output_string_port();
-        let mut file_table = FileTable::new();
+        let _file_table = FileTable::new();
         
         // Note: This test needs to be updated since we can't modify the port content
         // with the new immutable port design. For now, we'll test that we can get

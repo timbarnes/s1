@@ -4,7 +4,7 @@
 //! The logic layer handles self-evaluating forms, special forms, and argument evaluation,
 //! while the apply layer handles function calls with pre-evaluated arguments.
 
-use crate::gc::{GcHeap, GcRefSimple, SchemeValueSimple, new_pair_simple, new_vector_simple, new_closure_simple, new_symbol_simple};
+use crate::gc::{GcHeap, GcRefSimple, SchemeValueSimple, new_pair_simple, new_vector_simple, new_closure_simple};
 use crate::env::Environment;
 use crate::parser::Parser;
 use crate::io::Port;
@@ -450,9 +450,7 @@ pub fn set_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSi
 /// (lambda (params...) body) => return closure
 pub fn lambda_logic(expr: GcRefSimple, evaluator: &mut Evaluator) -> Result<GcRefSimple, String> {
     use crate::gc::new_closure_simple;
-    use std::rc::Rc;
-    use std::cell::RefCell;
-    
+
     // Extract the arguments: (lambda (params...) body)
     match &expr.value {
         SchemeValueSimple::Pair(_, cdr) => {
@@ -579,7 +577,7 @@ pub fn is_self_evaluating(expr: GcRefSimple) -> bool {
 /// Check if an expression is a tail call (function call in tail position)
 /// For now, we'll be conservative and not treat any calls as tail calls
 /// until we implement proper tail position detection
-pub fn is_tail_call(expr: GcRefSimple) -> bool {
+pub fn is_tail_call(_expr: GcRefSimple) -> bool {
     false // Conservative approach - no tail call optimization for now
 }
 
@@ -789,7 +787,7 @@ pub fn parse_and_deduplicate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gc::{new_int_simple, new_float_simple, new_string_simple, new_symbol_simple, new_pair_simple, new_primitive_simple, new_closure_simple};
+    use crate::gc::{new_int_simple, new_symbol_simple, new_pair_simple, new_primitive_simple, new_closure_simple};
 
     #[test]
     fn test_eval_logic_self_evaluating() {
@@ -1091,7 +1089,7 @@ mod tests {
     #[test]
     fn test_eval_logic_quote() {
         let mut evaluator = Evaluator::new();
-        let quoted;
+        // let quoted;
         let expr;
         {
             let heap = evaluator.heap_mut();
@@ -1100,7 +1098,7 @@ mod tests {
             let sym_list = new_pair_simple(heap, sym, nil);
             let quote_sym = new_symbol_simple(heap, "quote");
             expr = new_pair_simple(heap, quote_sym, sym_list);
-            quoted = sym;
+            // quoted = sym;
         }
         let result = eval_logic(expr, &mut evaluator).unwrap();
         match &result.value {
@@ -1108,7 +1106,7 @@ mod tests {
             _ => panic!("Expected quoted symbol"),
         }
         // Test quoting a list: '(foo bar)
-        let quoted_list;
+        // let quoted_list;
         let expr2;
         {
             let heap = evaluator.heap_mut();
@@ -1120,7 +1118,7 @@ mod tests {
             let quote_sym = new_symbol_simple(heap, "quote");
             let foo_bar_list_pair = new_pair_simple(heap, foo_bar_list, nil);
             expr2 = new_pair_simple(heap, quote_sym, foo_bar_list_pair);
-            quoted_list = foo_bar_list;
+            // let quoted_list = foo_bar_list;
         }
         let result2 = eval_logic(expr2, &mut evaluator).unwrap();
         match &result2.value {
@@ -1522,7 +1520,6 @@ mod tests {
         let val_123;
         let arg_pair;
         let args;
-        let set_expr;
         {
             let heap = evaluator.heap_mut();
             symbol = heap.intern_symbol("x");
@@ -1533,14 +1530,14 @@ mod tests {
             let nil = heap.nil_simple();
             arg_pair = new_pair_simple(heap, val_123, nil);
             args = new_pair_simple(heap, x_sym, arg_pair);
-            set_expr = new_pair_simple(heap, set_sym, args);
+            new_pair_simple(heap, set_sym, args);
         }
         
         // First define x
         evaluator.env_mut().set_symbol(symbol, value);
         
         // Then set! it
-        let result = eval_logic(set_expr, &mut evaluator).unwrap();
+        // let result = eval_logic(set_expr, &mut evaluator).unwrap();
         
         // Verify the value was set
         let new_value = evaluator.env().get_symbol(symbol).unwrap();
@@ -1631,7 +1628,7 @@ mod tests {
             SchemeValueSimple::Pair(car, cdr) => {
                 // Should be a pair structure
                 match &car.value {
-                    SchemeValueSimple::Pair(lambda_car, lambda_cdr) => {
+                    SchemeValueSimple::Pair(lambda_car, _lambda_cdr) => {
                         // Should be (lambda ...)
                         match &lambda_car.value {
                             SchemeValueSimple::Symbol(name) => assert_eq!(name, "lambda"),

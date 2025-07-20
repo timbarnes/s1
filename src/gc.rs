@@ -440,11 +440,10 @@ pub fn new_port_simple(heap: &mut GcHeap, kind: crate::io::PortKind) -> GcRefSim
 
 mod tests {
     use super::*;
-    use num_bigint::BigInt;
 
     #[test]
     fn test_singleton_nil_true_false() {
-        let mut heap = GcHeap::new();
+        let heap = GcHeap::new();
         
         // Test that nil is a singleton
         let nil1 = heap.nil_simple();
