@@ -1,6 +1,6 @@
 use num_bigint::BigInt;
 use num_traits::{ToPrimitive, Zero, One};
-use crate::gc::{GcRefSimple, new_int_simple, new_float_simple, SchemeValueSimple};
+use crate::gc::{GcRefSimple, new_int_simple, new_float_simple, new_bool_simple, SchemeValueSimple};
 
 pub fn plus_builtin(heap: &mut crate::gc::GcHeap, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
     if args.len() < 2 {
@@ -169,6 +169,85 @@ pub fn mod_builtin(heap: &mut crate::gc::GcHeap, args: &[GcRefSimple]) -> Result
     Ok(new_int_simple(heap, a % b))
 }
 
+pub fn eq_builtin(heap: &mut crate::gc::GcHeap, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+    if args.len() < 2 {
+        return Err("=: expects at least 2 arguments".to_string());
+    }
+    
+    // Convert all arguments to f64 for comparison
+    let mut numbers = Vec::new();
+    for arg in args {
+        let num = match &arg.value {
+            SchemeValueSimple::Int(i) => i.to_f64().unwrap(),
+            SchemeValueSimple::Float(f) => *f,
+            _ => return Err("=: all arguments must be numbers".to_string()),
+        };
+        numbers.push(num);
+    }
+    
+    // Check if all numbers are equal
+    let first = numbers[0];
+    let all_equal = numbers.iter().all(|&n| n == first);
+    
+    Ok(new_bool_simple(heap, all_equal))
+}
+
+pub fn lt_builtin(heap: &mut crate::gc::GcHeap, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+    if args.len() < 2 {
+        return Err("<: expects at least 2 arguments".to_string());
+    }
+    
+    // Convert all arguments to f64 for comparison
+    let mut numbers = Vec::new();
+    for arg in args {
+        let num = match &arg.value {
+            SchemeValueSimple::Int(i) => i.to_f64().unwrap(),
+            SchemeValueSimple::Float(f) => *f,
+            _ => return Err("<: all arguments must be numbers".to_string()),
+        };
+        numbers.push(num);
+    }
+    
+    // Check if numbers are in strictly increasing order
+    let mut prev = numbers[0];
+    for &num in &numbers[1..] {
+        if prev >= num {
+            return Ok(new_bool_simple(heap, false));
+        }
+        prev = num;
+    }
+    
+    Ok(new_bool_simple(heap, true))
+}
+
+pub fn gt_builtin(heap: &mut crate::gc::GcHeap, args: &[GcRefSimple]) -> Result<GcRefSimple, String> {
+    if args.len() < 2 {
+        return Err(">: expects at least 2 arguments".to_string());
+    }
+    
+    // Convert all arguments to f64 for comparison
+    let mut numbers = Vec::new();
+    for arg in args {
+        let num = match &arg.value {
+            SchemeValueSimple::Int(i) => i.to_f64().unwrap(),
+            SchemeValueSimple::Float(f) => *f,
+            _ => return Err(">: all arguments must be numbers".to_string()),
+        };
+        numbers.push(num);
+    }
+    
+    // Check if numbers are in strictly decreasing order
+    let mut prev = numbers[0];
+    for &num in &numbers[1..] {
+        if prev <= num {
+            return Ok(new_bool_simple(heap, false));
+        }
+        prev = num;
+    }
+    
+    Ok(new_bool_simple(heap, true))
+}
+
 mod tests {
     use super::*;
     use crate::gc::GcHeap;
@@ -243,5 +322,134 @@ mod tests {
             SchemeValueSimple::Int(i) => assert_eq!(i.to_string(), "1"),
             _ => panic!("Expected integer"),
         }
+    }
+
+    #[test]
+    fn test_eq_builtin() {
+        let mut heap = GcHeap::new();
+        
+        // Test equal integers
+        let args = vec![
+            new_int_simple(&mut heap, BigInt::from(5)),
+            new_int_simple(&mut heap, BigInt::from(5)),
+        ];
+        let result = eq_builtin(&mut heap, &args).unwrap();
+        assert!(matches!(&result.value, SchemeValueSimple::Bool(true)));
+        
+        // Test unequal integers
+        let args = vec![
+            new_int_simple(&mut heap, BigInt::from(5)),
+            new_int_simple(&mut heap, BigInt::from(6)),
+        ];
+        let result = eq_builtin(&mut heap, &args).unwrap();
+        assert!(matches!(&result.value, SchemeValueSimple::Bool(false)));
+        
+        // Test mixed int and float
+        let args = vec![
+            new_int_simple(&mut heap, BigInt::from(5)),
+            new_float_simple(&mut heap, 5.0),
+        ];
+        let result = eq_builtin(&mut heap, &args).unwrap();
+        assert!(matches!(&result.value, SchemeValueSimple::Bool(true)));
+        
+        // Test multiple equal values
+        let args = vec![
+            new_int_simple(&mut heap, BigInt::from(5)),
+            new_float_simple(&mut heap, 5.0),
+            new_int_simple(&mut heap, BigInt::from(5)),
+        ];
+        let result = eq_builtin(&mut heap, &args).unwrap();
+        assert!(matches!(&result.value, SchemeValueSimple::Bool(true)));
+        
+        // Test multiple unequal values
+        let args = vec![
+            new_int_simple(&mut heap, BigInt::from(5)),
+            new_float_simple(&mut heap, 5.0),
+            new_int_simple(&mut heap, BigInt::from(6)),
+        ];
+        let result = eq_builtin(&mut heap, &args).unwrap();
+        assert!(matches!(&result.value, SchemeValueSimple::Bool(false)));
+    }
+
+    #[test]
+    fn test_lt_builtin() {
+        let mut heap = GcHeap::new();
+        
+        // Test strictly increasing integers
+        let args = vec![
+            new_int_simple(&mut heap, BigInt::from(1)),
+            new_int_simple(&mut heap, BigInt::from(2)),
+            new_int_simple(&mut heap, BigInt::from(3)),
+        ];
+        let result = lt_builtin(&mut heap, &args).unwrap();
+        assert!(matches!(&result.value, SchemeValueSimple::Bool(true)));
+        
+        // Test not strictly increasing
+        let args = vec![
+            new_int_simple(&mut heap, BigInt::from(1)),
+            new_int_simple(&mut heap, BigInt::from(2)),
+            new_int_simple(&mut heap, BigInt::from(2)),
+        ];
+        let result = lt_builtin(&mut heap, &args).unwrap();
+        assert!(matches!(&result.value, SchemeValueSimple::Bool(false)));
+        
+        // Test mixed int and float
+        let args = vec![
+            new_int_simple(&mut heap, BigInt::from(1)),
+            new_float_simple(&mut heap, 1.5),
+            new_int_simple(&mut heap, BigInt::from(2)),
+        ];
+        let result = lt_builtin(&mut heap, &args).unwrap();
+        assert!(matches!(&result.value, SchemeValueSimple::Bool(true)));
+        
+        // Test decreasing sequence
+        let args = vec![
+            new_int_simple(&mut heap, BigInt::from(3)),
+            new_int_simple(&mut heap, BigInt::from(2)),
+            new_int_simple(&mut heap, BigInt::from(1)),
+        ];
+        let result = lt_builtin(&mut heap, &args).unwrap();
+        assert!(matches!(&result.value, SchemeValueSimple::Bool(false)));
+    }
+
+    #[test]
+    fn test_gt_builtin() {
+        let mut heap = GcHeap::new();
+        
+        // Test strictly decreasing integers
+        let args = vec![
+            new_int_simple(&mut heap, BigInt::from(3)),
+            new_int_simple(&mut heap, BigInt::from(2)),
+            new_int_simple(&mut heap, BigInt::from(1)),
+        ];
+        let result = gt_builtin(&mut heap, &args).unwrap();
+        assert!(matches!(&result.value, SchemeValueSimple::Bool(true)));
+        
+        // Test not strictly decreasing
+        let args = vec![
+            new_int_simple(&mut heap, BigInt::from(3)),
+            new_int_simple(&mut heap, BigInt::from(2)),
+            new_int_simple(&mut heap, BigInt::from(2)),
+        ];
+        let result = gt_builtin(&mut heap, &args).unwrap();
+        assert!(matches!(&result.value, SchemeValueSimple::Bool(false)));
+        
+        // Test mixed int and float
+        let args = vec![
+            new_int_simple(&mut heap, BigInt::from(3)),
+            new_float_simple(&mut heap, 2.5),
+            new_int_simple(&mut heap, BigInt::from(2)),
+        ];
+        let result = gt_builtin(&mut heap, &args).unwrap();
+        assert!(matches!(&result.value, SchemeValueSimple::Bool(true)));
+        
+        // Test increasing sequence
+        let args = vec![
+            new_int_simple(&mut heap, BigInt::from(1)),
+            new_int_simple(&mut heap, BigInt::from(2)),
+            new_int_simple(&mut heap, BigInt::from(3)),
+        ];
+        let result = gt_builtin(&mut heap, &args).unwrap();
+        assert!(matches!(&result.value, SchemeValueSimple::Bool(false)));
     }
 } 
