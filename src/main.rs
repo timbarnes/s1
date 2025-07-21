@@ -125,6 +125,15 @@ fn repl(evaluator: &mut Evaluator) {
                     stdio::stdout().flush().unwrap();
                 }
                 let parse_result = parse_and_deduplicate(&mut parser, &mut port, evaluator.heap_mut());
+                // Update the original port with the new position if it's a string port
+                if let SchemeValue::Port { kind } = &car.value {
+                    if let PortKind::StringPortInput { pos: _, .. } = kind {
+                        if let PortKind::StringPortInput { pos: new_pos, .. } = &port.kind {
+                            let current_pos = unsafe { *new_pos.get() };
+                            evaluator.heap_mut().update_string_port_pos(*car, current_pos);
+                        }
+                    }
+                }
                 match parse_result {
                     Ok(expr) => {
                         println!("Parsed: {}", print_scheme_value(&expr.value));
@@ -159,7 +168,7 @@ fn repl(evaluator: &mut Evaluator) {
                             // Replace the current port with the new input
                             port.kind = PortKind::StringPortInput {
                                 content: input,
-                                pos: 0,
+                                pos: std::cell::UnsafeCell::new(0),
                             };
                         } else {
                             // For non-stdin ports, pop on any parse error and continue

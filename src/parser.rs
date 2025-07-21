@@ -13,7 +13,7 @@
 //! use s1::gc::GcHeap;
 //!
 //! let mut heap = GcHeap::new();
-//! let mut port = Port { kind: PortKind::StringPortInput { content: "42".to_string(), pos: 0 } };
+//! let mut port = Port { kind: PortKind::StringPortInput { content: "42".to_string(), pos: std::cell::UnsafeCell::new(0) } };
 //! let mut parser = Parser::new();
 //! let expr = parser.parse(&mut heap, &mut port).unwrap();
 //! ```
@@ -187,7 +187,7 @@ mod tests {
     #[test]
     fn parse_number() {
         let mut heap = GcHeap::new();
-        let mut port = Port { kind: PortKind::StringPortInput { content: "42".to_string(), pos: 0 } };
+        let mut port = Port { kind: PortKind::StringPortInput { content: "42".to_string(), pos: std::cell::UnsafeCell::new(0) } };
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {
@@ -199,7 +199,7 @@ mod tests {
     #[test]
     fn parse_symbol() {
         let mut heap = GcHeap::new();
-        let mut port = Port { kind: PortKind::StringPortInput { content: "hello".to_string(), pos: 0 } };
+        let mut port = Port { kind: PortKind::StringPortInput { content: "hello".to_string(), pos: std::cell::UnsafeCell::new(0) } };
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {
@@ -211,7 +211,7 @@ mod tests {
     #[test]
     fn parse_string() {
         let mut heap = GcHeap::new();
-        let mut port = Port { kind: PortKind::StringPortInput { content: "\"hello world\"".to_string(), pos: 0 } };
+        let mut port = Port { kind: PortKind::StringPortInput { content: "\"hello world\"".to_string(), pos: std::cell::UnsafeCell::new(0) } };
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {
@@ -223,7 +223,7 @@ mod tests {
     #[test]
     fn parse_nil() {
         let mut heap = GcHeap::new();
-        let mut port = Port { kind: PortKind::StringPortInput { content: "nil".to_string(), pos: 0 } };
+        let mut port = Port { kind: PortKind::StringPortInput { content: "nil".to_string(), pos: std::cell::UnsafeCell::new(0) } };
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {
@@ -235,7 +235,7 @@ mod tests {
     #[test]
     fn parse_list() {
         let mut heap = GcHeap::new();
-        let mut port = Port { kind: PortKind::StringPortInput { content: "(1 2 3)".to_string(), pos: 0 } };
+        let mut port = Port { kind: PortKind::StringPortInput { content: "(1 2 3)".to_string(), pos: std::cell::UnsafeCell::new(0) } };
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         
@@ -275,7 +275,7 @@ mod tests {
     #[test]
     fn parse_booleans() {
         let mut heap = GcHeap::new();
-        let mut port = Port { kind: PortKind::StringPortInput { content: "#t #f".to_string(), pos: 0 } };
+        let mut port = Port { kind: PortKind::StringPortInput { content: "#t #f".to_string(), pos: std::cell::UnsafeCell::new(0) } };
         let mut parser = Parser::new();
         
         let expr = parser.parse(&mut heap, &mut port).unwrap();
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn parse_character() {
         let mut heap = GcHeap::new();
-        let mut port = Port { kind: PortKind::StringPortInput { content: "#\\a #\\space".to_string(), pos: 0 } };
+        let mut port = Port { kind: PortKind::StringPortInput { content: "#\\a #\\space".to_string(), pos: std::cell::UnsafeCell::new(0) } };
         let mut parser = Parser::new();
         
         let expr = parser.parse(&mut heap, &mut port).unwrap();
@@ -313,7 +313,7 @@ mod tests {
     #[test]
     fn parse_quoted() {
         let mut heap = GcHeap::new();
-        let mut port = Port { kind: PortKind::StringPortInput { content: "'hello".to_string(), pos: 0 } };
+        let mut port = Port { kind: PortKind::StringPortInput { content: "'hello".to_string(), pos: std::cell::UnsafeCell::new(0) } };
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         
@@ -344,7 +344,7 @@ mod tests {
     #[test]
     fn parse_dotted_pair() {
         let mut heap = GcHeap::new();
-        let mut port = Port { kind: PortKind::StringPortInput { content: "(1 . 2)".to_string(), pos: 0 } };
+        let mut port = Port { kind: PortKind::StringPortInput { content: "(1 . 2)".to_string(), pos: std::cell::UnsafeCell::new(0) } };
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         
@@ -366,7 +366,7 @@ mod tests {
     #[test]
     fn parse_vector() {
         let mut heap = GcHeap::new();
-        let mut port = Port { kind: PortKind::StringPortInput { content: "#(1 2 3)".to_string(), pos: 0 } };
+        let mut port = Port { kind: PortKind::StringPortInput { content: "#(1 2 3)".to_string(), pos: std::cell::UnsafeCell::new(0) } };
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         
@@ -393,7 +393,7 @@ mod tests {
     #[test]
     fn parse_float() {
         let mut heap = GcHeap::new();
-        let mut port = Port { kind: PortKind::StringPortInput { content: "3.14".to_string(), pos: 0 } };
+        let mut port = Port { kind: PortKind::StringPortInput { content: "3.14".to_string(), pos: std::cell::UnsafeCell::new(0) } };
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {

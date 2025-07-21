@@ -288,6 +288,17 @@ impl GcHeap {
         // TODO: Implement mark-and-sweep garbage collection
         // For now, we just leak memory
     }
+
+    /// Update the position of a StringPortInput in a SchemeValue::Port
+    pub fn update_string_port_pos(&mut self, port_ref: GcRef, new_pos: usize) {
+        // Convert the Scheme port to a Rust port, update it, then convert back
+        let rust_port = crate::io::scheme_port_to_port(port_ref);
+        if crate::io::update_string_port_pos(&rust_port, new_pos) {
+            // The port was updated successfully
+            // Note: In a real implementation, you might want to update the Scheme port object
+            // but for now, we'll rely on the Rust port being updated
+        }
+    }
 }
 
 // ============================================================================

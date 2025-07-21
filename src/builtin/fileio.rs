@@ -21,7 +21,7 @@ pub fn open_input_file_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRe
             }
             let port = new_port(heap, crate::io::PortKind::StringPortInput {
                 content,
-                pos: 0,
+                pos: std::cell::UnsafeCell::new(0),
             });
             Ok(port)
         }

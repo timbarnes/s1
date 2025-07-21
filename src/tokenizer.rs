@@ -7,7 +7,7 @@
 //!
 //! ```rust
 //! use s1::tokenizer::{Tokenizer, Token};
-//! use s1::{PortStack, FileTable, Port, PortKind};
+//! use s1::{PortStack, Port, PortKind};
 //!
 //! // Create a string port for testing
 //! let port = Port { kind: PortKind::StringPort { content: "hello world.to_string(), pos: 0 } };
@@ -75,10 +75,17 @@ impl<'a> Tokenizer<'a> {
             Some(c)
         } else {
             match &mut self.port.kind {
-                PortKind::StringPortInput { content, pos } => {
-                    if *pos < content.len() {
-                        let ch = content.chars().nth(*pos).unwrap();
-                        *pos += 1;
+                PortKind::StringPortInput { .. } => {
+                    // Use safe accessors from io.rs
+                    let current_pos = crate::io::get_string_port_pos(self.port)?;
+                    let content = if let PortKind::StringPortInput { content, .. } = &self.port.kind {
+                        content
+                    } else {
+                        unreachable!()
+                    };
+                    if current_pos < content.len() {
+                        let ch = content.chars().nth(current_pos).unwrap();
+                        crate::io::update_string_port_pos(self.port, current_pos + 1);
                         Some(ch)
                     } else {
                         None
@@ -290,7 +297,7 @@ impl<'a> Tokenizer<'a> {
     ///
     /// ```rust
     /// use s1::tokenizer::{Tokenizer, Token};
-    /// use s1::{PortStack, FileTable, Port, PortKind};
+    /// use s1::{PortStack, Port, PortKind};
     ///
     /// let port = Port { kind: PortKind::StringPort { content: "hello123.to_string(), pos: 0;
     /// let mut tokenizer = Tokenizer::new(port_stack, file_table);
@@ -380,7 +387,7 @@ mod tests {
 
     fn tokenizer_from_str<'a>(port: &'a mut Port, s: &str) -> Tokenizer<'a> {
         // Set up the string port
-        *port = Port { kind: PortKind::StringPortInput { content: s.to_string(), pos: 0 } };
+        *port = Port { kind: PortKind::StringPortInput { content: s.to_string(), pos: std::cell::UnsafeCell::new(0) } };
         Tokenizer::new(port)
     }
 

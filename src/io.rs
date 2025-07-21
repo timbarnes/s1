@@ -26,6 +26,8 @@ use std::io::{self, Write, Read, BufRead, BufReader, BufWriter};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader as StdBufReader;
+use std::cell::UnsafeCell;
+use crate::gc::GcRef;
 
 /// The different types of ports supported by the I/O system.
 ///
@@ -33,7 +35,7 @@ use std::io::BufReader as StdBufReader;
 /// - Standard input/output streams
 /// - File-based ports for reading/writing files
 /// - String ports for in-memory string operations
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug)]
 pub enum PortKind {
     /// Standard input stream
     Stdin,
@@ -44,9 +46,51 @@ pub enum PortKind {
     /// File-based port with read/write mode and optional file ID
     File { name: String, write: bool, file_id: Option<usize> },
     /// In-memory string port for input with content and current position
-    StringPortInput { content: String, pos: usize },
+    StringPortInput { content: String, pos: UnsafeCell<usize> },
     /// In-memory string port for output with accumulating content
     StringPortOutput { content: String },
+}
+
+impl Clone for PortKind {
+    fn clone(&self) -> Self {
+        match self {
+            PortKind::Stdin => PortKind::Stdin,
+            PortKind::Stdout => PortKind::Stdout,
+            PortKind::Stderr => PortKind::Stderr,
+            PortKind::File { name, write, file_id } => PortKind::File {
+                name: name.clone(),
+                write: *write,
+                file_id: *file_id,
+            },
+            PortKind::StringPortInput { content, pos } => PortKind::StringPortInput {
+                content: content.clone(),
+                pos: UnsafeCell::new(unsafe { *pos.get() }),
+            },
+            PortKind::StringPortOutput { content } => PortKind::StringPortOutput {
+                content: content.clone(),
+            },
+        }
+    }
+}
+
+impl PartialEq for PortKind {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (PortKind::Stdin, PortKind::Stdin) => true,
+            (PortKind::Stdout, PortKind::Stdout) => true,
+            (PortKind::Stderr, PortKind::Stderr) => true,
+            (PortKind::File { name: n1, write: w1, file_id: f1 }, PortKind::File { name: n2, write: w2, file_id: f2 }) => {
+                n1 == n2 && w1 == w2 && f1 == f2
+            }
+            (PortKind::StringPortInput { content: c1, pos: p1 }, PortKind::StringPortInput { content: c2, pos: p2 }) => {
+                c1 == c2 && unsafe { *p1.get() == *p2.get() }
+            }
+            (PortKind::StringPortOutput { content: c1 }, PortKind::StringPortOutput { content: c2 }) => {
+                c1 == c2
+            }
+            _ => false,
+        }
+    }
 }
 
 /// Represents an open port (input or output).
@@ -85,7 +129,7 @@ pub struct Port {
 /// ```
 pub struct PortStack {
     /// The stack of ports, with the current port at the top
-    stack: Vec<Port>,
+    stack: Vec<GcRef>,
 }
 
 /// Scheme-based port stack that uses a vector of port objects.
@@ -109,7 +153,7 @@ impl PortStack {
     /// let stack = PortStack::new(stdin_port);
     /// assert_eq!(stack.current().kind, PortKind::Stdin);
     /// ```
-    pub fn new(initial: Port) -> Self {
+    pub fn new(initial: GcRef) -> Self {
         Self { stack: vec![initial] }
     }
 
@@ -124,14 +168,14 @@ impl PortStack {
     /// let stack = PortStack::new(port);
     /// assert_eq!(stack.current().kind, PortKind::Stdin);
     /// ```
-    pub fn current(&self) -> &Port {
-        self.stack.last().unwrap()
+    pub fn current(&self) -> GcRef {
+        *self.stack.last().unwrap()
     }
 
     /// Get a mutable reference to the current port.
     ///
     /// This is useful for updating port state (like string port position).
-    pub fn current_mut(&mut self) -> &mut Port {
+    pub fn current_mut(&mut self) -> &mut GcRef {
         self.stack.last_mut().unwrap()
     }
 
@@ -149,7 +193,7 @@ impl PortStack {
     /// stack.push(file_port);
     /// assert_eq!(stack.current().kind, PortKind::File { name: "input.txt".to_string(), write: false, file_id: Some(1) });
     /// ```
-    pub fn push(&mut self, port: Port) {
+    pub fn push(&mut self, port: GcRef) {
         self.stack.push(port);
     }
 
@@ -184,41 +228,6 @@ impl PortStack {
         }
     }
 
-    /// Load a Scheme file and push it onto the port stack for reading.
-    ///
-    /// This method reads the entire file content and creates a string port
-    /// that can be used by the parser. The file content is pushed onto the
-    /// port stack, so when the file is exhausted, the previous port is restored.
-    ///
-    /// # Arguments
-    ///
-    /// * `filename` - The path to the Scheme file to load
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on success, or an error message on failure.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use s1::io::{PortStack, Port, PortKind};
-    ///
-    /// let mut port_stack = PortStack::new(Port { kind: PortKind::Stdin });
-    /// let result = port_stack.load_scheme_file("scheme/s1-core.scm");
-    /// assert!(result.is_ok());
-    /// ```
-    pub fn load_scheme_file(&mut self, filename: &str) -> Result<(), String> {
-        let file = File::open(filename).map_err(|e| format!("could not open {}: {}", filename, e))?;
-        let mut content = String::new();
-        StdBufReader::new(file).read_to_string(&mut content).map_err(|e| format!("could not read {}: {}", filename, e))?;
-        self.push(Port {
-            kind: PortKind::StringPortInput {
-                content,
-                pos: 0,
-            },
-        });
-        Ok(())
-    }
 }
 
 impl SchemePortStack {
@@ -279,7 +288,7 @@ impl SchemePortStack {
         
         let port = crate::gc::new_port(heap, PortKind::StringPortInput {
             content,
-            pos: 0,
+            pos: UnsafeCell::new(0),
         });
         self.push(port);
         Ok(())
@@ -455,17 +464,18 @@ impl FileTable {
 /// Helper function to read a line from a string port and update its position
 fn read_line_from_string_port(port: &Port) -> Option<(String, Port)> {
     if let PortKind::StringPortInput { content, pos } = &port.kind {
+        let current_pos = unsafe { *pos.get() };
         let mut lines = content.lines();
         // Skip to the current position
-        for _ in 0..*pos {
+        for _ in 0..current_pos {
             lines.next();
         }
         if let Some(line) = lines.next() {
-            let new_pos = *pos + 1;
+            let new_pos = current_pos + 1;
             let new_port = Port {
                 kind: PortKind::StringPortInput {
                     content: content.clone(),
-                    pos: new_pos,
+                    pos: UnsafeCell::new(new_pos),
                 }
             };
             Some((line.to_string() + "\n", new_port))
@@ -650,8 +660,9 @@ pub fn read_char(port: &Port, file_table: &mut FileTable) -> Option<char> {
             }
         }
         PortKind::StringPortInput { content, pos } => {
-            if *pos < content.len() {
-                let ch = content.chars().nth(*pos).unwrap();
+            let current_pos = unsafe { *pos.get() };
+            if current_pos < content.len() {
+                let ch = content.chars().nth(current_pos).unwrap();
                 Some(ch)
             } else {
                 None
@@ -747,7 +758,7 @@ pub fn new_string_port(s: &str) -> Port {
     Port {
         kind: PortKind::StringPortInput {
             content: s.to_string(),
-            pos: 0,
+            pos: UnsafeCell::new(0),
         }
     }
 }
@@ -815,6 +826,29 @@ pub fn get_output_string(port: &Port) -> String {
     }
 }
 
+/// Get the current position of a string port safely.
+/// This function should be called through the GC heap accessor.
+pub fn get_string_port_pos(port: &Port) -> Option<usize> {
+    match &port.kind {
+        PortKind::StringPortInput { pos, .. } => {
+            Some(unsafe { *pos.get() })
+        }
+        _ => None,
+    }
+}
+
+/// Update the position of a string port safely.
+/// This function should be called through the GC heap accessor.
+pub fn update_string_port_pos(port: &Port, new_pos: usize) -> bool {
+    match &port.kind {
+        PortKind::StringPortInput { pos, .. } => {
+            unsafe { *pos.get() = new_pos; }
+            true
+        }
+        _ => false,
+    }
+}
+
 /// Convert a Rust Port to a Scheme port object.
 pub fn port_to_scheme_port(port: Port, heap: &mut crate::gc::GcHeap) -> crate::gc::GcRef {
     crate::gc::new_port(heap, port.kind)
@@ -830,8 +864,6 @@ pub fn scheme_port_to_port(scheme_port: crate::gc::GcRef) -> Port {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -840,14 +872,21 @@ mod tests {
 
     #[test]
     fn test_port_stack_push_pop() {
-        let stdin_port = Port { kind: PortKind::Stdin };
-        let file_port = Port { kind: PortKind::File { name: "foo.scm".to_string(), write: false, file_id: Some(0) } };
+        use crate::gc::GcHeap;
+        let mut heap = GcHeap::new();
+        let stdin_port = port_to_scheme_port(Port { kind: PortKind::Stdin }, &mut heap);
+        let file_port = port_to_scheme_port(Port { kind: PortKind::File { name: "foo.scm".to_string(), write: false, file_id: Some(0) } }, &mut heap);
         let mut stack = PortStack::new(stdin_port);
-        assert_eq!(stack.current().kind, PortKind::Stdin);
+        assert!(matches!(&stack.current().value, crate::gc::SchemeValue::Port { kind: PortKind::Stdin }));
         stack.push(file_port);
-        assert_eq!(stack.current().kind, PortKind::File { name: "foo.scm".to_string(), write: false, file_id: Some(0) });
+        match &stack.current().value {
+            crate::gc::SchemeValue::Port { kind: PortKind::File { name, .. } } => {
+                assert_eq!(name, "foo.scm");
+            }
+            _ => panic!("Expected file port"),
+        }
         assert!(stack.pop());
-        assert_eq!(stack.current().kind, PortKind::Stdin);
+        assert!(matches!(&stack.current().value, crate::gc::SchemeValue::Port { kind: PortKind::Stdin }));
         assert!(!stack.pop());
     }
 
@@ -904,19 +943,37 @@ mod tests {
 
     #[test]
     fn test_port_stack_nesting_and_fallback() {
-        let stdin_port = Port { kind: PortKind::Stdin };
-        let file1_port = Port { kind: PortKind::File { name: "file1.scm".to_string(), write: false, file_id: Some(1) } };
-        let file2_port = Port { kind: PortKind::File { name: "file2.scm".to_string(), write: false, file_id: Some(2) } };
+        use crate::gc::GcHeap;
+        
+        let mut heap = GcHeap::new();
+        let stdin_port = port_to_scheme_port(Port { kind: PortKind::Stdin }, &mut heap);
+        let file1_port = port_to_scheme_port(Port { kind: PortKind::File { name: "file1.scm".to_string(), write: false, file_id: Some(1) } }, &mut heap);
+        let file2_port = port_to_scheme_port(Port { kind: PortKind::File { name: "file2.scm".to_string(), write: false, file_id: Some(2) } }, &mut heap);
         let mut stack = PortStack::new(stdin_port);
-        assert_eq!(stack.current().kind, PortKind::Stdin);
+        assert!(matches!(&stack.current().value, crate::gc::SchemeValue::Port { kind: PortKind::Stdin }));
         stack.push(file1_port);
-        assert_eq!(stack.current().kind, PortKind::File { name: "file1.scm".to_string(), write: false, file_id: Some(1) });
+        match &stack.current().value {
+            crate::gc::SchemeValue::Port { kind: PortKind::File { name, .. } } => {
+                assert_eq!(name, "file1.scm");
+            }
+            _ => panic!("Expected file port"),
+        }
         stack.push(file2_port);
-        assert_eq!(stack.current().kind, PortKind::File { name: "file2.scm".to_string(), write: false, file_id: Some(2) });
+        match &stack.current().value {
+            crate::gc::SchemeValue::Port { kind: PortKind::File { name, .. } } => {
+                assert_eq!(name, "file2.scm");
+            }
+            _ => panic!("Expected file port"),
+        }
         assert!(stack.pop());
-        assert_eq!(stack.current().kind, PortKind::File { name: "file1.scm".to_string(), write: false, file_id: Some(1) });
+        match &stack.current().value {
+            crate::gc::SchemeValue::Port { kind: PortKind::File { name, .. } } => {
+                assert_eq!(name, "file1.scm");
+            }
+            _ => panic!("Expected file port"),
+        }
         assert!(stack.pop());
-        assert_eq!(stack.current().kind, PortKind::Stdin);
+        assert!(matches!(&stack.current().value, crate::gc::SchemeValue::Port { kind: PortKind::Stdin }));
         // Can't pop last port
         assert!(!stack.pop());
     }
@@ -926,10 +983,13 @@ mod tests {
         let string_port = new_string_port("hello");
         let mut file_table = FileTable::new();
         
-        // Note: This test needs to be updated since we can't modify the port position
-        // with the new immutable port design. For now, we'll test that we can read
-        // the first character from a string port.
+        // Test that we can read the first character from a string port
         assert_eq!(read_char(&string_port, &mut file_table), Some('h'));
+        
+        // Test position update
+        assert_eq!(get_string_port_pos(&string_port), Some(0));
+        assert!(update_string_port_pos(&string_port, 1));
+        assert_eq!(get_string_port_pos(&string_port), Some(1));
     }
 
     #[test]
@@ -937,9 +997,7 @@ mod tests {
         let output_port = new_output_string_port();
         let _file_table = FileTable::new();
         
-        // Note: This test needs to be updated since we can't modify the port content
-        // with the new immutable port design. For now, we'll test that we can get
-        // the initial content from an output string port.
+        // Test that we can get the initial content from an output string port
         let content = get_output_string(&output_port);
         assert_eq!(content, "");
     }
@@ -974,11 +1032,11 @@ mod tests {
         use crate::gc::GcHeap;
         
         let mut heap = GcHeap::new();
-        let original_port = Port { kind: PortKind::StringPortInput { content: "hello".to_string(), pos: 0 } };
+        let original_port = Port { kind: PortKind::StringPortInput { content: "hello".to_string(), pos: UnsafeCell::new(0) } };
         
         let scheme_port = port_to_scheme_port(original_port.clone(), &mut heap);
         let converted_port = scheme_port_to_port(scheme_port);
         
         assert_eq!(original_port.kind, converted_port.kind);
     }
-} 
+}

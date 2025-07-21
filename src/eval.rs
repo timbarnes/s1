@@ -123,7 +123,7 @@ impl Evaluator {
         let mut port = Port {
             kind: PortKind::StringPortInput {
                 content: code.to_string(),
-                pos: 0,
+                pos: std::cell::UnsafeCell::new(0),
             },
         };
         let mut parser = Parser::new();
@@ -1717,7 +1717,7 @@ mod tests {
         let mut port = Port {
             kind: crate::io::PortKind::StringPortInput {
                 content: "(define x 42)".to_string(),
-                pos: 0,
+                pos: std::cell::UnsafeCell::new(0),
             },
         };
         
@@ -1761,7 +1761,7 @@ mod tests {
         let mut port2 = Port {
             kind: crate::io::PortKind::StringPortInput {
                 content: "(define x 42)".to_string(),
-                pos: 0,
+                pos: std::cell::UnsafeCell::new(0),
             },
         };
         
