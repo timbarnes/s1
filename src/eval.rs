@@ -111,12 +111,7 @@ impl Evaluator {
         use crate::parser::Parser;
         use crate::io::{Port, PortKind};
 
-        let mut port = Port {
-            kind: PortKind::StringPortInput {
-                content: code.to_string(),
-                pos: std::cell::UnsafeCell::new(0),
-            },
-        };
+        let mut port = crate::io::new_string_port_input(code);
         let mut parser = Parser::new();
         let mut last_result = self.heap.nil_s();
         let mut parsed_any = false;
@@ -1705,12 +1700,7 @@ mod tests {
         let mut parser = Parser::new();
         
         // Test parsing and deduplicating a simple expression
-        let mut port = Port {
-            kind: crate::io::PortKind::StringPortInput {
-                content: "(define x 42)".to_string(),
-                pos: std::cell::UnsafeCell::new(0),
-            },
-        };
+        let mut port = crate::io::new_string_port_input("(define x 42)");
         
         let expr = parse_and_deduplicate(&mut parser, &mut port, &mut evaluator.heap_mut()).unwrap();
         
@@ -1749,12 +1739,7 @@ mod tests {
         }
         
         // Test that symbols are interned by parsing the same expression again
-        let mut port2 = Port {
-            kind: crate::io::PortKind::StringPortInput {
-                content: "(define x 42)".to_string(),
-                pos: std::cell::UnsafeCell::new(0),
-            },
-        };
+        let mut port2 = crate::io::new_string_port_input("(define x 42)");
         
         let expr2 = parse_and_deduplicate(&mut parser, &mut port2, &mut evaluator.heap_mut()).unwrap();
         

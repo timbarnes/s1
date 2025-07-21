@@ -19,10 +19,7 @@ pub fn open_input_file_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRe
             if let Err(e) = reader.read_to_string(&mut content) {
                 return Err(format!("open-input-file: could not read file '{}': {}", filename, e));
             }
-            let port = new_port(heap, crate::io::PortKind::StringPortInput {
-                content,
-                pos: std::cell::UnsafeCell::new(0),
-            });
+            let port = new_port(heap, crate::io::new_string_port_input(&content).kind);
             Ok(port)
         }
         Err(e) => Err(format!("open-input-file: could not open file '{}': {}", filename, e)),

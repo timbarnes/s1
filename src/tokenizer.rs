@@ -387,7 +387,7 @@ mod tests {
 
     fn tokenizer_from_str<'a>(port: &'a mut Port, s: &str) -> Tokenizer<'a> {
         // Set up the string port
-        *port = Port { kind: PortKind::StringPortInput { content: s.to_string(), pos: std::cell::UnsafeCell::new(0) } };
+        *port = crate::io::new_string_port_input(s);
         Tokenizer::new(port)
     }
 

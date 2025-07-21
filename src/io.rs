@@ -654,6 +654,16 @@ pub fn update_string_port_pos(port: &Port, new_pos: usize) -> bool {
     }
 }
 
+/// Create a new input string port from a &str.
+pub fn new_string_port_input(content: &str) -> Port {
+    Port {
+        kind: PortKind::StringPortInput {
+            content: content.to_string(),
+            pos: UnsafeCell::new(0),
+        }
+    }
+}
+
 /// Convert a Rust Port to a Scheme port object.
 pub fn port_to_scheme_port(port: Port, heap: &mut crate::gc::GcHeap) -> crate::gc::GcRef {
     crate::gc::new_port(heap, port.kind)

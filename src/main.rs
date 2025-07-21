@@ -166,10 +166,7 @@ fn repl(evaluator: &mut Evaluator) {
                             }
                             if input.trim().is_empty() { continue; }
                             // Replace the current port with the new input
-                            port.kind = PortKind::StringPortInput {
-                                content: input,
-                                pos: std::cell::UnsafeCell::new(0),
-                            };
+                            port.kind = crate::io::new_string_port_input(&input).kind;
                         } else {
                             // For non-stdin ports, pop on any parse error and continue
                             println!("Parse error: {}", e);
