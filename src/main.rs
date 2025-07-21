@@ -9,12 +9,12 @@ mod printer;
 mod builtin;
 mod env;
 
-use crate::parser::Parser;
-use crate::io::{Port, PortKind};
+//use crate::parser::Parser;
+//use crate::io::{Port, PortKind};
 use crate::eval::{Evaluator, eval_logic, parse_and_deduplicate};
 use argh::FromArgs;
 use std::io as stdio;
-use stdio::Write;
+//use stdio::Write;
 use crate::printer::print_scheme_value;
 
 #[derive(FromArgs)]
@@ -76,13 +76,13 @@ fn main() {
 
 fn repl(evaluator: &mut Evaluator) {
     use crate::gc::SchemeValue;
-    use crate::io::{Port, PortKind};
+    use crate::io::{PortKind};
     // use crate::tokenizer::Tokenizer;
     use crate::parser::Parser;
     use std::io as stdio;
     use stdio::Write;
 
-    let stdin = stdio::stdin();
+    //let stdin = stdio::stdin();
     let mut parser = Parser::new();
     // Cache the interned symbol for **port-stack**
     let port_stack_sym = evaluator.heap.intern_symbol("**port-stack**");
@@ -103,40 +103,23 @@ fn repl(evaluator: &mut Evaluator) {
                 // Port stack is empty: exit cleanly
                 break;
             }
-            SchemeValue::Pair(car, _cdr) => {
-                // car should be a port object
-                let port_val = &car.value;
-                let mut port = match port_val {
-                    SchemeValue::Port { kind } => Port { kind: kind.clone() },
-                    _ => {
-                        println!("Error: car of **port-stack** is not a port");
+            _ => {
+                // Extract the current port
+                let mut port = match crate::io::extract_port_from_stack_val(&port_stack_val.value) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        println!("Error: {}", e);
                         break;
                     }
-                };
-                
-                // Store the original port kind to update it later
-                let original_kind = match port_val {
-                    SchemeValue::Port { kind } => kind.clone(),
-                    _ => unreachable!(),
                 };
                 interactive = matches!(port.kind, PortKind::Stdin);
                 if interactive {
                     print!("s1> ");
                     stdio::stdout().flush().unwrap();
                 }
-                let parse_result = parse_and_deduplicate(&mut parser, &mut port, evaluator.heap_mut());
-                // Update the original port with the new position if it's a string port
-                if let SchemeValue::Port { kind } = &car.value {
-                    if let PortKind::StringPortInput { pos: _, .. } = kind {
-                        if let PortKind::StringPortInput { pos: new_pos, .. } = &port.kind {
-                            let current_pos = crate::io::get_string_port_pos(&port).unwrap();
-                            evaluator.heap_mut().update_string_port_pos(*car, current_pos);
-                        }
-                    }
-                }
-                match parse_result {
+                match parse_and_deduplicate(&mut parser, &mut port, evaluator.heap_mut()) {
                     Ok(expr) => {
-                        println!("Parsed: {}", print_scheme_value(&expr.value));
+                        // println!("Parsed: {}", print_scheme_value(&expr.value));
                         match eval_logic(expr, evaluator) {
                             Ok(result) => {
                                 if interactive {
@@ -146,47 +129,25 @@ fn repl(evaluator: &mut Evaluator) {
                             Err(e) => println!("Evaluation error: {}", e),
                         }
                     }
-                    Err(e) => {
-                        // For stdin, read input and create a new port
-                        if matches!(port.kind, PortKind::Stdin) {
-                            let mut input = String::new();
-                            if stdin.read_line(&mut input).unwrap() == 0 {
-                                // EOF on stdin
-                                // Pop the port from **port-stack**
-                                match &port_stack_val.value {
-                                    SchemeValue::Pair(_car, cdr) => {
-                                        evaluator.env_mut().set_symbol(port_stack_sym, *cdr);
-                                    }
-                                    _ => {
-                                        println!("Error: **port-stack** is not a proper list");
-                                        break;
-                                    }
-                                }
-                                continue;
+                    Err(crate::parser::ParseError::Eof) => {
+                        // Pop the port stack on EOF
+                        match &port_stack_val.value {
+                            SchemeValue::Pair(_car, cdr) => {
+                                evaluator.env_mut().set_symbol(port_stack_sym, *cdr);
                             }
-                            if input.trim().is_empty() { continue; }
-                            // Replace the current port with the new input
-                            port.kind = crate::io::new_string_port_input(&input).kind;
-                        } else {
-                            // For non-stdin ports, pop on any parse error and continue
-                            println!("Parse error: {}", e);
-                            match &port_stack_val.value {
-                                SchemeValue::Pair(_car, cdr) => {
-                                    evaluator.env_mut().set_symbol(port_stack_sym, *cdr);
-                                    continue;
-                                }
-                                _ => {
-                                    println!("Error: **port-stack** is not a proper list");
-                                    break;
-                                }
+                            _ => {
+                                println!("Error: **port-stack** is not a proper list");
+                                break;
                             }
                         }
+                        continue;
+                    }
+                    Err(crate::parser::ParseError::Syntax(e)) => {
+                    // 
+                        println!("Parse error: {}", e);
+                        continue;
                     }
                 }
-            }
-            _ => {
-                println!("Error: **port-stack** is not a list");
-                break;
             }
         }
     }

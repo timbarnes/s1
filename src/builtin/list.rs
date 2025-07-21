@@ -164,15 +164,14 @@ pub fn append_builtin(heap: &mut crate::gc::GcHeap, args: &[GcRef]) -> Result<Gc
 mod tests {
     use super::*;
     use crate::gc::GcHeap;
-    use num_bigint::BigInt;
 
     #[test]
     fn test_car_builtin() {
         let mut heap = GcHeap::new();
         
         // Create a pair
-        let car = crate::gc::new_int(&mut heap, BigInt::from(1));
-        let cdr = crate::gc::new_int(&mut heap, BigInt::from(2));
+        let car = crate::gc::new_int(&mut heap, num_bigint::BigInt::from(1));
+        let cdr = crate::gc::new_int(&mut heap, num_bigint::BigInt::from(2));
         let pair = crate::gc::new_pair(&mut heap, car, cdr);
         
         // Test car
@@ -185,7 +184,7 @@ mod tests {
         assert!(result.unwrap_err().contains("expects exactly 1 argument"));
         
         // Test error: not a pair
-        let not_pair = crate::gc::new_int(&mut heap, BigInt::from(42));
+        let not_pair = crate::gc::new_int(&mut heap, num_bigint::BigInt::from(42));
         let result = car_builtin(&mut heap, &[not_pair]);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("argument must be a pair"));
@@ -196,8 +195,8 @@ mod tests {
         let mut heap = GcHeap::new();
         
         // Create a pair
-        let car = crate::gc::new_int(&mut heap, BigInt::from(1));
-        let cdr = crate::gc::new_int(&mut heap, BigInt::from(2));
+        let car = crate::gc::new_int(&mut heap, num_bigint::BigInt::from(1));
+        let cdr = crate::gc::new_int(&mut heap, num_bigint::BigInt::from(2));
         let pair = crate::gc::new_pair(&mut heap, car, cdr);
         
         // Test cdr
@@ -210,7 +209,7 @@ mod tests {
         assert!(result.unwrap_err().contains("expects exactly 1 argument"));
         
         // Test error: not a pair
-        let not_pair = crate::gc::new_int(&mut heap, BigInt::from(42));
+        let not_pair = crate::gc::new_int(&mut heap, num_bigint::BigInt::from(42));
         let result = cdr_builtin(&mut heap, &[not_pair]);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("argument must be a pair"));
@@ -220,8 +219,8 @@ mod tests {
     fn test_cons_builtin() {
         let mut heap = GcHeap::new();
         
-        let car = crate::gc::new_int(&mut heap, BigInt::from(1));
-        let cdr = crate::gc::new_int(&mut heap, BigInt::from(2));
+        let car = crate::gc::new_int(&mut heap, num_bigint::BigInt::from(1));
+        let cdr = crate::gc::new_int(&mut heap, num_bigint::BigInt::from(2));
         
         // Test cons
         let result = cons_builtin(&mut heap, &[car, cdr]).unwrap();
@@ -242,14 +241,14 @@ mod tests {
         assert!(matches!(&result.value, SchemeValue::Nil));
         
         // Test single element
-        let elem = crate::gc::new_int(&mut heap, BigInt::from(42));
+        let elem = crate::gc::new_int(&mut heap, num_bigint::BigInt::from(42));
         let result = list_builtin(&mut heap, &[elem]).unwrap();
         assert!(matches!(&result.value, SchemeValue::Pair(_, _)));
         
         // Test multiple elements
-        let elem1 = crate::gc::new_int(&mut heap, BigInt::from(1));
-        let elem2 = crate::gc::new_int(&mut heap, BigInt::from(2));
-        let elem3 = crate::gc::new_int(&mut heap, BigInt::from(3));
+        let elem1 = crate::gc::new_int(&mut heap, num_bigint::BigInt::from(1));
+        let elem2 = crate::gc::new_int(&mut heap,num_bigint:: BigInt::from(2));
+        let elem3 = crate::gc::new_int(&mut heap, num_bigint::BigInt::from(3));
         let result = list_builtin(&mut heap, &[elem1, elem2, elem3]).unwrap();
         assert!(matches!(&result.value, SchemeValue::Pair(_, _)));
     }
@@ -263,15 +262,15 @@ mod tests {
         assert!(matches!(&result.value, SchemeValue::Nil));
         
         // Test single list
-        let elem1 = crate::gc::new_int(&mut heap, BigInt::from(1));
-        let elem2 = crate::gc::new_int(&mut heap, BigInt::from(2));
+        let elem1 = crate::gc::new_int(&mut heap, num_bigint::BigInt::from(1));
+        let elem2 = crate::gc::new_int(&mut heap, num_bigint::BigInt::from(2));
         let list1 = list_builtin(&mut heap, &[elem1, elem2]).unwrap();
         let result = append_builtin(&mut heap, &[list1]).unwrap();
         assert!(matches!(&result.value, SchemeValue::Pair(_, _)));
         
         // Test appending two lists
-        let elem3 = crate::gc::new_int(&mut heap, BigInt::from(3));
-        let elem4 = crate::gc::new_int(&mut heap, BigInt::from(4));
+        let elem3 = crate::gc::new_int(&mut heap, num_bigint::BigInt::from(3));
+        let elem4 = crate::gc::new_int(&mut heap, num_bigint::BigInt::from(4));
         let list2 = list_builtin(&mut heap, &[elem3, elem4]).unwrap();
         let result = append_builtin(&mut heap, &[list1, list2]).unwrap();
         assert!(matches!(&result.value, SchemeValue::Pair(_, _)));

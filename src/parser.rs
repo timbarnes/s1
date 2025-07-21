@@ -26,6 +26,12 @@ use crate::tokenizer::{Tokenizer, Token};
 use num_bigint::BigInt;
 use crate::io::{Port};
 
+#[derive(Debug, PartialEq)]
+pub enum ParseError {
+    Eof,
+    Syntax(String),
+}
+
 /// Parser for Scheme s-expressions using the reference-based GC system.
 ///
 /// This parser uses GcRefSimple (&'static GcObject) for better performance and simpler code.
@@ -46,18 +52,18 @@ impl Parser {
     /// # Arguments
     /// * `heap` - The GC heap for allocating Scheme values
     /// * `port` - The input port to read from
-    pub fn parse(&mut self, heap: &mut GcHeap, port: &mut Port) -> Result<GcRef, String> {
+    pub fn parse(&mut self, heap: &mut GcHeap, port: &mut Port) -> Result<GcRef, ParseError> {
         let mut tokenizer = Tokenizer::new(port);
         let token = tokenizer.next_token();
         match token {
             Some(Token::Quote) => Self::parse_quoted_expression(heap, &mut tokenizer),
             Some(token) => Self::parse_from_token(heap, Some(token), &mut tokenizer),
-            None => Err("Unexpected end of input".to_string()),
+            None => Err(ParseError::Eof),
         }
     }
 
     /// Parse a quoted expression (after encountering a quote token).
-    fn parse_quoted_expression(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<GcRef, String> {
+    fn parse_quoted_expression(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<GcRef, ParseError> {
         // Get the next token
         let next_token = tokenizer.next_token();
         // Parse the quoted expression first and ensure the borrow is dropped
@@ -69,25 +75,25 @@ impl Parser {
         Ok(new_pair(heap, quote_sym, quoted_list))
     }
 
-    fn parse_number_token(heap: &mut GcHeap, s: &str) -> Result<GcRef, String> {
+    fn parse_number_token(heap: &mut GcHeap, s: &str) -> Result<GcRef, ParseError> {
         if s.contains('.') || s.contains('e') || s.contains('E') {
             // Parse as float if it looks like a float
             if let Ok(f) = s.parse::<f64>() {
                 Ok(new_float(heap, f))
             } else {
-                Err(format!("Invalid float literal: {}", s))
+                Err(ParseError::Syntax(format!("Invalid float literal: {}", s)))
             }
         } else {
             // Parse as BigInt
             if let Some(i) = BigInt::parse_bytes(s.as_bytes(), 10) {
                 Ok(new_int(heap, i))
             } else {
-                Err(format!("Invalid integer literal: {}", s))
+                Err(ParseError::Syntax(format!("Invalid integer literal: {}", s)))
             }
         }
     }
 
-    fn parse_symbol_token(heap: &mut GcHeap, s: &str) -> Result<GcRef, String> {
+    fn parse_symbol_token(heap: &mut GcHeap, s: &str) -> Result<GcRef, ParseError> {
         if s == "nil" || s == "()" {
             Ok(new_nil(heap))
         } else if s.starts_with("#\\") {
@@ -100,14 +106,14 @@ impl Parser {
             if let Some(c) = ch {
                 Ok(new_char(heap, c))
             } else {
-                Err(format!("Invalid character literal: {}", s))
+                Err(ParseError::Syntax(format!("Invalid character literal: {}", s)))
             }
         } else {
             Ok(new_symbol(heap, s))
         }
     }
 
-    fn parse_vector_token(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<GcRef, String> {
+    fn parse_vector_token(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<GcRef, ParseError> {
         let mut vec_elems = Vec::new();
         loop {
             let t = tokenizer.next_token();
@@ -115,7 +121,7 @@ impl Parser {
                 break;
             }
             if let None = t {
-                return Err("Unclosed vector (unexpected EOF)".to_string());
+                return Err(ParseError::Syntax("Unclosed vector (unexpected EOF)".to_string()));
             }
             vec_elems.push(Self::parse_from_token(heap, t, tokenizer)?);
         }
@@ -123,7 +129,7 @@ impl Parser {
     }
 
     /// Parse an s-expression from a given token (used for list elements and recursive parsing).
-    fn parse_from_token(heap: &mut GcHeap, token: Option<Token>, tokenizer: &mut Tokenizer) -> Result<GcRef, String> {
+    fn parse_from_token(heap: &mut GcHeap, token: Option<Token>, tokenizer: &mut Tokenizer) -> Result<GcRef, ParseError> {
         match token {
             Some(Token::Number(s)) => Self::parse_number_token(heap, &s),
             Some(Token::String(s)) => Ok(new_string(heap, &s)),
@@ -131,18 +137,18 @@ impl Parser {
             Some(Token::Character(c)) => Ok(new_char(heap, c)),
             Some(Token::Symbol(s)) => Self::parse_symbol_token(heap, &s),
             Some(Token::LeftParen) => Self::parse_list(heap, tokenizer),
-            Some(Token::RightParen) => Err("Unexpected ')'".to_string()),
-            Some(Token::Dot) => Err("Unexpected '.'".to_string()),
+            Some(Token::RightParen) => Err(ParseError::Syntax("Unexpected ')'".to_string())),
+            Some(Token::Dot) => Err(ParseError::Syntax("Unexpected '.'".to_string())),
             Some(Token::Quote) => Self::parse_quoted_expression(heap, tokenizer),
             Some(Token::LeftBracket) => Self::parse_vector_token(heap, tokenizer),
-            Some(Token::RightBracket) => Err("Unexpected ']'".to_string()),
-            Some(Token::Eof) => Err("Unexpected end of input".to_string()),
-            None => Err("Unexpected end of input".to_string()),
+            Some(Token::RightBracket) => Err(ParseError::Syntax("Unexpected ']'".to_string())),
+            Some(Token::Eof) => Err(ParseError::Eof),
+            None => Err(ParseError::Eof),
         }
     }
 
     /// Parse a Scheme list (after encountering a left parenthesis).
-    fn parse_list(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<GcRef, String> {
+    fn parse_list(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<GcRef, ParseError> {
         let mut elements = Vec::new();
         loop {
             let token = tokenizer.next_token();
@@ -155,7 +161,7 @@ impl Parser {
                     }
                     return Ok(list);
                 }
-                None => return Err("Unclosed list (unexpected EOF)".to_string()),
+                None => return Err(ParseError::Syntax("Unclosed list (unexpected EOF)".to_string())),
                 Some(Token::Dot) => {
                     // Dotted pair: (a b . c)
                     let tail = Self::parse_from_token(heap, tokenizer.next_token(), tokenizer)?;
@@ -166,7 +172,7 @@ impl Parser {
                         }
                         return Ok(list);
                     } else {
-                        return Err("Expected ')' after dotted pair".to_string());
+                        return Err(ParseError::Syntax("Expected ')' after dotted pair".to_string()));
                     }
                 }
                 Some(token) => {

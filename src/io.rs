@@ -26,6 +26,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader as StdBufReader;
 use std::cell::UnsafeCell;
+use crate::gc::SchemeValue;
 
 /// The different types of ports supported by the I/O system.
 ///
@@ -676,6 +677,19 @@ pub fn scheme_port_to_port(scheme_port: crate::gc::GcRef) -> Port {
             kind: kind.clone(),
         },
         _ => panic!("Expected port object"),
+    }
+}
+
+/// Extract the current input Port from the top of the Scheme-level port stack (**port-stack**).
+/// Returns an error if the stack is empty or the value is not a port.
+pub fn extract_port_from_stack_val(port_stack_val: &SchemeValue) -> Result<Port, String> {
+    match port_stack_val {
+        SchemeValue::Pair(car, _) => match &car.value {
+            SchemeValue::Port { kind } => Ok(Port { kind: kind.clone() }),
+            _ => Err("car of **port-stack** is not a port".to_string()),
+        },
+        SchemeValue::Nil => Err("**port-stack** is empty".to_string()),
+        _ => Err("**port-stack** is not a list".to_string()),
     }
 }
 

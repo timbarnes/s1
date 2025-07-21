@@ -30,7 +30,6 @@ pub fn open_input_file_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRe
 mod tests {
     use super::*;
     use crate::gc::{GcHeap, new_string, new_int, SchemeValue};
-    use std::fs::File;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
