@@ -129,7 +129,7 @@ fn repl(evaluator: &mut Evaluator) {
                 if let SchemeValue::Port { kind } = &car.value {
                     if let PortKind::StringPortInput { pos: _, .. } = kind {
                         if let PortKind::StringPortInput { pos: new_pos, .. } = &port.kind {
-                            let current_pos = unsafe { *new_pos.get() };
+                            let current_pos = crate::io::get_string_port_pos(&port).unwrap();
                             evaluator.heap_mut().update_string_port_pos(*car, current_pos);
                         }
                     }

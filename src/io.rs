@@ -370,7 +370,7 @@ impl FileTable {
 /// Helper function to read a line from a string port and update its position
 fn read_line_from_string_port(port: &Port) -> Option<(String, Port)> {
     if let PortKind::StringPortInput { content, pos } = &port.kind {
-        let current_pos = unsafe { *pos.get() };
+        let current_pos = get_string_port_pos(port).unwrap();
         let mut lines = content.lines();
         // Skip to the current position
         for _ in 0..current_pos {
@@ -566,7 +566,7 @@ pub fn read_char(port: &Port, file_table: &mut FileTable) -> Option<char> {
             }
         }
         PortKind::StringPortInput { content, pos } => {
-            let current_pos = unsafe { *pos.get() };
+            let current_pos = get_string_port_pos(port).unwrap();
             if current_pos < content.len() {
                 let ch = content.chars().nth(current_pos).unwrap();
                 Some(ch)
