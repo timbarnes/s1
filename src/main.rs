@@ -10,7 +10,7 @@ mod builtin;
 mod env;
 
 use crate::parser::Parser;
-use crate::io::{Port, PortKind, PortStack};
+use crate::io::{Port, PortKind};
 use crate::eval::{Evaluator, eval_logic, parse_and_deduplicate};
 use argh::FromArgs;
 use std::io as stdio;

@@ -7,12 +7,12 @@
 //!
 //! ```rust
 //! use s1::tokenizer::{Tokenizer, Token};
-//! use s1::{PortStack, Port, PortKind};
+//! use s1::{Port, PortKind};
 //!
 //! // Create a string port for testing
 //! let port = Port { kind: PortKind::StringPort { content: "hello world.to_string(), pos: 0 } };
 //!
-//! let mut tokenizer = Tokenizer::new(port_stack, file_table);
+//! let mut tokenizer = Tokenizer::new(port);
 //!
 //! // Read tokens
 //! assert_eq!(tokenizer.next_token(), Some(Token::Symbol("hello.to_string())));
@@ -297,10 +297,10 @@ impl<'a> Tokenizer<'a> {
     ///
     /// ```rust
     /// use s1::tokenizer::{Tokenizer, Token};
-    /// use s1::{PortStack, Port, PortKind};
+    /// use s1::{Port, PortKind};
     ///
     /// let port = Port { kind: PortKind::StringPort { content: "hello123.to_string(), pos: 0;
-    /// let mut tokenizer = Tokenizer::new(port_stack, file_table);
+    /// let mut tokenizer = Tokenizer::new(port);
     ///
     /// assert_eq!(tokenizer.next_token(), Some(Token::Symbol("hello.to_string())));
     /// assert_eq!(tokenizer.next_token(), Some(Token::Number("123.to_string())));
