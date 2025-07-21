@@ -16,7 +16,6 @@ use std::cell::RefCell;
 pub struct Evaluator {
     pub heap: GcHeap,
     env: Environment,
-    port_stack: crate::io::SchemePortStack,
     /// Tail call optimization state
     tail_call: Option<TailCall>,
 }
@@ -32,12 +31,13 @@ impl Evaluator {
     pub fn new() -> Self {
         let mut heap = GcHeap::new();
         let stdin_port = crate::gc::new_port(&mut heap, crate::io::PortKind::Stdin);
-        let port_stack = crate::io::SchemePortStack::new(&mut heap, stdin_port);
+        // Remove port_stack: crate::io::SchemePortStack, from Evaluator
+        // Remove all initialization and methods related to SchemePortStack
         
         let mut evaluator = Self {
             heap,
             env: Environment::new(),
-            port_stack,
+            // Remove port_stack: crate::io::SchemePortStack, from Evaluator
             tail_call: None,
         };
         
@@ -50,12 +50,13 @@ impl Evaluator {
     /// Create an evaluator with a specific heap
     pub fn with_heap(mut heap: GcHeap) -> Self {
         let stdin_port = crate::gc::new_port(&mut heap, crate::io::PortKind::Stdin);
-        let port_stack = crate::io::SchemePortStack::new(&mut heap, stdin_port);
+        // Remove port_stack: crate::io::SchemePortStack, from Evaluator
+        // Remove all initialization and methods related to SchemePortStack
         
         let mut evaluator = Self {
             heap,
             env: Environment::new(),
-            port_stack,
+            // Remove port_stack: crate::io::SchemePortStack, from Evaluator
             tail_call: None,
         };
         
@@ -78,16 +79,6 @@ impl Evaluator {
     /// Get a mutable reference to the environment (for eval_apply only)
     pub fn env_mut(&mut self) -> &mut Environment {
         &mut self.env
-    }
-
-    /// Get a reference to the port stack
-    pub fn port_stack(&self) -> &crate::io::SchemePortStack {
-        &self.port_stack
-    }
-
-    /// Get a mutable reference to the port stack
-    pub fn port_stack_mut(&mut self) -> &mut crate::io::SchemePortStack {
-        &mut self.port_stack
     }
 
     /// Initialize Scheme-level I/O globals: **stdin**, **stdout**, **port-stack**
