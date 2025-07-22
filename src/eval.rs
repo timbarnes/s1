@@ -8,6 +8,7 @@ use crate::gc::{GcHeap, GcRef, SchemeValue, new_pair, new_vector, new_closure};
 use crate::env::Environment;
 use crate::parser::{ParseError, Parser};
 use crate::io::Port;
+use crate::printer::print_scheme_value;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -19,6 +20,7 @@ pub struct Evaluator {
     /// Tail call optimization state
     tail_call: Option<TailCall>,
     pub new_port: bool,
+    pub trace: bool,
 }
 
 /// Represents a tail call that should be optimized
@@ -31,16 +33,14 @@ pub struct TailCall {
 impl Evaluator {
     pub fn new() -> Self {
         let mut heap = GcHeap::new();
-        let stdin_port = crate::gc::new_port(&mut heap, crate::io::PortKind::Stdin);
-        // Remove port_stack: crate::io::SchemePortStack, from Evaluator
-        // Remove all initialization and methods related to SchemePortStack
-        
+        // let stdin_port = crate::gc::new_port(&mut heap, crate::io::PortKind::Stdin);
         let mut evaluator = Self {
             heap,
             env: Environment::new(),
             // Remove port_stack: crate::io::SchemePortStack, from Evaluator
             tail_call: None,
             new_port: false,
+            trace: false,
         };
         
         // Register built-ins in the evaluator's heap and environment
@@ -51,7 +51,7 @@ impl Evaluator {
 
     /// Create an evaluator with a specific heap
     pub fn with_heap(mut heap: GcHeap) -> Self {
-        let stdin_port = crate::gc::new_port(&mut heap, crate::io::PortKind::Stdin);
+        // let stdin_port = crate::gc::new_port(&mut heap, crate::io::PortKind::Stdin);
         // Remove port_stack: crate::io::SchemePortStack, from Evaluator
         // Remove all initialization and methods related to SchemePortStack
         
@@ -61,6 +61,7 @@ impl Evaluator {
             // Remove port_stack: crate::io::SchemePortStack, from Evaluator
             tail_call: None,
             new_port: false,
+            trace: false,
         };
         
         // Register built-ins in the evaluator's heap and environment
@@ -133,6 +134,13 @@ impl Evaluator {
 /// Apply function to pre-evaluated arguments
 /// Handles environment access for symbol lookup and function application
 pub fn eval_apply(func: GcRef, args: &[GcRef], evaluator: &mut Evaluator) -> Result<GcRef, String> {
+    if evaluator.trace {
+        //print!("Trace: ");
+        for v in args {
+            print!(" {:?}", v);
+        }
+        println!();
+    }
     match &func.value {
         SchemeValue::Symbol(name) => {
             // Symbol lookup - check environment using symbol-based lookup

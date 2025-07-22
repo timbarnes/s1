@@ -29,6 +29,9 @@ struct Args {
     /// exit after file loading, do not enter REPL
     #[argh(switch, short = 'q')]
     quit: bool,
+    /// trace mode
+    #[argh(switch, short= 't')]
+    trace: bool,
 }
 
 fn main() {
@@ -63,6 +66,10 @@ fn main() {
     //         std::process::exit(1);
     //     }
     // }
+
+    if args.trace {
+        evaluator.trace = true;
+    }
     
     if args.quit {
         return;
