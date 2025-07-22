@@ -1,7 +1,7 @@
 pub mod number;
 pub mod predicate;
 pub mod list;
-mod fileio;
+pub mod fileio;
 
 use crate::gc::{GcHeap, GcRef, new_string, new_bool, SchemeValue};
 // use num_bigint::BigInt;

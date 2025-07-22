@@ -18,6 +18,7 @@ pub struct Evaluator {
     env: Environment,
     /// Tail call optimization state
     tail_call: Option<TailCall>,
+    pub new_port: bool,
 }
 
 /// Represents a tail call that should be optimized
@@ -39,6 +40,7 @@ impl Evaluator {
             env: Environment::new(),
             // Remove port_stack: crate::io::SchemePortStack, from Evaluator
             tail_call: None,
+            new_port: false,
         };
         
         // Register built-ins in the evaluator's heap and environment
@@ -58,6 +60,7 @@ impl Evaluator {
             env: Environment::new(),
             // Remove port_stack: crate::io::SchemePortStack, from Evaluator
             tail_call: None,
+            new_port: false,
         };
         
         // Register built-ins in the evaluator's heap and environment
@@ -544,6 +547,7 @@ pub fn push_port_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, 
                     let current_stack = evaluator.env().get_symbol(port_stack_sym).unwrap_or_else(|| evaluator.heap.nil_s());
                     let new_stack = crate::gc::new_pair(evaluator.heap_mut(), port, current_stack);
                     evaluator.env_mut().set_symbol(port_stack_sym, new_stack);
+                    evaluator.new_port = true;
                     Ok(evaluator.heap.true_s())
                 }
                 _ => Err("push-port!: expected 1 argument".to_string()),

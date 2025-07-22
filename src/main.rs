@@ -82,72 +82,86 @@ fn repl(evaluator: &mut Evaluator) {
     use std::io as stdio;
     use stdio::Write;
 
-    //let stdin = stdio::stdin();
     let mut parser = Parser::new();
-    // Cache the interned symbol for **port-stack**
     let port_stack_sym = evaluator.heap.intern_symbol("**port-stack**");
     let mut interactive = false;
     println!("Welcome to the s1 Scheme REPL");
+
+    // Initialize the current port from the top of the stack
+    let mut current_port = {
+        let port_stack_val = evaluator.env().get_symbol(port_stack_sym).expect("**port-stack** is unbound at REPL start");
+        match crate::io::extract_port_from_stack_val(&port_stack_val.value) {
+            Ok(p) => p,
+            Err(e) => {
+                println!("Error: {}", e);
+                return;
+            }
+        }
+    };
+
     loop {
-        // Look up **port-stack** in the environment
-        let port_stack_val = evaluator.env().get_symbol(port_stack_sym);
-        let port_stack_val = match port_stack_val {
-            Some(v) => v,
-            None => {
-                println!("Error: **port-stack** is unbound");
-                break;
-            }
-        };
-        match &port_stack_val.value {
-            SchemeValue::Nil => {
-                // Port stack is empty: exit cleanly
-                break;
-            }
-            _ => {
-                // Extract the current port
-                let mut port = match crate::io::extract_port_from_stack_val(&port_stack_val.value) {
+        // Check the port. Each parse-eval needs to be sure the port hasn't changed.
+        if evaluator.new_port {
+            evaluator.new_port = false;
+            current_port = {
+                let port_stack_val = 
+                evaluator.env().get_symbol(port_stack_sym).expect("**port-stack** is unbound at REPL start");
+                match crate::io::extract_port_from_stack_val(&port_stack_val.value) {
                     Ok(p) => p,
                     Err(e) => {
                         println!("Error: {}", e);
-                        break;
+                        return;
                     }
-                };
-                interactive = matches!(port.kind, PortKind::Stdin);
-                if interactive {
-                    print!("s1> ");
-                    stdio::stdout().flush().unwrap();
                 }
-                match parse_and_deduplicate(&mut parser, &mut port, evaluator.heap_mut()) {
-                    Ok(expr) => {
-                        // println!("Parsed: {}", print_scheme_value(&expr.value));
-                        match eval_logic(expr, evaluator) {
-                            Ok(result) => {
-                                if interactive {
-                                    println!("=> {}", print_scheme_value(&result.value));
-                                }
-                            }
-                            Err(e) => println!("Evaluation error: {}", e),
+            };
+        }
+            
+        interactive = matches!(current_port.kind, PortKind::Stdin);
+        if interactive {
+            print!("s1> ");
+            stdio::stdout().flush().unwrap();
+        }
+        match parse_and_deduplicate(&mut parser, &mut current_port, evaluator.heap_mut()) {
+            Ok(expr) => {
+                match eval_logic(expr, evaluator) {
+                    Ok(result) => {
+                        if interactive {
+                            println!("=> {}", print_scheme_value(&result.value));
                         }
                     }
-                    Err(crate::parser::ParseError::Eof) => {
-                        // Pop the port stack on EOF
-                        match &port_stack_val.value {
-                            SchemeValue::Pair(_car, cdr) => {
-                                evaluator.env_mut().set_symbol(port_stack_sym, *cdr);
-                            }
-                            _ => {
-                                println!("Error: **port-stack** is not a proper list");
+                    Err(e) => println!("Evaluation error: {}", e),
+                }
+            }
+            Err(crate::parser::ParseError::Eof) => {
+                // Pop the port stack on EOF
+                let port_stack_val = evaluator.env().get_symbol(port_stack_sym).expect("**port-stack** is unbound");
+                match &port_stack_val.value {
+                    SchemeValue::Pair(_car, cdr) => {
+                        evaluator.env_mut().set_symbol(port_stack_sym, *cdr);
+                        // Update current_port to the new top of the stack
+                        let new_stack_val = evaluator.env().get_symbol(port_stack_sym).expect("**port-stack** is unbound after pop");
+                        match crate::io::extract_port_from_stack_val(&new_stack_val.value) {
+                            Ok(p) => current_port = p,
+                            Err(e) => {
+                                println!("Error: {}", e);
                                 break;
                             }
                         }
-                        continue;
                     }
-                    Err(crate::parser::ParseError::Syntax(e)) => {
-                    // 
-                        println!("Parse error: {}", e);
-                        continue;
+                    SchemeValue::Nil => {
+                        // Port stack is empty: exit cleanly
+                        break;
+                    }
+                    _ => {
+                        println!("Error: **port-stack** is not a proper list");
+                        break;
                     }
                 }
+                continue;
+            }
+            Err(crate::parser::ParseError::Syntax(e)) => {
+                println!("Parse error: {}", e);
+                continue;
             }
         }
     }
