@@ -47,25 +47,25 @@ fn main() {
     }
 
     // Execute startup commands as Scheme code
-    // let mut startup_commands = Vec::new();
+    let mut startup_commands = Vec::new();
     
     // Load core file unless --no-core
-    // if !args.no_core {
-    //     startup_commands.push(format!("(load \"scheme/s1-core.scm\")"));
-    // }
+    if !args.no_core {
+        startup_commands.push(format!("(push-port! (open-input-file \"scheme/s1-core.scm\"))"));
+    }
     
     // Load each file in order
-    // for filename in &args.file {
-    //     startup_commands.push(format!("(load \"{}\")", filename));
-    // }
+    for filename in &args.file {
+        startup_commands.push(format!("(push-port! (open-input-file \"{}\"))", filename));
+    }
     
     // Execute startup commands
-    // for command in startup_commands {
-    //     if let Err(e) = evaluator.eval_string(&command) {
-    //         eprintln!("Error executing startup command '{}': {}", command, e);
-    //         std::process::exit(1);
-    //     }
-    // }
+    for command in startup_commands {
+        if let Err(e) = evaluator.eval_string(&command) {
+            eprintln!("Error executing startup command '{}': {}", command, e);
+            std::process::exit(1);
+        }
+    }
 
     if args.trace {
         evaluator.trace = true;
