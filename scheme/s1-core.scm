@@ -45,3 +45,15 @@
 
 (display "s1-core loaded")
 (newline)
+
+(define load (lambda (f) (push-port! (open-input-file f))))
+;; (load "scheme/regression.scm")
+
+(define not (lambda (v) (if v #f #t)))
+(define abs (lambda (n) (if (< n 0) (- n) n)))
+(define <= (lambda (m n) (not (> m n))))
+(define >= (lambda (m n) (not (< m n))))
+(define zero? (lambda (n) (= n 0)))
+(define positive? (lambda (n) (>= n 0)))
+(define negative? (lambda (n) (< n 0)))
+(define even? (lambda (n) (zero? (mod n 2))))

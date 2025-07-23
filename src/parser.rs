@@ -19,12 +19,12 @@
 //! ```
 
 use crate::gc::{
-    GcHeap, GcRef, new_int, new_float, new_symbol, new_string, 
-    new_bool, new_char, new_nil, new_pair, new_vector
+    GcHeap, GcRef, get_nil, get_symbol, new_bool, new_char, new_float, new_int, new_pair,
+    new_string, new_vector,
 };
-use crate::tokenizer::{Tokenizer, Token};
+use crate::io::Port;
+use crate::tokenizer::{Token, Tokenizer};
 use num_bigint::BigInt;
-use crate::io::{Port};
 
 #[derive(Debug, PartialEq)]
 pub enum ParseError {
@@ -63,14 +63,14 @@ impl Parser {
     }
 
     /// Parse a quoted expression (after encountering a quote token).
-    fn parse_quoted_expression(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<GcRef, ParseError> {
-        // Get the next token
+    fn parse_quoted_expression(
+        heap: &mut GcHeap,
+        tokenizer: &mut Tokenizer,
+    ) -> Result<GcRef, ParseError> {
         let next_token = tokenizer.next_token();
-        // Parse the quoted expression first and ensure the borrow is dropped
         let quoted = Self::parse_from_token(heap, next_token, tokenizer)?;
-        // Now create the quote structure with a fresh borrow
-        let quote_sym = new_symbol(heap, "quote");
-        let nil = new_nil(heap);
+        let quote_sym = get_symbol(heap, "quote");
+        let nil = get_nil(heap);
         let quoted_list = new_pair(heap, quoted, nil);
         Ok(new_pair(heap, quote_sym, quoted_list))
     }
@@ -88,14 +88,17 @@ impl Parser {
             if let Some(i) = BigInt::parse_bytes(s.as_bytes(), 10) {
                 Ok(new_int(heap, i))
             } else {
-                Err(ParseError::Syntax(format!("Invalid integer literal: {}", s)))
+                Err(ParseError::Syntax(format!(
+                    "Invalid integer literal: {}",
+                    s
+                )))
             }
         }
     }
 
     fn parse_symbol_token(heap: &mut GcHeap, s: &str) -> Result<GcRef, ParseError> {
         if s == "nil" || s == "()" {
-            Ok(new_nil(heap))
+            Ok(get_nil(heap))
         } else if s.starts_with("#\\") {
             let ch = match &s[2..] {
                 "space" => Some(' '),
@@ -106,14 +109,20 @@ impl Parser {
             if let Some(c) = ch {
                 Ok(new_char(heap, c))
             } else {
-                Err(ParseError::Syntax(format!("Invalid character literal: {}", s)))
+                Err(ParseError::Syntax(format!(
+                    "Invalid character literal: {}",
+                    s
+                )))
             }
         } else {
-            Ok(new_symbol(heap, s))
+            Ok(get_symbol(heap, s))
         }
     }
 
-    fn parse_vector_token(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<GcRef, ParseError> {
+    fn parse_vector_token(
+        heap: &mut GcHeap,
+        tokenizer: &mut Tokenizer,
+    ) -> Result<GcRef, ParseError> {
         let mut vec_elems = Vec::new();
         loop {
             let t = tokenizer.next_token();
@@ -121,7 +130,9 @@ impl Parser {
                 break;
             }
             if let None = t {
-                return Err(ParseError::Syntax("Unclosed vector (unexpected EOF)".to_string()));
+                return Err(ParseError::Syntax(
+                    "Unclosed vector (unexpected EOF)".to_string(),
+                ));
             }
             vec_elems.push(Self::parse_from_token(heap, t, tokenizer)?);
         }
@@ -129,7 +140,11 @@ impl Parser {
     }
 
     /// Parse an s-expression from a given token (used for list elements and recursive parsing).
-    fn parse_from_token(heap: &mut GcHeap, token: Option<Token>, tokenizer: &mut Tokenizer) -> Result<GcRef, ParseError> {
+    fn parse_from_token(
+        heap: &mut GcHeap,
+        token: Option<Token>,
+        tokenizer: &mut Tokenizer,
+    ) -> Result<GcRef, ParseError> {
         match token {
             Some(Token::Number(s)) => Self::parse_number_token(heap, &s),
             Some(Token::String(s)) => Ok(new_string(heap, &s)),
@@ -155,13 +170,17 @@ impl Parser {
             match token {
                 Some(Token::RightParen) => {
                     // End of list
-                    let mut list = new_nil(heap);
+                    let mut list = get_nil(heap);
                     for elem in elements.into_iter().rev() {
                         list = new_pair(heap, elem, list);
                     }
                     return Ok(list);
                 }
-                None => return Err(ParseError::Syntax("Unclosed list (unexpected EOF)".to_string())),
+                None => {
+                    return Err(ParseError::Syntax(
+                        "Unclosed list (unexpected EOF)".to_string(),
+                    ));
+                }
                 Some(Token::Dot) => {
                     // Dotted pair: (a b . c)
                     let tail = Self::parse_from_token(heap, tokenizer.next_token(), tokenizer)?;
@@ -172,7 +191,9 @@ impl Parser {
                         }
                         return Ok(list);
                     } else {
-                        return Err(ParseError::Syntax("Expected ')' after dotted pair".to_string()));
+                        return Err(ParseError::Syntax(
+                            "Expected ')' after dotted pair".to_string(),
+                        ));
                     }
                 }
                 Some(token) => {
@@ -187,8 +208,8 @@ impl Parser {
 
 mod tests {
     use super::*;
-    use crate::io::{Port, PortKind};
     use crate::gc::SchemeValue;
+    use crate::io::{Port, PortKind};
 
     #[test]
     fn parse_number() {
@@ -244,7 +265,7 @@ mod tests {
         let mut port = crate::io::new_string_port_input("(1 2 3)");
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
-        
+
         match &expr.value {
             SchemeValue::Pair(car, cdr) => {
                 match &car.value {
@@ -283,13 +304,13 @@ mod tests {
         let mut heap = GcHeap::new();
         let mut port = crate::io::new_string_port_input("#t #f");
         let mut parser = Parser::new();
-        
+
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {
             SchemeValue::Bool(b) => assert_eq!(*b, true),
             _ => panic!("Expected true, got {:?}", expr.value),
         }
-        
+
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {
             SchemeValue::Bool(b) => assert_eq!(*b, false),
@@ -302,13 +323,13 @@ mod tests {
         let mut heap = GcHeap::new();
         let mut port = crate::io::new_string_port_input("#\\a #\\space");
         let mut parser = Parser::new();
-        
+
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {
             SchemeValue::Char(c) => assert_eq!(*c, 'a'),
             _ => panic!("Expected character 'a', got {:?}", expr.value),
         }
-        
+
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {
             SchemeValue::Char(c) => assert_eq!(*c, ' '),
@@ -322,7 +343,7 @@ mod tests {
         let mut port = crate::io::new_string_port_input("'hello");
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
-        
+
         match &expr.value {
             SchemeValue::Pair(quote_sym, quoted_expr) => {
                 match &quote_sym.value {
@@ -353,7 +374,7 @@ mod tests {
         let mut port = crate::io::new_string_port_input("(1 . 2)");
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
-        
+
         match &expr.value {
             SchemeValue::Pair(car, cdr) => {
                 match &car.value {
@@ -375,7 +396,7 @@ mod tests {
         let mut port = crate::io::new_string_port_input("#(1 2 3)");
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
-        
+
         match &expr.value {
             SchemeValue::Vector(v) => {
                 assert_eq!(v.len(), 3);
@@ -407,4 +428,4 @@ mod tests {
             _ => panic!("Expected float, got {:?}", expr.value),
         }
     }
-} 
+}

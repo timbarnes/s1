@@ -10,7 +10,9 @@ pub fn print_scheme_value(val: &SchemeValue) -> String {
             loop {
                 match current {
                     SchemeValue::Pair(car, cdr) => {
-                        if !first { s.push(' '); }
+                        if !first {
+                            s.push(' ');
+                        }
                         s.push_str(&print_scheme_value(&car.value));
                         current = &cdr.value;
                         first = false;
@@ -37,6 +39,7 @@ pub fn print_scheme_value(val: &SchemeValue) -> String {
         SchemeValue::Bool(false) => "#f".to_string(),
         SchemeValue::Char(c) => format!("#\\{}", c),
         SchemeValue::Nil => "nil".to_string(),
+        //SchemeValue::Closure { params, body, env } => "Closure".to_string(),
         _ => format!("{:?}", val),
     }
-} 
+}

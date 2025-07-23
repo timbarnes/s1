@@ -21,13 +21,12 @@
 
 #![allow(dead_code)]
 
+use num_bigint::BigInt;
 use std::cell::RefCell;
-use std::rc::Rc;
 use std::cmp::PartialEq;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use num_bigint::BigInt;
-
+use std::rc::Rc;
 
 /// Simple Scheme values that use GcRefSimple references.
 /// This is the new system that eliminates Rc<RefCell<T>> overhead.
@@ -85,9 +84,13 @@ impl PartialEq for SchemeValue {
             }
             (SchemeValue::Str(a), SchemeValue::Str(b)) => a == b,
             (SchemeValue::Vector(a), SchemeValue::Vector(b)) => {
-                if a.len() != b.len() { return false; }
+                if a.len() != b.len() {
+                    return false;
+                }
                 for (x, y) in a.iter().zip(b.iter()) {
-                    if x.value != y.value { return false; }
+                    if x.value != y.value {
+                        return false;
+                    }
                 }
                 true
             }
@@ -96,7 +99,18 @@ impl PartialEq for SchemeValue {
             // For Primitive, just compare type (not function pointer)
             (SchemeValue::Primitive { .. }, SchemeValue::Primitive { .. }) => true,
             // For Closure, compare params and body (not env since it's captured)
-            (SchemeValue::Closure { params: p1, body: b1, .. }, SchemeValue::Closure { params: p2, body: b2, .. }) => {
+            (
+                SchemeValue::Closure {
+                    params: p1,
+                    body: b1,
+                    ..
+                },
+                SchemeValue::Closure {
+                    params: p2,
+                    body: b2,
+                    ..
+                },
+            ) => {
                 if p1.len() != p2.len() {
                     return false;
                 }
@@ -121,14 +135,19 @@ impl std::fmt::Debug for SchemeValue {
             SchemeValue::Int(i) => write!(f, "Int({})", i),
             SchemeValue::Float(fl) => write!(f, "Float({})", fl),
             SchemeValue::Symbol(s) => write!(f, "Symbol({:?})", s),
-            SchemeValue::Pair(car, cdr) => f.debug_tuple("Pair").field(&car.value).field(&cdr.value).finish(),
+            SchemeValue::Pair(car, cdr) => f
+                .debug_tuple("Pair")
+                .field(&car.value)
+                .field(&cdr.value)
+                .finish(),
             SchemeValue::Str(s) => write!(f, "Str({:?})", s),
             SchemeValue::Vector(v) => f.debug_tuple("Vector").field(v).finish(),
             SchemeValue::Bool(b) => write!(f, "Bool({})", b),
             SchemeValue::Char(c) => write!(f, "Char({:?})", c),
             SchemeValue::Primitive { doc, .. } => write!(f, "Primitive({})", doc),
             SchemeValue::Closure { params, body, .. } => {
-                let param_names: Vec<String> = params.iter()
+                let param_names: Vec<String> = params
+                    .iter()
                     .map(|p| match &p.value {
                         SchemeValue::Symbol(name) => name.clone(),
                         _ => "?".to_string(),
@@ -202,10 +221,10 @@ impl GcHeap {
             objects_simple: Vec::new(),
             symbol_table: HashMap::new(),
         };
-        
+
         // Pre-allocate singleton objects
         heap.pre_allocate_simple_objects();
-        
+
         heap
     }
 
@@ -268,7 +287,7 @@ impl GcHeap {
         if let Some(existing) = self.symbol_table.get(name) {
             return *existing;
         }
-        
+
         let symbol_obj = GcObject {
             value: SchemeValue::Symbol(name.to_string()),
             marked: false,
@@ -325,11 +344,7 @@ pub fn new_float(heap: &mut GcHeap, val: f64) -> GcRef {
 
 /// Create a new boolean value.
 pub fn new_bool(heap: &mut GcHeap, val: bool) -> GcRef {
-    if val {
-        heap.true_s()
-    } else {
-        heap.false_s()
-    }
+    if val { heap.true_s() } else { heap.false_s() }
 }
 
 /// Create a new character value.
@@ -341,8 +356,9 @@ pub fn new_char(heap: &mut GcHeap, val: char) -> GcRef {
     heap.alloc(obj)
 }
 
-/// Create a new symbol value (interned).
-pub fn new_symbol(heap: &mut GcHeap, name: &str) -> GcRef {
+/// Create a new symbol or return the identical existing symbol.
+/// There can only be a single version of each symbol name, so (eq? 's 's) is always true.
+pub fn get_symbol(heap: &mut GcHeap, name: &str) -> GcRef {
     heap.intern_symbol(name)
 }
 
@@ -355,8 +371,8 @@ pub fn new_string(heap: &mut GcHeap, s: &str) -> GcRef {
     heap.alloc(obj)
 }
 
-/// Create a new nil value.
-pub fn new_nil(heap: &mut GcHeap) -> GcRef {
+/// Return the nil value.
+pub fn get_nil(heap: &mut GcHeap) -> GcRef {
     heap.nil_s()
 }
 
@@ -404,17 +420,11 @@ pub fn new_closure(
     env: Rc<RefCell<crate::env::Frame>>,
 ) -> GcRef {
     let obj = GcObject {
-        value: SchemeValue::Closure {
-            params,
-            body,
-            env,
-        },
+        value: SchemeValue::Closure { params, body, env },
         marked: false,
     };
     heap.alloc(obj)
 }
-
-
 
 /// Create a new port value.
 pub fn new_port(heap: &mut GcHeap, kind: crate::io::PortKind) -> GcRef {
@@ -431,22 +441,22 @@ mod tests {
     #[test]
     fn test_singleton_nil_true_false() {
         let heap = GcHeap::new();
-        
+
         // Test that nil is a singleton
         let nil1 = heap.nil_s();
         let nil2 = heap.nil_s();
         assert!(std::ptr::eq(nil1, nil2));
-        
+
         // Test that true is a singleton
         let true1 = heap.true_s();
         let true2 = heap.true_s();
         assert!(std::ptr::eq(true1, true2));
-        
+
         // Test that false is a singleton
         let false1 = heap.false_s();
         let false2 = heap.false_s();
         assert!(std::ptr::eq(false1, false2));
-        
+
         // Test that nil, true, and false are different
         assert!(!std::ptr::eq(nil1, true1));
         assert!(!std::ptr::eq(nil1, false1));
@@ -456,16 +466,16 @@ mod tests {
     #[test]
     fn test_symbol_interning() {
         let mut heap = GcHeap::new();
-        
+
         // Test that symbols with the same name are interned
         let sym1 = heap.intern_symbol("foo");
         let sym2 = heap.intern_symbol("foo");
         assert!(std::ptr::eq(sym1, sym2));
-        
+
         // Test that different symbols are different
         let sym3 = heap.intern_symbol("bar");
         assert!(!std::ptr::eq(sym1, sym3));
-        
+
         // Test symbol table stats
         assert_eq!(heap.symbol_table_stats(), 2);
     }
@@ -473,21 +483,21 @@ mod tests {
     #[test]
     fn test_basic_allocation() {
         let mut heap = GcHeap::new();
-        
+
         // Test integer allocation
         let int_val = new_int(&mut heap, BigInt::from(42));
         match &int_val.value {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "42"),
             _ => panic!("Expected integer"),
         }
-        
+
         // Test string allocation
         let str_val = new_string(&mut heap, "hello");
         match &str_val.value {
             SchemeValue::Str(s) => assert_eq!(s, "hello"),
             _ => panic!("Expected string"),
         }
-        
+
         // Test pair allocation
         let pair = new_pair(&mut heap, int_val, str_val);
         match &pair.value {
@@ -497,7 +507,7 @@ mod tests {
             }
             _ => panic!("Expected pair"),
         }
-        
+
         // Test port allocation
         let port = new_port(&mut heap, crate::io::PortKind::Stdin);
         match &port.value {
