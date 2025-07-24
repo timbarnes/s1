@@ -39,7 +39,16 @@ pub fn print_scheme_value(val: &SchemeValue) -> String {
         SchemeValue::Bool(false) => "#f".to_string(),
         SchemeValue::Char(c) => format!("#\\{}", c),
         SchemeValue::Nil => "nil".to_string(),
-        //SchemeValue::Closure { params, body, env } => "Closure".to_string(),
+        SchemeValue::Closure { params, body, env } => {
+            let mut s = "Closure: ( ".to_string();
+            for arg in params {
+                s.push_str(print_scheme_value(&arg.value).as_str());
+                s.push_str(" ");
+            }
+            s.push_str(") ");
+            s.push_str(print_scheme_value(&body.value).as_str());
+            s
+        }
         _ => format!("{:?}", val),
     }
 }
