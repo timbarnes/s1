@@ -274,5 +274,13 @@
 (test-true (eq? '(1 2) '(1 2)) "Equal lists")
 (test-false (eq? '(1 2) '(1 3)) "Unequal lists")
 
+;; Test 17: Factorial (recursion
+(display "=== Testing Factorial ===")
+(define fact
+    (lambda (n)
+        (if (zero? n) 1 (* n (fact (- n 1))))))
+(newline)
+(test-equal 1 (fact 0) "Factorial of zero")
+(test-equal 720 (fact 6) "Factorial of six")
 (display "=== All tests completed ===")
-(newline) 
+(newline)

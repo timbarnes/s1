@@ -110,6 +110,7 @@ fn repl(evaluator: &mut Evaluator) {
     };
 
     loop {
+        evaluator.depth = 0;
         // Check the port. Each parse-eval needs to be sure the port hasn't changed.
         if evaluator.new_port {
             evaluator.new_port = false;

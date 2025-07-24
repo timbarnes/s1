@@ -15,12 +15,12 @@ use std::rc::Rc;
 
 /// Evaluator that owns both heap and environment
 pub struct Evaluator {
-    pub heap: GcHeap,
-    env: Environment,
-    /// Tail call optimization state
-    tail_call: Option<TailCall>,
-    pub new_port: bool,
-    pub trace: bool,
+    pub heap: GcHeap,            // The global heap for scheme data
+    env: Environment,            // The current state of the environment
+    tail_call: Option<TailCall>, // Tail call optimization state
+    pub new_port: bool,          // Indicates a new port has been pushed on the stack
+    pub trace: bool,             // Indicates tracing is enabled
+    pub depth: usize,            // Evaluation nesting depth (used by trace)
 }
 
 /// Represents a tail call that should be optimized
@@ -41,6 +41,7 @@ impl Evaluator {
             tail_call: None,
             new_port: false,
             trace: false,
+            depth: 0,
         };
 
         // Register built-ins in the evaluator's heap and environment
@@ -62,6 +63,7 @@ impl Evaluator {
             tail_call: None,
             new_port: false,
             trace: false,
+            depth: 0,
         };
 
         // Register built-ins in the evaluator's heap and environment
@@ -223,8 +225,11 @@ fn eval_closure_logic(
 /// Main evaluation walker - handles self-evaluating forms, symbol resolution, and nested calls
 pub fn eval_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     // Check for pending tail call
+    evaluator.depth += 1;
     if evaluator.trace {
-        //println!("{:?}", expr);
+        for i in 1..evaluator.depth {
+            print!(" ");
+        }
         println!("{}", print_scheme_value(&expr.value));
     }
     if let Some(tail_call) = evaluator.tail_call.take() {
@@ -272,6 +277,7 @@ pub fn eval_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Strin
             }
             // Recursively evaluate the function position (car)
             let func = eval_logic(*car, evaluator)?;
+            evaluator.depth -= 1;
             // Apply the function to the evaluated arguments
             eval_apply(func, &evaluated_args, evaluator)
         }
@@ -282,6 +288,7 @@ pub fn eval_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Strin
 /// Trace logic: turn the trace function on or off
 /// This function takes a boolean value, and sets evaluator.trace to match the argument.
 pub fn trace_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+    evaluator.depth -= 1;
     match &expr.value {
         SchemeValue::Pair(_, cdr) => match &cdr.value {
             SchemeValue::Pair(bool_expr, _) => match &bool_expr.value {
@@ -296,8 +303,9 @@ pub fn trace_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Stri
 }
 
 /// Quote logic: return first argument unevaluated
-pub fn quote_logic(expr: GcRef, _evaluator: &mut Evaluator) -> Result<GcRef, String> {
+pub fn quote_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     // (quote x) => return x unevaluated
+    evaluator.depth -= 1;
     match &expr.value {
         SchemeValue::Pair(_, cdr) => match &cdr.value {
             SchemeValue::Pair(arg, _) => Ok(*arg),
@@ -310,6 +318,7 @@ pub fn quote_logic(expr: GcRef, _evaluator: &mut Evaluator) -> Result<GcRef, Str
 // Stubs for special forms
 pub fn begin_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     // (begin expr1 expr2 ... exprN) => evaluate each in sequence, return last
+    evaluator.depth -= 1;
     match &expr.value {
         SchemeValue::Pair(_, cdr) => {
             let mut current = *cdr;
@@ -365,6 +374,7 @@ pub fn define_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Str
     }
 }
 pub fn if_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+    evaluator.depth -= 1;
     // (if test consequent [alternate])
     match &expr.value {
         SchemeValue::Pair(_, cdr) => {
@@ -403,6 +413,7 @@ pub fn if_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String>
     }
 }
 pub fn and_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+    evaluator.depth -= 1;
     // (and expr1 expr2 ... exprN)
     match &expr.value {
         SchemeValue::Pair(_, cdr) => {
@@ -429,6 +440,7 @@ pub fn and_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String
 }
 
 pub fn or_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+    evaluator.depth -= 1;
     // (or expr1 expr2 ... exprN)
     match &expr.value {
         SchemeValue::Pair(_, cdr) => {
@@ -453,6 +465,7 @@ pub fn or_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String>
 }
 
 pub fn set_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+    evaluator.depth -= 1;
     // (set! symbol expr)
     match &expr.value {
         SchemeValue::Pair(_, cdr) => {
@@ -490,14 +503,16 @@ pub fn set_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String
 }
 
 /// Lambda logic: create a closure with captured environment
-/// (lambda (params...) body) => return closure
+/// (lambda (params...) body1 body2 ...) => return closure
 pub fn lambda_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
-    use crate::gc::new_closure;
+    use crate::gc::{GcHeap, new_closure};
+    //use crate::gc_util::{list_from_vec, list_to_vec};
 
-    // Extract the arguments: (lambda (params...) body)
+    evaluator.depth -= 2;
+
     match &expr.value {
         SchemeValue::Pair(_, cdr) => {
-            // cdr should be ((params...) . (body . nil))
+            // cdr should be (params . body...)
             match &cdr.value {
                 SchemeValue::Pair(params_list, body_rest) => {
                     // Extract parameter names from params_list
@@ -527,51 +542,43 @@ pub fn lambda_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Str
                         }
                     }
 
-                    // Extract body from body_rest
-                    match &body_rest.value {
-                        SchemeValue::Pair(body, tail) => {
-                            match &tail.value {
-                                SchemeValue::Nil => {
-                                    // Create a mapping from parameter names to their interned symbols
-                                    let mut param_map = HashMap::new();
-                                    for param in &params {
-                                        match &param.value {
-                                            SchemeValue::Symbol(name) => {
-                                                param_map.insert(name.clone(), *param);
-                                            }
-                                            _ => {
-                                                return Err(
-                                                    "Lambda parameter must be a symbol".to_string()
-                                                );
-                                            }
-                                        }
-                                    }
+                    // Convert body_rest (a proper list) into a Vec<GcRef>
+                    let body_exprs = list_to_vec(*body_rest)?;
 
-                                    // Deduplicate the body, but preserve parameter symbols
-                                    let deduplicated_body = deduplicate_symbols_preserve_params(
-                                        *body,
-                                        evaluator.heap_mut(),
-                                        &param_map,
-                                    );
+                    if body_exprs.is_empty() {
+                        return Err("lambda: missing body".to_string());
+                    }
 
-                                    // Capture the current environment for the closure
-                                    // This ensures the closure has access to all bindings in the current environment
-                                    let captured_frame = evaluator.env().current_frame();
+                    // Wrap the body expressions in an implicit (begin ...) if needed
+                    let wrapped_body = wrap_body_in_begin(body_exprs, evaluator.heap_mut());
 
-                                    // Create the closure with the deduplicated body
-                                    let closure = new_closure(
-                                        evaluator.heap_mut(),
-                                        params,
-                                        deduplicated_body,
-                                        captured_frame,
-                                    );
-                                    Ok(closure)
-                                }
-                                _ => Err("lambda: too many arguments".to_string()),
+                    // Intern and preserve parameter symbols
+                    let mut param_map = HashMap::new();
+                    for param in &params {
+                        match &param.value {
+                            SchemeValue::Symbol(name) => {
+                                param_map.insert(name.clone(), *param);
+                            }
+                            _ => {
+                                return Err("lambda: parameter must be a symbol".to_string());
                             }
                         }
-                        _ => Err("lambda: missing body".to_string()),
                     }
+
+                    let deduplicated_body = deduplicate_symbols_preserve_params(
+                        wrapped_body,
+                        evaluator.heap_mut(),
+                        &param_map,
+                    );
+
+                    let captured_frame = evaluator.env().current_frame();
+                    let closure = new_closure(
+                        evaluator.heap_mut(),
+                        params,
+                        deduplicated_body,
+                        captured_frame,
+                    );
+                    Ok(closure)
                 }
                 _ => Err("lambda: malformed arguments".to_string()),
             }
@@ -582,6 +589,7 @@ pub fn lambda_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Str
 
 pub fn push_port_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     // (push-port! port)
+    evaluator.depth -= 1;
     match &expr.value {
         SchemeValue::Pair(_, cdr) => {
             // Extract the argument from the cdr
@@ -609,6 +617,7 @@ pub fn push_port_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, 
 pub fn pop_port_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     // (pop-port!)
     use crate::gc::SchemeValue;
+    evaluator.depth -= 1;
     match &expr.value {
         SchemeValue::Pair(_, cdr) => {
             // Check that cdr is nil (no arguments)
@@ -638,6 +647,41 @@ pub fn pop_port_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, S
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
+
+fn wrap_body_in_begin(body_exprs: Vec<GcRef>, heap: &mut GcHeap) -> GcRef {
+    if body_exprs.len() == 1 {
+        body_exprs[0]
+    } else {
+        // Create (begin expr1 expr2 ...)
+        let begin_sym = heap.intern_symbol("begin");
+        let mut exprs = body_exprs;
+        exprs.insert(0, begin_sym);
+        list_from_vec(exprs, heap)
+    }
+}
+
+fn list_from_vec(exprs: Vec<GcRef>, heap: &mut GcHeap) -> GcRef {
+    let mut list = crate::gc::get_nil(heap);
+    for element in exprs.iter().rev() {
+        list = crate::gc::new_pair(heap, *element, list);
+    }
+    list
+}
+
+fn list_to_vec(list: GcRef) -> Result<Vec<GcRef>, String> {
+    let mut vec = Vec::new();
+    let mut l = list;
+    loop {
+        match &l.value {
+            SchemeValue::Nil => break Ok(vec),
+            SchemeValue::Pair(car, cdr) => {
+                vec.push(*car);
+                l = *cdr;
+            }
+            _ => break Err("Expected a list".to_string()),
+        }
+    }
+}
 
 /// Extract arguments from a list (cdr of a function call)
 pub fn extract_args(expr: GcRef) -> Result<Vec<GcRef>, String> {

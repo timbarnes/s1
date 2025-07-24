@@ -11,7 +11,7 @@
 (define char? (lambda (x) (eq? (type-of x) 'char)))
 (define primitive? (lambda (x) (eq? (type-of x) 'primitive)))
 (define env-frame? (lambda (x) (eq? (type-of x) 'env-frame)))
-(define nil? (lambda (x) (eq? x '()))) 
+(define nil? (lambda (x) (eq? x '())))
 
 ;; List accessor functions (compositions of car and cdr)
 ;; These provide convenient access to nested list elements
@@ -46,7 +46,10 @@
 (display "s1-core loaded")
 (newline)
 
-(define load (lambda (f) (push-port! (open-input-file f))))
+(define load (lambda (f)
+    (begin (define inp (open-input-file f))
+        (display inp)
+        (push-port! inp))))
 ;; (load "scheme/regression.scm")
 
 (define not (lambda (v) (if v #f #t)))
