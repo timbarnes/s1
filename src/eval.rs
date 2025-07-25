@@ -1533,9 +1533,9 @@ mod tests {
         // Verify it's a closure
         match &add1.value {
             SchemeValue::Closure { params, body, .. } => {
-                assert_eq!(params.len(), 1);
+                assert_eq!(params.len(), 2); // 1 + the zeroth element for variadics
                 // Check that the parameter is a symbol with the right name
-                match &params[0].value {
+                match &params[1].value {
                     SchemeValue::Symbol(name) => assert_eq!(name, "x"),
                     _ => panic!("Expected symbol parameter"),
                 }
@@ -1607,7 +1607,7 @@ mod tests {
             let plus_expr = new_pair(heap, plus_sym, x_y_pair);
 
             // Create closure with captured environment
-            closure = new_closure(heap, vec![x_param, y_param], plus_expr, captured_env);
+            closure = new_closure(heap, vec![nil, x_param, y_param], plus_expr, captured_env);
         }
 
         // Apply the closure: (closure 3 4)
@@ -1906,7 +1906,7 @@ mod tests {
         {
             let heap = evaluator.heap_mut();
             deduplicated_body = deduplicate_symbols(plus_expr, heap);
-            closure = new_closure(heap, vec![x_param], deduplicated_body, captured_env);
+            closure = new_closure(heap, vec![nil, x_param], deduplicated_body, captured_env);
         }
 
         // Apply the closure: (closure 5)
