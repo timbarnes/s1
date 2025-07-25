@@ -275,12 +275,17 @@
 (test-false (eq? '(1 2) '(1 3)) "Unequal lists")
 
 ;; Test 17: Factorial (recursion
-(display "=== Testing Factorial ===")
+(display "=== Testing Recursion ===")
 (define fact
     (lambda (n)
         (if (zero? n) 1 (* n (fact (- n 1))))))
 (newline)
-(test-equal 1 (fact 0) "Factorial of zero")
-(test-equal 720 (fact 6) "Factorial of six")
+(test-equal 1 (fact 0) "Factorial(0)")
+(test-equal 720 (fact 6) "Factorial(6)")
+(define fib
+    (lambda (n)
+        (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))))
+(test-equal 13 (fib 7) "Fibonacci(7)")
+(test-equal 6765 (fib 20) "Fibonacci(20)")
 (display "=== All tests completed ===")
 (newline)

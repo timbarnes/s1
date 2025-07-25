@@ -21,12 +21,12 @@
 //! write_line(&stdin_port, &mut file_table, "Hello, World!");
 //! ```
 
-use std::io::{self, Write, Read, BufRead, BufReader, BufWriter};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::BufReader as StdBufReader;
-use std::cell::UnsafeCell;
+use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
+// use std::io::BufReader as StdBufReader;
 use crate::gc::SchemeValue;
+use std::cell::UnsafeCell;
 
 /// The different types of ports supported by the I/O system.
 ///
@@ -43,9 +43,16 @@ pub enum PortKind {
     /// Standard error stream
     Stderr,
     /// File-based port with read/write mode and optional file ID
-    File { name: String, write: bool, file_id: Option<usize> },
+    File {
+        name: String,
+        write: bool,
+        file_id: Option<usize>,
+    },
     /// In-memory string port for input with content and current position
-    StringPortInput { content: String, pos: UnsafeCell<usize> },
+    StringPortInput {
+        content: String,
+        pos: UnsafeCell<usize>,
+    },
     /// In-memory string port for output with accumulating content
     StringPortOutput { content: String },
 }
@@ -56,7 +63,11 @@ impl Clone for PortKind {
             PortKind::Stdin => PortKind::Stdin,
             PortKind::Stdout => PortKind::Stdout,
             PortKind::Stderr => PortKind::Stderr,
-            PortKind::File { name, write, file_id } => PortKind::File {
+            PortKind::File {
+                name,
+                write,
+                file_id,
+            } => PortKind::File {
                 name: name.clone(),
                 write: *write,
                 file_id: *file_id,
@@ -78,15 +89,32 @@ impl PartialEq for PortKind {
             (PortKind::Stdin, PortKind::Stdin) => true,
             (PortKind::Stdout, PortKind::Stdout) => true,
             (PortKind::Stderr, PortKind::Stderr) => true,
-            (PortKind::File { name: n1, write: w1, file_id: f1 }, PortKind::File { name: n2, write: w2, file_id: f2 }) => {
-                n1 == n2 && w1 == w2 && f1 == f2
-            }
-            (PortKind::StringPortInput { content: c1, pos: p1 }, PortKind::StringPortInput { content: c2, pos: p2 }) => {
-                c1 == c2 && unsafe { *p1.get() == *p2.get() }
-            }
-            (PortKind::StringPortOutput { content: c1 }, PortKind::StringPortOutput { content: c2 }) => {
-                c1 == c2
-            }
+            (
+                PortKind::File {
+                    name: n1,
+                    write: w1,
+                    file_id: f1,
+                },
+                PortKind::File {
+                    name: n2,
+                    write: w2,
+                    file_id: f2,
+                },
+            ) => n1 == n2 && w1 == w2 && f1 == f2,
+            (
+                PortKind::StringPortInput {
+                    content: c1,
+                    pos: p1,
+                },
+                PortKind::StringPortInput {
+                    content: c2,
+                    pos: p2,
+                },
+            ) => c1 == c2 && unsafe { *p1.get() == *p2.get() },
+            (
+                PortKind::StringPortOutput { content: c1 },
+                PortKind::StringPortOutput { content: c2 },
+            ) => c1 == c2,
             _ => false,
         }
     }
@@ -150,7 +178,10 @@ impl FileTable {
     /// let table = FileTable::new();
     /// ```
     pub fn new() -> Self {
-        Self { next_id: 1, files: HashMap::new() }
+        Self {
+            next_id: 1,
+            files: HashMap::new(),
+        }
     }
 
     /// Open a file and return its ID.
@@ -284,7 +315,7 @@ fn read_line_from_string_port(port: &Port) -> Option<(String, Port)> {
                 kind: PortKind::StringPortInput {
                     content: content.clone(),
                     pos: UnsafeCell::new(new_pos),
-                }
+                },
             };
             Some((line.to_string() + "\n", new_port))
         } else {
@@ -332,11 +363,7 @@ pub fn read_line(port: &Port, file_table: &mut FileTable) -> Option<String> {
         PortKind::Stdin => {
             let mut buf = String::new();
             let n = io::stdin().read_line(&mut buf).ok()?;
-            if n == 0 {
-                None
-            } else {
-                Some(buf)
-            }
+            if n == 0 { None } else { Some(buf) }
         }
         PortKind::File { file_id, .. } => {
             if let Some(file_id) = file_id {
@@ -344,11 +371,7 @@ pub fn read_line(port: &Port, file_table: &mut FileTable) -> Option<String> {
                     let mut reader = BufReader::new(file);
                     let mut buf = String::new();
                     let n = reader.read_line(&mut buf).ok()?;
-                    if n == 0 {
-                        None
-                    } else {
-                        Some(buf)
-                    }
+                    if n == 0 { None } else { Some(buf) }
                 } else {
                     None
                 }
@@ -566,7 +589,7 @@ pub fn new_string_port(s: &str) -> Port {
         kind: PortKind::StringPortInput {
             content: s.to_string(),
             pos: UnsafeCell::new(0),
-        }
+        },
     }
 }
 
@@ -589,7 +612,7 @@ pub fn new_string_port(s: &str) -> Port {
 ///
 /// // Write to the string port
 /// write_line(&output_port, &mut file_table, "hello");
-/// 
+///
 /// // Get the accumulated content
 /// let content = get_output_string(&output_port);
 /// assert_eq!(content, "hello");
@@ -598,7 +621,7 @@ pub fn new_output_string_port() -> Port {
     Port {
         kind: PortKind::StringPortOutput {
             content: String::new(),
-        }
+        },
     }
 }
 
@@ -636,9 +659,7 @@ pub fn get_output_string(port: &Port) -> String {
 /// This function should be called through the GC heap accessor.
 pub fn get_string_port_pos(port: &Port) -> Option<usize> {
     match &port.kind {
-        PortKind::StringPortInput { pos, .. } => {
-            Some(unsafe { *pos.get() })
-        }
+        PortKind::StringPortInput { pos, .. } => Some(unsafe { *pos.get() }),
         _ => None,
     }
 }
@@ -648,7 +669,9 @@ pub fn get_string_port_pos(port: &Port) -> Option<usize> {
 pub fn update_string_port_pos(port: &Port, new_pos: usize) -> bool {
     match &port.kind {
         PortKind::StringPortInput { pos, .. } => {
-            unsafe { *pos.get() = new_pos; }
+            unsafe {
+                *pos.get() = new_pos;
+            }
             true
         }
         _ => false,
@@ -661,7 +684,7 @@ pub fn new_string_port_input(content: &str) -> Port {
         kind: PortKind::StringPortInput {
             content: content.to_string(),
             pos: UnsafeCell::new(0),
-        }
+        },
     }
 }
 
@@ -673,9 +696,7 @@ pub fn port_to_scheme_port(port: Port, heap: &mut crate::gc::GcHeap) -> crate::g
 /// Convert a Scheme port object to a Rust Port.
 pub fn scheme_port_to_port(scheme_port: crate::gc::GcRef) -> Port {
     match &scheme_port.value {
-        crate::gc::SchemeValue::Port { kind } => Port {
-            kind: kind.clone(),
-        },
+        crate::gc::SchemeValue::Port { kind } => Port { kind: kind.clone() },
         _ => panic!("Expected port object"),
     }
 }
@@ -702,13 +723,18 @@ mod tests {
     #[test]
     fn test_port_conversion() {
         use crate::gc::GcHeap;
-        
+
         let mut heap = GcHeap::new();
-        let original_port = Port { kind: PortKind::StringPortInput { content: "hello".to_string(), pos: UnsafeCell::new(0) } };
-        
+        let original_port = Port {
+            kind: PortKind::StringPortInput {
+                content: "hello".to_string(),
+                pos: UnsafeCell::new(0),
+            },
+        };
+
         let scheme_port = port_to_scheme_port(original_port.clone(), &mut heap);
         let converted_port = scheme_port_to_port(scheme_port);
-        
+
         assert_eq!(original_port.kind, converted_port.kind);
     }
 }

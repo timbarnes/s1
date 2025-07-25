@@ -40,12 +40,33 @@ pub fn print_scheme_value(val: &SchemeValue) -> String {
         SchemeValue::Char(c) => format!("#\\{}", c),
         SchemeValue::Nil => "nil".to_string(),
         SchemeValue::Closure { params, body, env } => {
-            let mut s = "Closure: ( ".to_string();
-            for arg in params {
-                s.push_str(print_scheme_value(&arg.value).as_str());
-                s.push_str(" ");
+            let mut s = "Closure: ".to_string();
+            match params.len() {
+                0 => s.push_str("() "),
+                1 => {
+                    s.push_str(print_scheme_value(&params[0].value).as_str());
+                    s.push(' ');
+                }
+                _ => {
+                    // two cases: list and dotted, depending on the value of params[0]
+                    s.push('(');
+                    for arg in params[1..].iter() {
+                        s.push_str(print_scheme_value(&arg.value).as_str());
+                        s.push(' ');
+                    }
+                    match &params[0].value {
+                        SchemeValue::Symbol(name) => {
+                            println!("Symbol: {}", name);
+                            s.push_str(". ");
+                            s.push_str(name.as_str());
+                            s.push(' ');
+                        }
+                        _ => (),
+                    }
+                    s.pop();
+                    s.push_str(") ");
+                }
             }
-            s.push_str(") ");
             s.push_str(print_scheme_value(&body.value).as_str());
             s
         }
