@@ -56,7 +56,9 @@ impl Parser {
         let mut tokenizer = Tokenizer::new(port);
         let token = tokenizer.next_token();
         match token {
-            Some(Token::Quote) => Self::parse_quoted_expression(heap, &mut tokenizer),
+            Some(Token::Quote) => {
+                Self::parse_quoted_expression(heap, &mut tokenizer, "quote".to_string())
+            }
             Some(token) => Self::parse_from_token(heap, Some(token), &mut tokenizer),
             None => Err(ParseError::Eof),
         }
@@ -66,10 +68,11 @@ impl Parser {
     fn parse_quoted_expression(
         heap: &mut GcHeap,
         tokenizer: &mut Tokenizer,
+        sym: String, //
     ) -> Result<GcRef, ParseError> {
         let next_token = tokenizer.next_token();
         let quoted = Self::parse_from_token(heap, next_token, tokenizer)?;
-        let quote_sym = get_symbol(heap, "quote");
+        let quote_sym = get_symbol(heap, sym.as_str());
         let nil = get_nil(heap);
         let quoted_list = new_pair(heap, quoted, nil);
         Ok(new_pair(heap, quote_sym, quoted_list))
@@ -154,9 +157,20 @@ impl Parser {
             Some(Token::LeftParen) => Self::parse_list(heap, tokenizer),
             Some(Token::RightParen) => Err(ParseError::Syntax("Unexpected ')'".to_string())),
             Some(Token::Dot) => Err(ParseError::Syntax("Unexpected '.'".to_string())),
-            Some(Token::Quote) => Self::parse_quoted_expression(heap, tokenizer),
+            Some(Token::Quote) => {
+                Self::parse_quoted_expression(heap, tokenizer, "quote".to_string())
+            }
             Some(Token::LeftBracket) => Self::parse_vector_token(heap, tokenizer),
             Some(Token::RightBracket) => Err(ParseError::Syntax("Unexpected ']'".to_string())),
+            Some(Token::Backquote) => {
+                Self::parse_quoted_expression(heap, tokenizer, "backquote".to_string())
+            }
+            Some(Token::Comma) => {
+                Self::parse_quoted_expression(heap, tokenizer, "comma".to_string())
+            }
+            Some(Token::CommaAt) => {
+                Self::parse_quoted_expression(heap, tokenizer, "comma-at".to_string())
+            }
             Some(Token::Eof) => Err(ParseError::Eof),
             None => Err(ParseError::Eof),
         }

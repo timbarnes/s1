@@ -20,7 +20,7 @@
 //! assert_eq!(tokenizer.next_token(), None);
 //! ```
 
-use crate::io::{PortKind, Port};
+use crate::io::{Port, PortKind};
 use std::io::Read;
 
 /// Represents a lexical token in Scheme source code.
@@ -50,6 +50,12 @@ pub enum Token {
     Dot,
     /// End of input
     Eof,
+    /// Backquote for macros and transformation
+    Backquote,
+    /// Comma for unquote
+    Comma,
+    /// Comma-at for unquote-splicing
+    CommaAt,
 }
 
 /// Tokenizer that reads characters from a port and produces tokens.
@@ -78,7 +84,8 @@ impl<'a> Tokenizer<'a> {
                 PortKind::StringPortInput { .. } => {
                     // Use safe accessors from io.rs
                     let current_pos = crate::io::get_string_port_pos(self.port)?;
-                    let content = if let PortKind::StringPortInput { content, .. } = &self.port.kind {
+                    let content = if let PortKind::StringPortInput { content, .. } = &self.port.kind
+                    {
                         content
                     } else {
                         unreachable!()
@@ -135,10 +142,17 @@ impl<'a> Tokenizer<'a> {
     /// non-decimal-point character, then returns the number as a string.
     fn read_number(&mut self, first_char: char) -> String {
         let mut number = first_char.to_string();
-        
+
         loop {
             match self.read_char() {
-                Some(c) if c.is_ascii_digit() || c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-' => {
+                Some(c)
+                    if c.is_ascii_digit()
+                        || c == '.'
+                        || c == 'e'
+                        || c == 'E'
+                        || c == '+'
+                        || c == '-' =>
+                {
                     number.push(c);
                 }
                 Some(c) => {
@@ -150,7 +164,7 @@ impl<'a> Tokenizer<'a> {
                 }
             }
         }
-        
+
         number
     }
 
@@ -160,7 +174,7 @@ impl<'a> Tokenizer<'a> {
     /// then returns the symbol as a string.
     fn read_symbol(&mut self, first_char: char) -> String {
         let mut symbol = first_char.to_string();
-        
+
         loop {
             match self.read_char() {
                 Some(c) if !c.is_whitespace() && !"();\"'`,".contains(c) => {
@@ -175,7 +189,7 @@ impl<'a> Tokenizer<'a> {
                 }
             }
         }
-        
+
         symbol
     }
 
@@ -185,7 +199,7 @@ impl<'a> Tokenizer<'a> {
     /// handling escape sequences.
     fn read_string(&mut self) -> Option<String> {
         let mut string = String::new();
-        
+
         loop {
             match self.read_char() {
                 Some('"') => {
@@ -212,7 +226,7 @@ impl<'a> Tokenizer<'a> {
                 }
             }
         }
-        
+
         Some(string)
     }
 
@@ -327,7 +341,9 @@ impl<'a> Tokenizer<'a> {
                     None => Some(Token::Symbol(self.read_symbol(c))),
                 }
             }
-            Some(c) if c.is_alphabetic() || "!$%&*/:<=>?^_~@".contains(c) => Some(Token::Symbol(self.read_symbol(c))),
+            Some(c) if c.is_alphabetic() || "!$%&*/:<=>?^_~@".contains(c) => {
+                Some(Token::Symbol(self.read_symbol(c)))
+            }
             Some('"') => self.read_string().map(Token::String),
             Some('(') => Some(Token::LeftParen),
             Some(')') => {
@@ -337,7 +353,7 @@ impl<'a> Tokenizer<'a> {
                 } else {
                     Some(Token::RightParen)
                 }
-            },
+            }
             Some('[') => Some(Token::LeftBracket),
             Some(']') => Some(Token::RightBracket),
             Some('\'') => Some(Token::Quote),
@@ -348,7 +364,7 @@ impl<'a> Tokenizer<'a> {
                     Some('(') => {
                         self.vector_depth += 1;
                         Some(Token::LeftBracket)
-                    },
+                    }
                     Some(c) => {
                         self.unread_char(c);
                         self.read_boolean_or_char()
@@ -356,6 +372,18 @@ impl<'a> Tokenizer<'a> {
                     None => Some(Token::Symbol("#".to_string())),
                 }
             }
+            Some('`') => Some(Token::Backquote),
+            Some(',') => match self.read_char() {
+                Some(c) => {
+                    if c == '@' {
+                        Some(Token::CommaAt)
+                    } else {
+                        self.unread_char(c);
+                        Some(Token::Comma)
+                    }
+                }
+                None => Some(Token::Eof),
+            },
             Some(c) => Some(Token::Symbol(c.to_string())),
             None => Some(Token::Eof),
         }
@@ -393,28 +421,46 @@ mod tests {
 
     #[test]
     fn test_basic_tokens() {
-        let mut port = Port { kind: PortKind::Stdin };
+        let mut port = Port {
+            kind: PortKind::Stdin,
+        };
         let mut tokenizer = tokenizer_from_str(&mut port, "hello123\"world\"");
-        assert_eq!(tokenizer.next_token(), Some(Token::Symbol("hello123".to_string())));
-        assert_eq!(tokenizer.next_token(), Some(Token::String("world".to_string())));
+        assert_eq!(
+            tokenizer.next_token(),
+            Some(Token::Symbol("hello123".to_string()))
+        );
+        assert_eq!(
+            tokenizer.next_token(),
+            Some(Token::String("world".to_string()))
+        );
         assert_eq!(tokenizer.next_token(), Some(Token::Eof));
     }
 
     #[test]
     fn test_whitespace_and_comments() {
-        let mut port = Port { kind: PortKind::Stdin };
+        let mut port = Port {
+            kind: PortKind::Stdin,
+        };
         let mut tokenizer = tokenizer_from_str(&mut port, "  hello  ; comment\n  world");
-        
-        assert_eq!(tokenizer.next_token(), Some(Token::Symbol("hello".to_string())));
-        assert_eq!(tokenizer.next_token(), Some(Token::Symbol("world".to_string())));
+
+        assert_eq!(
+            tokenizer.next_token(),
+            Some(Token::Symbol("hello".to_string()))
+        );
+        assert_eq!(
+            tokenizer.next_token(),
+            Some(Token::Symbol("world".to_string()))
+        );
         assert_eq!(tokenizer.next_token(), Some(Token::Eof));
     }
 
     #[test]
     fn test_parentheses_and_brackets() {
-        let mut port = Port { kind: PortKind::Stdin };
+        let mut port = Port {
+            kind: PortKind::Stdin,
+        };
         let mut tokenizer = tokenizer_from_str(&mut port, "()[]");
-        
+
         assert_eq!(tokenizer.next_token(), Some(Token::LeftParen));
         assert_eq!(tokenizer.next_token(), Some(Token::RightParen));
         assert_eq!(tokenizer.next_token(), Some(Token::LeftBracket));
@@ -424,9 +470,11 @@ mod tests {
 
     #[test]
     fn test_booleans_and_nil() {
-        let mut port = Port { kind: PortKind::Stdin };
+        let mut port = Port {
+            kind: PortKind::Stdin,
+        };
         let mut tokenizer = tokenizer_from_str(&mut port, "#t #f");
-        
+
         assert_eq!(tokenizer.next_token(), Some(Token::Boolean(true)));
         assert_eq!(tokenizer.next_token(), Some(Token::Boolean(false)));
         assert_eq!(tokenizer.next_token(), Some(Token::Eof));
@@ -434,9 +482,11 @@ mod tests {
 
     #[test]
     fn test_character() {
-        let mut port = Port { kind: PortKind::Stdin };
+        let mut port = Port {
+            kind: PortKind::Stdin,
+        };
         let mut tokenizer = tokenizer_from_str(&mut port, "#\\a #\\space");
-        
+
         assert_eq!(tokenizer.next_token(), Some(Token::Character('a')));
         assert_eq!(tokenizer.next_token(), Some(Token::Character(' ')));
         assert_eq!(tokenizer.next_token(), Some(Token::Eof));
@@ -444,9 +494,11 @@ mod tests {
 
     #[test]
     fn test_quote_and_dot() {
-        let mut port = Port { kind: PortKind::Stdin };
+        let mut port = Port {
+            kind: PortKind::Stdin,
+        };
         let mut tokenizer = tokenizer_from_str(&mut port, "' .;");
-        
+
         assert_eq!(tokenizer.next_token(), Some(Token::Quote));
         assert_eq!(tokenizer.next_token(), Some(Token::Dot));
         assert_eq!(tokenizer.next_token(), Some(Token::Eof));
@@ -454,49 +506,74 @@ mod tests {
 
     #[test]
     fn test_multiple_tokens_per_line() {
-        let mut port = Port { kind: PortKind::Stdin };
+        let mut port = Port {
+            kind: PortKind::Stdin,
+        };
         let mut tokenizer = tokenizer_from_str(&mut port, "hello world 123");
-        
-        assert_eq!(tokenizer.next_token(), Some(Token::Symbol("hello".to_string())));
-        assert_eq!(tokenizer.next_token(), Some(Token::Symbol("world".to_string())));
-        assert_eq!(tokenizer.next_token(), Some(Token::Number("123".to_string())));
+
+        assert_eq!(
+            tokenizer.next_token(),
+            Some(Token::Symbol("hello".to_string()))
+        );
+        assert_eq!(
+            tokenizer.next_token(),
+            Some(Token::Symbol("world".to_string()))
+        );
+        assert_eq!(
+            tokenizer.next_token(),
+            Some(Token::Number("123".to_string()))
+        );
         assert_eq!(tokenizer.next_token(), Some(Token::Eof));
     }
 
     #[test]
     fn test_comments() {
-        let mut port = Port { kind: PortKind::Stdin };
+        let mut port = Port {
+            kind: PortKind::Stdin,
+        };
         let mut tokenizer = tokenizer_from_str(&mut port, "hello ; this is a comment\nworld");
-        
-        assert_eq!(tokenizer.next_token(), Some(Token::Symbol("hello".to_string())));
-        assert_eq!(tokenizer.next_token(), Some(Token::Symbol("world".to_string())));
+
+        assert_eq!(
+            tokenizer.next_token(),
+            Some(Token::Symbol("hello".to_string()))
+        );
+        assert_eq!(
+            tokenizer.next_token(),
+            Some(Token::Symbol("world".to_string()))
+        );
         assert_eq!(tokenizer.next_token(), Some(Token::Eof));
     }
 
     #[test]
     fn test_string_literal_debug() {
-        let mut port = Port { kind: PortKind::Stdin };
+        let mut port = Port {
+            kind: PortKind::Stdin,
+        };
         let mut tokenizer = tokenizer_from_str(&mut port, "\"hello world\"");
-        
+
         let token1 = tokenizer.next_token();
         let token2 = tokenizer.next_token();
         println!("Input: \"hello world\"");
         println!("Token 1: {:?}", token1);
         println!("Token 2: {:?}", token2);
-        
+
         // This test is just for debugging, so we'll make it pass
         assert!(true);
     }
 
     #[test]
     fn test_vector_token_debug() {
-        let mut port = Port { kind: PortKind::Stdin };
+        let mut port = Port {
+            kind: PortKind::Stdin,
+        };
         let mut tokenizer = tokenizer_from_str(&mut port, "#(1 2 3)");
         let mut tokens = Vec::new();
         loop {
             let tok = tokenizer.next_token();
             println!("Token: {:?}", tok);
-            if let Some(Token::Eof) = tok { break; }
+            if let Some(Token::Eof) = tok {
+                break;
+            }
             tokens.push(tok);
         }
         // This test is just for debugging, so we'll make it pass
@@ -505,11 +582,22 @@ mod tests {
 
     #[test]
     fn test_negative_and_positive_numbers() {
-        let mut port = Port { kind: PortKind::Stdin };
+        let mut port = Port {
+            kind: PortKind::Stdin,
+        };
         let mut tokenizer = tokenizer_from_str(&mut port, "-45 +123 -123412341234123412341234");
-        assert_eq!(tokenizer.next_token(), Some(Token::Number("-45".to_string())));
-        assert_eq!(tokenizer.next_token(), Some(Token::Number("+123".to_string())));
-        assert_eq!(tokenizer.next_token(), Some(Token::Number("-123412341234123412341234".to_string())));
+        assert_eq!(
+            tokenizer.next_token(),
+            Some(Token::Number("-45".to_string()))
+        );
+        assert_eq!(
+            tokenizer.next_token(),
+            Some(Token::Number("+123".to_string()))
+        );
+        assert_eq!(
+            tokenizer.next_token(),
+            Some(Token::Number("-123412341234123412341234".to_string()))
+        );
         assert_eq!(tokenizer.next_token(), Some(Token::Eof));
     }
-} 
+}
