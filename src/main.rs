@@ -31,7 +31,7 @@ struct Args {
     quit: bool,
     /// trace mode
     #[argh(switch, short = 't')]
-    trace: bool,
+    trace: i32,
 }
 
 fn main() {
@@ -69,9 +69,7 @@ fn main() {
         }
     }
 
-    if args.trace {
-        evaluator.trace = true;
-    }
+    evaluator.trace = args.trace;
 
     if args.quit {
         return;

@@ -21,8 +21,8 @@ pub struct Evaluator {
     env: Environment,            // The current state of the environment
     tail_call: Option<TailCall>, // Tail call optimization state
     pub new_port: bool,          // Indicates a new port has been pushed on the stack
-    pub trace: bool,             // Indicates tracing is enabled
-    pub depth: usize,            // Evaluation nesting depth (used by trace)
+    pub trace: i32,              // Indicates tracing is enabled to a given depth
+    pub depth: i32,              // Evaluation nesting depth (used by trace)
 }
 
 /// Represents a tail call that should be optimized
@@ -45,7 +45,7 @@ impl Evaluator {
             env: Environment::new(),
             tail_call: None,
             new_port: false,
-            trace: false,
+            trace: 0,
             depth: 0,
         };
 
@@ -67,7 +67,7 @@ impl Evaluator {
             // Remove port_stack: crate::io::SchemePortStack, from Evaluator
             tail_call: None,
             new_port: false,
-            trace: false,
+            trace: 0,
             depth: 0,
         };
 
@@ -142,12 +142,11 @@ impl Evaluator {
 /// Apply function to pre-evaluated arguments
 /// Handles environment access for symbol lookup and function application
 fn eval_apply(func: GcRef, args: &[GcRef], evaluator: &mut Evaluator) -> Result<GcRef, String> {
-    if evaluator.trace {
-        //print!("Trace: ");
+    if evaluator.trace > evaluator.depth {
         for v in args {
-            print!(" {:?}", v);
+            //print!(" {:?}", v);
+            print_scheme_value(&v.value);
         }
-        println!();
     }
     match &func.value {
         SchemeValue::Symbol(name) => {
@@ -257,9 +256,9 @@ fn eval_closure_logic(
 pub fn eval_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     // Check for pending tail call
     evaluator.depth += 1;
-    if evaluator.trace {
+    if evaluator.trace > evaluator.depth {
         for _ in 1..evaluator.depth {
-            print!(" ");
+            print!(">");
         }
         println!("{}", print_scheme_value(&expr.value));
     }
@@ -342,12 +341,18 @@ fn eval_apply_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Str
 /// Trace logic: turn the trace function on or off
 /// This function takes a boolean value, and sets evaluator.trace to match the argument.
 fn trace_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+    use num_traits::ToPrimitive;
     evaluator.depth -= 1;
     let args = expect_n_args(expr, 2)?;
     let trace_val = eval_logic(args[1], evaluator)?;
-    match trace_val.value {
-        SchemeValue::Bool(v) => evaluator.trace = v,
-        _ => return Err("trace: requires boolean argument".to_string()),
+    match &trace_val.value {
+        SchemeValue::Int(v) => match v.to_i32() {
+            Some(value) => {
+                evaluator.trace = value;
+            }
+            None => return Err("trace: requires integer argument".to_string()),
+        },
+        _ => return Err("trace: requires integer argument".to_string()),
     }
     Ok(trace_val)
 }
