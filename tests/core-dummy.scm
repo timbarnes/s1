@@ -3,7 +3,7 @@
 22
 (display "Core dummy file loaded\n")
 
-(define expander
+(define macro-expand
   (lambda (x)
     (expand-aux x 0)))
 
@@ -47,5 +47,8 @@
                 x)
             x))))
 
-(define define-macro (lambda (name . body)
-    (expand `(lambda ,params ,@body))))
+(define expander (lambda (x)
+    (if (pair? x)
+        (if (macro? (car x))
+            (macro-expand x)
+            (cons x (expander (cdr x)))))))

@@ -35,6 +35,7 @@ pub fn type_of(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
         SchemeValue::Char(_) => "char",
         SchemeValue::Primitive { .. } => "primitive",
         SchemeValue::Closure { .. } => "closure",
+        SchemeValue::Macro { .. } => "macro",
         SchemeValue::Nil => "nil",
         _ => "unknown",
     };

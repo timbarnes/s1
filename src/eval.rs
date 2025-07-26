@@ -285,7 +285,7 @@ pub fn eval_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Strin
                     "and" => return and_logic(expr, evaluator),
                     "or" => return or_logic(expr, evaluator),
                     "set!" => return set_logic(expr, evaluator),
-                    "lambda" => return callable_logic(expr, evaluator),
+                    "lambda" | "macro" => return callable_logic(expr, evaluator),
                     "push-port!" => return push_port_logic(expr, evaluator),
                     "pop-port!" => return pop_port_logic(expr, evaluator),
                     "trace" => return trace_logic(expr, evaluator),
@@ -295,22 +295,27 @@ pub fn eval_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Strin
                 },
                 _ => {}
             }
-            // Recursively evaluate all arguments (cdr)
-            let mut evaluated_args = Vec::new();
-            let mut current = *cdr;
-            loop {
-                match &current.value {
-                    SchemeValue::Nil => break,
-                    SchemeValue::Pair(arg, next) => {
-                        evaluated_args.push(eval_logic(*arg, evaluator)?);
-                        current = *next;
-                    }
-                    _ => return Err("Improper list in function call".to_string()),
-                }
-            }
             // Recursively evaluate the function position (car)
             let func = eval_logic(*car, evaluator)?;
             evaluator.depth -= 1;
+
+            // Recursively evaluate all arguments (cdr) if func is not a macro
+            let mut evaluated_args = Vec::new();
+            if is_macro(&func) {
+                evaluated_args = list_to_vec(*cdr)?; // pass through unchanged
+            } else {
+                let mut current = *cdr;
+                loop {
+                    match &current.value {
+                        SchemeValue::Nil => break,
+                        SchemeValue::Pair(arg, next) => {
+                            evaluated_args.push(eval_logic(*arg, evaluator)?);
+                            current = *next;
+                        }
+                        _ => return Err("Improper list in function call".to_string()),
+                    }
+                }
+            }
             // Apply the function to the evaluated arguments
             eval_apply(func, &evaluated_args, evaluator)
         }
@@ -639,6 +644,13 @@ fn pop_port_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Strin
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
+
+fn is_macro(func: &GcRef) -> bool {
+    match &func.value {
+        SchemeValue::Macro { params, body, env } => true,
+        _ => false,
+    }
+}
 
 fn wrap_body_in_begin(body_exprs: Vec<GcRef>, heap: &mut GcHeap) -> GcRef {
     if body_exprs.len() == 1 {

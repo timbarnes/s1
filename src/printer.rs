@@ -50,6 +50,7 @@ fn print_callable(callable_type: &str, params: &Vec<&GcObject>, body: &GcObject)
     match params.len() {
         0 => s.push_str(" () "),
         1 => {
+            s.push(' ');
             s.push_str(print_scheme_value(&params[0].value).as_str());
             s.push(' ');
         }

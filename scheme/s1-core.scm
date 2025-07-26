@@ -7,6 +7,7 @@
 (define string? (lambda (x) (eq? (type-of x) 'string)))
 (define vector? (lambda (x) (eq? (type-of x) 'vector)))
 (define closure? (lambda (x) (eq? (type-of x) 'closure)))
+(define macro? (lambda (x) (eq? (type-of x) 'macro)))
 (define boolean? (lambda (x) (eq? (type-of x) 'boolean)))
 (define char? (lambda (x) (eq? (type-of x) 'char)))
 (define primitive? (lambda (x) (eq? (type-of x) 'primitive)))
