@@ -63,6 +63,14 @@ pub enum SchemeValue {
         /// Captured environment frame
         env: Rc<RefCell<crate::env::Frame>>,
     },
+    Macro {
+        /// Parameter symbols (interned symbol pointers)
+        params: Vec<GcRef>,
+        /// Function body expression
+        body: GcRef,
+        /// Captured environment frame
+        env: Rc<RefCell<crate::env::Frame>>,
+    },
     /// Empty list (nil)
     Nil,
     /// Port objects for input/output operations
@@ -154,6 +162,16 @@ impl std::fmt::Debug for SchemeValue {
                     })
                     .collect();
                 write!(f, "Closure({:?}, {:?})", param_names, &body.value)
+            }
+            SchemeValue::Macro { params, body, .. } => {
+                let param_names: Vec<String> = params
+                    .iter()
+                    .map(|p| match &p.value {
+                        SchemeValue::Symbol(name) => name.clone(),
+                        _ => "?".to_string(),
+                    })
+                    .collect();
+                write!(f, "Macro({:?}, {:?})", param_names, &body.value)
             }
             SchemeValue::Nil => write!(f, "Nil"),
             SchemeValue::Port { kind } => write!(f, "Port({:?})", kind),
@@ -421,6 +439,20 @@ pub fn new_closure(
 ) -> GcRef {
     let obj = GcObject {
         value: SchemeValue::Closure { params, body, env },
+        marked: false,
+    };
+    heap.alloc(obj)
+}
+
+/// Create a new macro.
+pub fn new_macro(
+    heap: &mut GcHeap,
+    params: Vec<GcRef>,
+    body: GcRef,
+    env: Rc<RefCell<crate::env::Frame>>,
+) -> GcRef {
+    let obj = GcObject {
+        value: SchemeValue::Macro { params, body, env },
         marked: false,
     };
     heap.alloc(obj)

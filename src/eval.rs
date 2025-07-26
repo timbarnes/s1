@@ -5,7 +5,9 @@
 //! while the apply layer handles function calls with pre-evaluated arguments.
 
 use crate::env::Environment;
-use crate::gc::{GcHeap, GcRef, SchemeValue, get_nil, new_closure, new_pair, new_vector};
+use crate::gc::{
+    GcHeap, GcRef, SchemeValue, get_nil, new_closure, new_macro, new_pair, new_vector,
+};
 use crate::io::Port;
 use crate::parser::{ParseError, Parser};
 use crate::printer::print_scheme_value;
@@ -283,7 +285,7 @@ pub fn eval_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Strin
                     "and" => return and_logic(expr, evaluator),
                     "or" => return or_logic(expr, evaluator),
                     "set!" => return set_logic(expr, evaluator),
-                    "lambda" => return lambda_logic(expr, evaluator),
+                    "lambda" => return callable_logic(expr, evaluator),
                     "push-port!" => return push_port_logic(expr, evaluator),
                     "pop-port!" => return pop_port_logic(expr, evaluator),
                     "trace" => return trace_logic(expr, evaluator),
@@ -478,29 +480,28 @@ fn set_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     }
 }
 
-/// Lambda logic: create a closure with captured environment
+/// Callable logic: create a closure or a macro with captured environment
 /// (lambda (params...) body1 body2 ...) => return closure
+/// (macro (params...) body1 body2 ...) => return macro
 ///     params can take one of four forms:
 ///     - an empty vec, meaning no arguments
 ///     - a vec with a single entry, meaning variadic arguments bound as a list
 ///     - a vec with multiple entries following a nil first entry, meaning named arguments
 ///     - a vec with variadic arguments bound as a list and named arguments
-fn lambda_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn callable_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     // (lambda params body ..)
     use crate::gc::new_closure;
     //use crate::gc_util::{list_from_vec, list_to_vec};
     evaluator.depth -= 1;
 
     let form = expect_at_least_n_args(expr, 3)?;
+    print_scheme_value(&expr.value);
     // Process argument lists
     let (params, ptype) = params_to_vec(&form[1]); // Special processing for the range of argument structures
     let mut args: Vec<&crate::gc::GcObject> = Vec::new();
     match ptype {
-        Ptype::Empty => {
-            // println!("Empty params");
-        }
+        Ptype::Empty => {}
         Ptype::List => {
-            // println!("List params");
             args.push(get_nil(evaluator.heap_mut()));
             for arg in params.iter() {
                 match &arg.value {
@@ -513,13 +514,11 @@ fn lambda_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String>
         }
         Ptype::Variadic => match &params[0].value {
             SchemeValue::Symbol(name) => {
-                // println!("Variadic params");
                 args.push(evaluator.heap_mut().intern_symbol(&name));
             }
             _ => (),
         },
         Ptype::Dotted => {
-            // println!("Dotted params");
             for arg in params.iter() {
                 match &arg.value {
                     SchemeValue::Symbol(name) => {
@@ -554,13 +553,30 @@ fn lambda_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String>
         deduplicate_symbols_preserve_params(wrapped_body, evaluator.heap_mut(), &param_map);
 
     let captured_frame = evaluator.env().current_frame();
-    let closure = new_closure(
-        evaluator.heap_mut(),
-        args,
-        deduplicated_body,
-        captured_frame,
-    );
-    Ok(closure)
+    match &form[0].value {
+        SchemeValue::Symbol(name) => {
+            if name == "lambda" {
+                let new_closure = new_closure(
+                    evaluator.heap_mut(),
+                    args,
+                    deduplicated_body,
+                    captured_frame,
+                );
+                Ok(new_closure)
+            } else if name == "macro" {
+                let new_macro = new_macro(
+                    evaluator.heap_mut(),
+                    args,
+                    deduplicated_body,
+                    captured_frame,
+                );
+                Ok(new_macro)
+            } else {
+                return Err("Callable must be lambda or macro".to_string());
+            }
+        }
+        _ => return Err("Callable type must be a symbol".to_string()),
+    }
 }
 
 fn push_port_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
@@ -852,7 +868,7 @@ fn deduplicate_symbols(expr: GcRef, heap: &mut GcHeap) -> GcRef {
                 expr // No change, return original
             }
         }
-        SchemeValue::Closure { params, body, env } => {
+        SchemeValue::Closure { params, body, env } | SchemeValue::Macro { params, body, env } => {
             // Deduplicate the body, but params are already symbols (interned)
             let new_body = deduplicate_symbols(*body, heap);
 
@@ -938,7 +954,7 @@ fn deduplicate_symbols_preserve_params(
                 expr // No change, return original
             }
         }
-        SchemeValue::Closure { params, body, env } => {
+        SchemeValue::Closure { params, body, env } | SchemeValue::Macro { params, body, env } => {
             // Deduplicate the body, but params are already symbols (interned)
             let new_body = deduplicate_symbols_preserve_params(*body, heap, param_map);
 
