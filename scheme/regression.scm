@@ -274,7 +274,14 @@
 (test-true (eq? '(1 2) '(1 2)) "Equal lists")
 (test-false (eq? '(1 2) '(1 3)) "Unequal lists")
 
-;; Test 17: Factorial (recursion
+;; Test 17: eval and apply
+(display "=== Testing eval and apply ===")
+(newline)
+(test-true (eq? (eval '(+ 1 2)) 3) "eval")
+(test-true (eq? (apply + '(1 2)) 3) "apply")
+(test-true (eq? (eval '(+ 1 2)) (apply + '(1 2))) "eval and apply")
+
+;; Test 18: Factorial (recursion
 (display "=== Testing Recursion ===")
 (define fact
     (lambda (n)

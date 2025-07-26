@@ -25,7 +25,7 @@ pub struct Evaluator {
 
 /// Represents a tail call that should be optimized
 #[derive(Clone)]
-pub struct TailCall {
+struct TailCall {
     pub func: GcRef,
     pub args: Vec<GcRef>,
 }
@@ -139,7 +139,7 @@ impl Evaluator {
 
 /// Apply function to pre-evaluated arguments
 /// Handles environment access for symbol lookup and function application
-pub fn eval_apply(func: GcRef, args: &[GcRef], evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn eval_apply(func: GcRef, args: &[GcRef], evaluator: &mut Evaluator) -> Result<GcRef, String> {
     if evaluator.trace {
         //print!("Trace: ");
         for v in args {
@@ -287,6 +287,8 @@ pub fn eval_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Strin
                     "push-port!" => return push_port_logic(expr, evaluator),
                     "pop-port!" => return pop_port_logic(expr, evaluator),
                     "trace" => return trace_logic(expr, evaluator),
+                    "eval" => return eval_eval_logic(expr, evaluator),
+                    "apply" => return eval_apply_logic(expr, evaluator),
                     _ => {}
                 },
                 _ => {}
@@ -314,9 +316,25 @@ pub fn eval_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Strin
     }
 }
 
+fn eval_eval_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+    evaluator.depth -= 1;
+    let args = expect_n_args(expr, 2)?;
+    let result = eval_logic(args[1], evaluator)?;
+    eval_logic(result, evaluator)
+}
+
+fn eval_apply_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+    evaluator.depth -= 1;
+    let args = expect_n_args(expr, 3)?;
+    let func = eval_logic(args[1], evaluator)?;
+    let arg = eval_logic(args[2], evaluator)?;
+    let argvec = list_to_vec(arg)?;
+    eval_apply(func, &argvec, evaluator)
+}
+
 /// Trace logic: turn the trace function on or off
 /// This function takes a boolean value, and sets evaluator.trace to match the argument.
-pub fn trace_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn trace_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     let args = expect_n_args(expr, 2)?;
     let trace_val = eval_logic(args[1], evaluator)?;
@@ -328,7 +346,7 @@ pub fn trace_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Stri
 }
 
 /// Quote logic: return first argument unevaluated
-pub fn quote_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn quote_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     // (quote x) => return x unevaluated
     evaluator.depth -= 1;
     match &expr.value {
@@ -341,7 +359,7 @@ pub fn quote_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Stri
 }
 
 // Stubs for special forms
-pub fn begin_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn begin_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     // (begin expr1 expr2 ... exprN) => evaluate each in sequence, return last
     evaluator.depth -= 1;
     match &expr.value {
@@ -364,7 +382,7 @@ pub fn begin_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Stri
     }
 }
 
-pub fn define_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn define_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     // (define symbol expr)
     let args = expect_n_args(expr, 3)?; // including 'define
     let sym = expect_symbol(&args[1])?;
@@ -373,7 +391,7 @@ pub fn define_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Str
     Ok(sym)
 }
 
-pub fn if_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn if_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     // (if test consequent [alternate])
     let args = expect_at_least_n_args(expr, 2)?;
@@ -394,7 +412,7 @@ pub fn if_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String>
     }
 }
 
-pub fn and_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn and_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     // (and expr1 expr2 ... exprN)
     match &expr.value {
@@ -421,7 +439,7 @@ pub fn and_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String
     }
 }
 
-pub fn or_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn or_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     // (or expr1 expr2 ... exprN)
     match &expr.value {
@@ -446,7 +464,7 @@ pub fn or_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String>
     }
 }
 
-pub fn set_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn set_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     let args = expect_n_args(expr, 3)?;
     let sym = expect_symbol(&args[1])?;
@@ -467,7 +485,7 @@ pub fn set_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String
 ///     - a vec with a single entry, meaning variadic arguments bound as a list
 ///     - a vec with multiple entries following a nil first entry, meaning named arguments
 ///     - a vec with variadic arguments bound as a list and named arguments
-pub fn lambda_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn lambda_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     // (lambda params body ..)
     use crate::gc::new_closure;
     //use crate::gc_util::{list_from_vec, list_to_vec};
@@ -545,7 +563,7 @@ pub fn lambda_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Str
     Ok(closure)
 }
 
-pub fn push_port_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn push_port_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     // (push-port! port)
     evaluator.depth -= 1;
     match &expr.value {
@@ -572,7 +590,7 @@ pub fn push_port_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, 
     }
 }
 
-pub fn pop_port_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn pop_port_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     // (pop-port!)
     use crate::gc::SchemeValue;
     evaluator.depth -= 1;
@@ -670,7 +688,7 @@ fn params_to_vec(mut list: GcRef) -> (Vec<GcRef>, Ptype) {
 
 // Expect exactly N arguments in a proper list
 // debug_assert!(N > 0);
-pub fn expect_n_args(list: GcRef, n: usize) -> Result<Vec<GcRef>, String> {
+fn expect_n_args(list: GcRef, n: usize) -> Result<Vec<GcRef>, String> {
     let args = list_to_vec(list)?;
     if args.len() != n {
         Err(format!(
@@ -684,7 +702,7 @@ pub fn expect_n_args(list: GcRef, n: usize) -> Result<Vec<GcRef>, String> {
 }
 
 // Expect at least N arguments in a proper list
-pub fn expect_at_least_n_args(list: GcRef, n: usize) -> Result<Vec<GcRef>, String> {
+fn expect_at_least_n_args(list: GcRef, n: usize) -> Result<Vec<GcRef>, String> {
     let args = list_to_vec(list)?;
     if args.len() < n {
         Err(format!(
@@ -698,7 +716,7 @@ pub fn expect_at_least_n_args(list: GcRef, n: usize) -> Result<Vec<GcRef>, Strin
 }
 
 // Expect the first N arguments to be present, return them, discard or keep tail as needed
-pub fn extract_first_n(list: GcRef, n: usize) -> Result<(Vec<GcRef>, Option<GcRef>), String> {
+fn extract_first_n(list: GcRef, n: usize) -> Result<(Vec<GcRef>, Option<GcRef>), String> {
     let mut args = Vec::new();
     let mut current = list;
     for _ in 0..n {
@@ -714,7 +732,7 @@ pub fn extract_first_n(list: GcRef, n: usize) -> Result<(Vec<GcRef>, Option<GcRe
 }
 
 // Expect a single symbol from an expression list
-pub fn expect_symbol(expr: &GcRef) -> Result<GcRef, String> {
+fn expect_symbol(expr: &GcRef) -> Result<GcRef, String> {
     match &expr.value {
         SchemeValue::Symbol(_) => Ok(*expr),
         _ => Err("expected symbol".to_string()),
@@ -722,7 +740,7 @@ pub fn expect_symbol(expr: &GcRef) -> Result<GcRef, String> {
 }
 
 /// Extract arguments from a list (cdr of a function call)
-pub fn extract_args(expr: GcRef) -> Result<Vec<GcRef>, String> {
+fn extract_args(expr: GcRef) -> Result<Vec<GcRef>, String> {
     let mut args = Vec::new();
     let mut current = expr;
 
@@ -749,7 +767,7 @@ pub fn extract_args(expr: GcRef) -> Result<Vec<GcRef>, String> {
 }
 
 /// Check if a function is a special form
-pub fn is_special_form(func: GcRef) -> Option<&'static str> {
+fn is_special_form(func: GcRef) -> Option<&'static str> {
     match &func.value {
         SchemeValue::Symbol(name) => match name.as_str() {
             "quote" | "if" | "define" | "begin" | "and" | "or" | "set!" | "lambda" => Some(name),
@@ -760,7 +778,7 @@ pub fn is_special_form(func: GcRef) -> Option<&'static str> {
 }
 
 /// Check if an expression is self-evaluating (doesn't need evaluation)
-pub fn is_self_evaluating(expr: GcRef) -> bool {
+fn is_self_evaluating(expr: GcRef) -> bool {
     match &expr.value {
         SchemeValue::Int(_) => true,
         SchemeValue::Float(_) => true,
@@ -776,7 +794,7 @@ pub fn is_self_evaluating(expr: GcRef) -> bool {
 /// Check if an expression is a tail call (function call in tail position)
 /// For now, we'll be conservative and not treat any calls as tail calls
 /// until we implement proper tail position detection
-pub fn is_tail_call(_expr: GcRef) -> bool {
+fn is_tail_call(_expr: GcRef) -> bool {
     false // Conservative approach - no tail call optimization for now
 }
 
@@ -797,7 +815,7 @@ pub fn is_tail_call(_expr: GcRef) -> bool {
 /// let deduplicated = deduplicate_symbols(expr, &mut heap);
 /// assert!(std::ptr::eq(expr, deduplicated)); // Same object
 /// ```
-pub fn deduplicate_symbols(expr: GcRef, heap: &mut GcHeap) -> GcRef {
+fn deduplicate_symbols(expr: GcRef, heap: &mut GcHeap) -> GcRef {
     match &expr.value {
         SchemeValue::Symbol(name) => {
             // Replace with interned symbol
@@ -874,7 +892,7 @@ pub fn deduplicate_symbols(expr: GcRef, heap: &mut GcHeap) -> GcRef {
 /// let deduplicated = deduplicate_symbols_preserve_params(expr, &mut heap, &param_map);
 /// assert!(std::ptr::eq(expr, deduplicated)); // Same object
 /// ```
-pub fn deduplicate_symbols_preserve_params(
+fn deduplicate_symbols_preserve_params(
     expr: GcRef,
     heap: &mut GcHeap,
     param_map: &HashMap<String, GcRef>,
