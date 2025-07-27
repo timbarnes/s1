@@ -144,10 +144,10 @@ impl Evaluator {
 fn eval_apply(func: GcRef, args: &[GcRef], evaluator: &mut Evaluator) -> Result<GcRef, String> {
     if evaluator.trace > evaluator.depth {
         for v in args {
-            //print!(" {:?}", v);
             print_scheme_value(&v.value);
         }
     }
+    evaluator.depth -= 1;
     match &func.value {
         SchemeValue::Symbol(name) => {
             // Symbol lookup - check environment using symbol-based lookup
@@ -275,11 +275,13 @@ pub fn eval_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Strin
         // 3. Pair: function call or special form
         SchemeValue::Pair(car, cdr) => {
             // Special form dispatch using match
+            evaluator.depth += 1;
             match &car.value {
                 SchemeValue::Symbol(name) => match name.as_str() {
                     "quote" => return quote_logic(expr, evaluator),
                     "begin" => return begin_logic(expr, evaluator),
                     "define" => return define_logic(expr, evaluator),
+                    "cond" => return cond_logic(expr, evaluator),
                     "if" => return if_logic(expr, evaluator),
                     "and" => return and_logic(expr, evaluator),
                     "or" => return or_logic(expr, evaluator),
@@ -296,7 +298,6 @@ pub fn eval_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Strin
             }
             // Recursively evaluate the function position (car)
             let func = eval_logic(*car, evaluator)?;
-            evaluator.depth -= 1;
 
             // Recursively evaluate all arguments (cdr) if func is not a macro
             let mut evaluated_args = Vec::new();
@@ -316,6 +317,7 @@ pub fn eval_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Strin
                 }
             }
             // Apply the function to the evaluated arguments
+            evaluator.depth -= 1;
             eval_apply(func, &evaluated_args, evaluator)
         }
         _ => Err("eval_logic: unsupported expression type".to_string()),
@@ -339,7 +341,7 @@ fn eval_apply_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Str
 }
 
 /// Trace logic: turn the trace function on or off
-/// This function takes a boolean value, and sets evaluator.trace to match the argument.
+/// This function takes an integer value, and sets evaluator.trace to match the argument.
 fn trace_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     use num_traits::ToPrimitive;
     evaluator.depth -= 1;
@@ -424,6 +426,66 @@ fn if_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     }
 }
 
+fn cond_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+    evaluator.depth -= 1;
+    let args = expect_at_least_n_args(expr, 2)?;
+
+    for clause in &args[1..] {
+        match &clause.value {
+            SchemeValue::Pair(test, body) => {
+                let test_result = match &test.value {
+                    SchemeValue::Symbol(s) if s == "else" => true,
+                    _ => {
+                        let evaluated = eval_logic(test, evaluator)?;
+                        !matches!(evaluated.value, SchemeValue::Bool(false))
+                    }
+                };
+
+                if test_result {
+                    // Evaluate all expressions in the body
+                    let mut result = get_nil(&mut evaluator.heap);
+                    let mut current = *body;
+                    while let SchemeValue::Pair(car, cdr) = &current.value {
+                        result = eval_logic(car, evaluator)?;
+                        current = cdr;
+                    }
+                    return Ok(result);
+                }
+            }
+            _ => return Err("cond: clause must be a pair".to_string()),
+        }
+    }
+
+    Ok(get_nil(&mut evaluator.heap))
+}
+// fn cond_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+//     evaluator.depth -= 1;
+//     // (cond (test consequent) .. (else alternate))
+//     let args = expect_at_least_n_args(expr, 2)?;
+//     for clause in &args[1..] {
+//         match &clause.value {
+//             SchemeValue::Pair(test, body) => {
+//                 let test = eval_logic(test, evaluator)?;
+//                 match test.value {
+//                     SchemeValue::Bool(val) => {
+//                         if val {
+//                             match consequent.value {
+//                                 SchemeValue::Pair(car, _) => {
+//                                     return eval_logic(car, evaluator);
+//                                 }
+//                                 _ => return Err("cond: invalid consequent".to_string()),
+//                             }
+//                         }
+//                     }
+//                     _ => return Err("cond: invalid test expression".to_string()),
+//                 }
+//             }
+//             _ => return Err("cond: invalid clause".to_string()),
+//         }
+//     }
+//     Ok(get_nil(&mut evaluator.heap))
+// }
+
 fn and_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     // (and expr1 expr2 ... exprN)
@@ -505,7 +567,6 @@ fn callable_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Strin
     evaluator.depth -= 1;
 
     let form = expect_at_least_n_args(expr, 3)?;
-    print_scheme_value(&expr.value);
     // Process argument lists
     let (params, ptype) = params_to_vec(&form[1]); // Special processing for the range of argument structures
     let mut args: Vec<&crate::gc::GcObject> = Vec::new();

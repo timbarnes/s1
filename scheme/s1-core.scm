@@ -44,6 +44,19 @@
 (define cdddr (lambda (l) (cdr (cdr (cdr l)))))      ;; Cdr of cdr of cdr
 (define cddddr (lambda (l) (cdr (cdr (cdr (cdr l)))))) ;; Cdr of cdr of cdr of cdr
 
+(define map (lambda (f . lists)
+    (if (nil? args)
+        '()
+        (cons (f (car args)) (map f (cdr args))))))
+
+(define displayln (lambda s
+    (map display+ s)
+    (newline)))
+
+(define display+ (lambda (s)
+    (display s)
+    (display " ")))
+
 (display "s1-core loaded")
 (newline)
 
@@ -51,7 +64,6 @@
     (begin (define inp (open-input-file f))
         (display inp)
         (push-port! inp))))
-;; (load "scheme/regression.scm")
 
 (define not (lambda (v) (if v #f #t)))
 (define abs (lambda (n) (if (< n 0) (- n) n)))
@@ -61,3 +73,18 @@
 (define positive? (lambda (n) (>= n 0)))
 (define negative? (lambda (n) (< n 0)))
 (define even? (lambda (n) (zero? (mod n 2))))
+(define odd? (lambda (n) (not (even? n))))
+
+(define map (lambda (f . lists)
+  (define any-null? (lambda lsts
+    (cond ((nil? lsts) #f)
+          ((nil? (car lsts)) #t)
+          (else (any-null? (cdr lsts))))))
+
+  (define loop (lambda lists
+    (if (any-null? lists)
+        '()
+        (cons (apply f (map car lists))
+              (loop (map cdr lists))))))
+
+  (loop lists)))

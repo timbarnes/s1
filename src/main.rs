@@ -49,16 +49,16 @@ fn main() {
     // Execute startup commands as Scheme code
     let mut startup_commands = Vec::new();
 
+    // Load each file in order
+    for filename in &args.file {
+        startup_commands.push(format!("(push-port! (open-input-file \"{}\"))", filename));
+    }
+
     // Load core file unless --no-core
     if !args.no_core {
         startup_commands.push(format!(
             "(push-port! (open-input-file \"scheme/s1-core.scm\"))"
         ));
-    }
-
-    // Load each file in order
-    for filename in &args.file {
-        startup_commands.push(format!("(push-port! (open-input-file \"{}\"))", filename));
     }
 
     // Execute startup commands

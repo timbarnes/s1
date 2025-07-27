@@ -186,7 +186,7 @@
 (test-equal 200 200 "set! with number")
 (test-equal 250 250 "set! with expression")
 
-;; Test 9: If
+;; Test 9: If and Cond
 (display "=== Testing If ===")
 (newline)
 (test-equal 1 (if #t 1 2) "if with true condition")
@@ -196,6 +196,9 @@
 (test-equal 3 (if #t (+ 1 2) (- 1 2)) "if with expressions")
 (test-equal -1 (if #f (+ 1 2) (- 1 2)) "if with expressions, false")
 (test-equal 11 (if (> 10 5) (+ 10 1) (- 10 1)) "if with comparison")
+(test-equal 22 (cond ((= 3 3) 22) (else "failed")) "cond with boolean expr")
+(test-equal 22 (cond (else 22)) "minimal cond with else")
+(test-equal 66 (cond (#f 22 33) (#f 44 55) (else (display "ok") 66)) "cond with implicit begin")
 
 ;; Test 10: And/Or
 (display "=== Testing And/Or ===")
