@@ -51,11 +51,11 @@ pub enum Token {
     /// End of input
     Eof,
     /// Backquote for macros and transformation
-    Backquote,
+    QuasiQuote,
     /// Comma for unquote
-    Comma,
+    Unquote,
     /// Comma-at for unquote-splicing
-    CommaAt,
+    UnquoteSplicing,
 }
 
 /// Tokenizer that reads characters from a port and produces tokens.
@@ -372,14 +372,14 @@ impl<'a> Tokenizer<'a> {
                     None => Some(Token::Symbol("#".to_string())),
                 }
             }
-            Some('`') => Some(Token::Backquote),
+            Some('`') => Some(Token::QuasiQuote),
             Some(',') => match self.read_char() {
                 Some(c) => {
                     if c == '@' {
-                        Some(Token::CommaAt)
+                        Some(Token::UnquoteSplicing)
                     } else {
                         self.unread_char(c);
-                        Some(Token::Comma)
+                        Some(Token::Unquote)
                     }
                 }
                 None => Some(Token::Eof),

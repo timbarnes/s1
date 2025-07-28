@@ -176,6 +176,50 @@ fn eval_apply(func: GcRef, args: &[GcRef], evaluator: &mut Evaluator) -> Result<
     }
 }
 
+/// Macro expansion logic, operates on pre-bound macro parameters and body
+fn expand_macro(expr: &GcRef, depth: usize, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+    match &expr.value {
+        SchemeValue::Pair(car, cdr) => {
+            match &car.value {
+                SchemeValue::Symbol(s) if s == "unquote" => {
+                    if depth == 1 {
+                        eval_logic(list_ref(expr, 1)?, evaluator) // immediate expansion
+                    } else {
+                        let inner = list_ref(expr, 1)?;
+                        let rebuilt = list_from_vec(
+                            vec![
+                                evaluator.heap.intern_symbol("unquote"),
+                                expand_macro(&inner, depth - 1, evaluator)?,
+                            ],
+                            &mut evaluator.heap,
+                        );
+                        Ok(rebuilt)
+                    }
+                }
+                SchemeValue::Symbol(s) if s == "quasiquote" => {
+                    let inner = list_ref(expr, 1)?;
+                    let expanded = expand_macro(&inner, depth + 1, evaluator)?;
+                    if depth == 0 {
+                        // strip the outer backquote
+                        Ok(expanded)
+                    } else {
+                        Ok(list_from_vec(
+                            vec![evaluator.heap.intern_symbol("quasiquote"), expanded],
+                            &mut evaluator.heap,
+                        ))
+                    }
+                }
+                _ => {
+                    let new_car = expand_macro(car, depth, evaluator)?;
+                    let new_cdr = expand_macro(cdr, depth, evaluator)?;
+                    Ok(new_pair(&mut evaluator.heap, new_car, new_cdr))
+                }
+            }
+        }
+        _ => Ok(expr),
+    }
+}
+
 fn eval_macro_logic(
     params: &[GcRef],
     body: GcRef,
@@ -190,19 +234,9 @@ fn eval_macro_logic(
         .env_mut()
         .set_current_frame(new_env.current_frame());
     // Expand the macro
-    let quote_sym = evaluator.heap.intern_symbol("quote");
-    let macro_expand_sym = evaluator.heap.intern_symbol("macro-expand");
-    let nil = get_nil(&mut evaluator.heap);
-    let cdr = new_pair(&mut evaluator.heap, body, nil);
-    let quoted_body = new_pair(&mut evaluator.heap, quote_sym, cdr);
-    let call_expr = list_from_vec(vec![macro_expand_sym, quoted_body], evaluator.heap_mut());
-    println!("Unexpanded macro: {}", print_scheme_value(&body.value));
-    println!("Expander code: {}", print_scheme_value(&call_expr.value));
-    //println!("Current environment frame: {:?}", new_env.current_frame());
-    let xval = eval_apply(evaluator.heap.intern_symbol("x"), &[], evaluator)?;
-    println!("x binding: {:?}", xval);
-    let expanded = eval_logic(call_expr, evaluator)?;
-    println!("After expansion: {}", print_scheme_value(&expanded.value));
+    //println!("Unexpanded macro: {}", print_scheme_value(&body.value));
+    let expanded = expand_macro(&body, 0, evaluator)?;
+    //println!("After expansion: {}", print_scheme_value(&expanded.value));
 
     evaluator.env_mut().set_current_frame(original_env);
     eval_logic(expanded, evaluator)
@@ -754,6 +788,21 @@ fn wrap_body_in_begin(body_exprs: Vec<GcRef>, heap: &mut GcHeap) -> GcRef {
         let mut exprs = body_exprs;
         exprs.insert(0, begin_sym);
         list_from_vec(exprs, heap)
+    }
+}
+
+fn list_ref(mut list: &GcRef, index: usize) -> Result<GcRef, String> {
+    for _ in 0..index {
+        match &list.value {
+            SchemeValue::Pair(_, cdr) => {
+                list = cdr;
+            }
+            _ => return Err("list_ref: index out of bounds".to_string()),
+        }
+    }
+    match &list.value {
+        SchemeValue::Pair(car, _) => Ok(car.clone()),
+        _ => Err("list_ref: not a proper list".to_string()),
     }
 }
 

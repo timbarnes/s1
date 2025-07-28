@@ -162,14 +162,14 @@ impl Parser {
             }
             Some(Token::LeftBracket) => Self::parse_vector_token(heap, tokenizer),
             Some(Token::RightBracket) => Err(ParseError::Syntax("Unexpected ']'".to_string())),
-            Some(Token::Backquote) => {
-                Self::parse_quoted_expression(heap, tokenizer, "backquote".to_string())
+            Some(Token::QuasiQuote) => {
+                Self::parse_quoted_expression(heap, tokenizer, "quasiquote".to_string())
             }
-            Some(Token::Comma) => {
-                Self::parse_quoted_expression(heap, tokenizer, "comma".to_string())
+            Some(Token::Unquote) => {
+                Self::parse_quoted_expression(heap, tokenizer, "unquote".to_string())
             }
-            Some(Token::CommaAt) => {
-                Self::parse_quoted_expression(heap, tokenizer, "comma-at".to_string())
+            Some(Token::UnquoteSplicing) => {
+                Self::parse_quoted_expression(heap, tokenizer, "unquote-splicing".to_string())
             }
             Some(Token::Eof) => Err(ParseError::Eof),
             None => Err(ParseError::Eof),
