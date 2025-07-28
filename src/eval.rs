@@ -4,7 +4,7 @@
 //! The logic layer handles self-evaluating forms, special forms, and argument evaluation,
 //! while the apply layer handles function calls with pre-evaluated arguments.
 
-use crate::env::Environment;
+use crate::env::{Environment, Frame};
 use crate::gc::{
     GcHeap, GcRef, SchemeValue, get_nil, new_closure, new_macro, new_pair, new_vector,
 };
@@ -168,64 +168,58 @@ fn eval_apply(func: GcRef, args: &[GcRef], evaluator: &mut Evaluator) -> Result<
             // Apply closure - handle environment and evaluation
             eval_closure_logic(params, body, env, args, evaluator)
         }
-        _ => Err("eval_apply: function is not a symbol, primitive, or closure".to_string()),
+        SchemeValue::Macro { params, body, env } => {
+            // Apply macro - handle environment and evaluation
+            eval_macro_logic(params, body, env, args, evaluator)
+        }
+        _ => Err("eval_apply: function is not a symbol, primitive, macro or closure".to_string()),
     }
+}
+
+fn eval_macro_logic(
+    params: &[GcRef],
+    body: GcRef,
+    env: &Rc<RefCell<Frame>>,
+    args: &[GcRef],
+    evaluator: &mut Evaluator,
+) -> Result<GcRef, String> {
+    // Bind unevaluated arguments to macro parameters
+    let new_env = bind_params(params, args, env, evaluator.heap_mut())?;
+    let original_env = evaluator.env_mut().current_frame();
+    evaluator
+        .env_mut()
+        .set_current_frame(new_env.current_frame());
+    // Expand the macro
+    let quote_sym = evaluator.heap.intern_symbol("quote");
+    let macro_expand_sym = evaluator.heap.intern_symbol("macro-expand");
+    let nil = get_nil(&mut evaluator.heap);
+    let cdr = new_pair(&mut evaluator.heap, body, nil);
+    let quoted_body = new_pair(&mut evaluator.heap, quote_sym, cdr);
+    let call_expr = list_from_vec(vec![macro_expand_sym, quoted_body], evaluator.heap_mut());
+    println!("Unexpanded macro: {}", print_scheme_value(&body.value));
+    println!("Expander code: {}", print_scheme_value(&call_expr.value));
+    //println!("Current environment frame: {:?}", new_env.current_frame());
+    let xval = eval_apply(evaluator.heap.intern_symbol("x"), &[], evaluator)?;
+    println!("x binding: {:?}", xval);
+    let expanded = eval_logic(call_expr, evaluator)?;
+    println!("After expansion: {}", print_scheme_value(&expanded.value));
+
+    evaluator.env_mut().set_current_frame(original_env);
+    eval_logic(expanded, evaluator)
 }
 
 /// Evaluate a closure by creating a new environment frame and evaluating the body
 fn eval_closure_logic(
     params: &[GcRef],
     body: GcRef,
-    env: &Rc<RefCell<crate::env::Frame>>,
+    env: &Rc<RefCell<Frame>>,
     args: &[GcRef],
     evaluator: &mut Evaluator,
 ) -> Result<GcRef, String> {
-    // Check argument count (tricky with variadic cases)
-    // if args.len() != params.len() {
-    //     return Err(format!(
-    //         "Closure expects {} arguments, got {}",
-    //         params.len(),
-    //         args.len()
-    //     ));
-    // }
-
     // Create a new environment extending the captured environment
-    let captured_env = Environment::from_frame(env.clone());
-    let mut new_env = captured_env.extend();
-
-    match params.len() {
-        0 => (), // no arguments supplied, so nothing to bind
-        1 => {
-            // variadic arguments: bind all arguments as a single list
-            let arglist = list_from_vec(args.to_vec(), evaluator.heap_mut());
-            new_env.set_symbol(params[0], arglist);
-        }
-        _ => {
-            // Bind parameters to arguments in the new environment using symbol-based binding
-            // Ignore first arg (used for variadic case only)
-            for (param, arg) in params[1..].iter().zip(args.iter()) {
-                new_env.set_symbol(*param, *arg);
-            }
-            // Bind variadic arg if it exists
-            let delta = args.len() - (params.len() - 1);
-            if delta > 0 {
-                match &params[0].value {
-                    SchemeValue::Symbol(_name) => {
-                        // bind remaining arguments as a list
-                        let arglist = list_from_vec(
-                            args[(params.len() - 1)..].to_vec(),
-                            evaluator.heap_mut(),
-                        );
-                        new_env.set_symbol(params[0], arglist);
-                    }
-                    _ => (),
-                }
-            }
-        }
-    }
-    // println!("params: {:?}; args: {:?}", params, args);
-    // Temporarily switch the evaluator's environment to the new one
+    let new_env = bind_params(params, args, env, evaluator.heap_mut())?;
     let original_env = evaluator.env_mut().current_frame();
+    // Temporarily switch the evaluator's environment to the new one
     evaluator
         .env_mut()
         .set_current_frame(new_env.current_frame());
@@ -300,25 +294,27 @@ pub fn eval_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Strin
             let func = eval_logic(*car, evaluator)?;
 
             // Recursively evaluate all arguments (cdr) if func is not a macro
-            let mut evaluated_args = Vec::new();
+            let mut processed_args = Vec::new();
             if is_macro(&func) {
-                evaluated_args = list_to_vec(*cdr)?; // pass through unchanged
+                //println!("Found a macro! {:?}", &func);
+                processed_args = list_to_vec(*cdr)?; // pass through unchanged
+                return eval_apply(func, &processed_args, evaluator);
             } else {
                 let mut current = *cdr;
                 loop {
                     match &current.value {
                         SchemeValue::Nil => break,
                         SchemeValue::Pair(arg, next) => {
-                            evaluated_args.push(eval_logic(*arg, evaluator)?);
+                            processed_args.push(eval_logic(*arg, evaluator)?);
                             current = *next;
                         }
                         _ => return Err("Improper list in function call".to_string()),
                     }
                 }
+                // Apply the function to the evaluated arguments
+                evaluator.depth -= 1;
+                return eval_apply(func, &processed_args, evaluator);
             }
-            // Apply the function to the evaluated arguments
-            evaluator.depth -= 1;
-            eval_apply(func, &evaluated_args, evaluator)
         }
         _ => Err("eval_logic: unsupported expression type".to_string()),
     }
@@ -716,6 +712,37 @@ fn is_macro(func: &GcRef) -> bool {
         SchemeValue::Macro { params, body, env } => true,
         _ => false,
     }
+}
+
+fn bind_params(
+    params: &[GcRef],
+    args: &[GcRef],
+    parent_env: &Rc<RefCell<Frame>>,
+    heap: &mut GcHeap,
+) -> Result<Environment, String> {
+    let captured_env = Environment::from_frame(parent_env.clone());
+    let mut new_env = captured_env.extend();
+    match params.len() {
+        0 => (),
+        1 => {
+            let arglist = list_from_vec(args.to_vec(), heap);
+            new_env.set_symbol(params[0], arglist);
+        }
+        _ => {
+            for (param, arg) in params[1..].iter().zip(args.iter()) {
+                new_env.set_symbol(*param, *arg);
+            }
+            let delta = args.len().saturating_sub(params.len() - 1);
+            if delta > 0 {
+                if let SchemeValue::Symbol(_) = &params[0].value {
+                    let rest_args = &args[(params.len() - 1)..];
+                    let arglist = list_from_vec(rest_args.to_vec(), heap);
+                    new_env.set_symbol(params[0], arglist);
+                }
+            }
+        }
+    }
+    Ok(new_env)
 }
 
 fn wrap_body_in_begin(body_exprs: Vec<GcRef>, heap: &mut GcHeap) -> GcRef {

@@ -6,10 +6,10 @@
 //! - Constructors and accessors for environments
 //! - Public get/set global binding helpers
 
+use crate::gc::GcRef;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::cell::RefCell;
-use crate::gc::GcRef;
 
 /// A single environment frame containing variable bindings
 #[derive(Debug)]
@@ -28,7 +28,7 @@ impl Frame {
     }
 
     /// Get a binding from this frame using a symbol key (doesn't search parent)
-    fn get_local(&self, symbol: GcRef) -> Option<GcRef> {
+    pub fn get_local(&self, symbol: GcRef) -> Option<GcRef> {
         self.bindings.get(&symbol).copied()
     }
 
@@ -62,8 +62,6 @@ impl Environment {
             current_frame: frame,
         }
     }
-
-
 
     /// Create a new frame extending the current environment
     /// Returns a new Environment with the new frame as current
@@ -101,7 +99,7 @@ impl Environment {
     /// Get a binding by symbol, searching through the frame chain
     pub fn get_symbol(&self, symbol: GcRef) -> Option<GcRef> {
         let mut current = Some(self.current_frame.clone());
-        
+
         while let Some(frame_rc) = current {
             let frame = frame_rc.borrow();
             if let Some(value) = frame.get_local(symbol) {
@@ -121,14 +119,14 @@ impl Environment {
     /// Set a binding in the global frame (root of the chain) using a symbol key
     pub fn set_global_symbol(&mut self, symbol: GcRef, value: GcRef) {
         let mut current = self.current_frame.clone();
-        
+
         // Find the root frame (the one with no parent)
         loop {
             let parent = {
                 let frame = current.borrow();
                 frame.parent.clone()
             };
-            
+
             if parent.is_none() {
                 // This is the global frame
                 let mut frame = current.borrow_mut();
@@ -150,8 +148,6 @@ impl Environment {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,48 +157,48 @@ mod tests {
     #[test]
     fn test_frame_based_environment() {
         let mut heap = GcHeap::new();
-        
+
         // Create a new environment
         let mut env = Environment::new();
-        
+
         // Create some interned symbols
         let global_sym = heap.intern_symbol("global_var");
         let local_sym = heap.intern_symbol("local_var");
         let extended_sym = heap.intern_symbol("extended_var");
-        
+
         // Set a global binding
         let global_val = new_int(&mut heap, BigInt::from(42));
         env.set_global_symbol(global_sym, global_val);
-        
+
         // Verify we can get the global binding
         assert!(env.get_symbol(global_sym).is_some());
-        
+
         // Set a local binding in current frame
         let local_val = new_string(&mut heap, "local");
         env.set_symbol(local_sym, local_val);
-        
+
         // Verify we can get the local binding
         assert!(env.get_symbol(local_sym).is_some());
-        
+
         // Create an extended environment (new frame)
         let mut extended_env = env.extend();
-        
+
         // Set a binding in the new frame
         let extended_val = new_int(&mut heap, BigInt::from(99));
         extended_env.set_symbol(extended_sym, extended_val);
-        
+
         // Verify we can get the extended binding
         assert!(extended_env.get_symbol(extended_sym).is_some());
-        
+
         // Verify we can still get the global binding (lexical scoping)
         assert!(extended_env.get_symbol(global_sym).is_some());
-        
+
         // Verify we can still get the local binding from parent frame
         assert!(extended_env.get_symbol(local_sym).is_some());
-        
+
         // Verify the original environment doesn't see the extended binding
         assert!(env.get_symbol(extended_sym).is_none());
-        
+
         // Test that local bindings shadow global ones
         let shadow_val = new_string(&mut heap, "shadowed");
         extended_env.set_symbol(global_sym, shadow_val);
@@ -212,59 +208,57 @@ mod tests {
     #[test]
     fn test_symbol_based_environment() {
         let mut heap = GcHeap::new();
-        
+
         // Create a new environment
         let mut env = Environment::new();
-        
+
         // Create some interned symbols
         let global_sym = heap.intern_symbol("global_var");
         let local_sym = heap.intern_symbol("local_var");
         let extended_sym = heap.intern_symbol("extended_var");
-        
+
         // Set a global binding using symbol
         let global_val = new_int(&mut heap, BigInt::from(42));
         env.set_global_symbol(global_sym, global_val);
-        
+
         // Verify we can get the global binding using symbol
         assert!(env.get_symbol(global_sym).is_some());
-        
+
         // Set a local binding in current frame using symbol
         let local_val = new_string(&mut heap, "local");
         env.set_symbol(local_sym, local_val);
-        
+
         // Verify we can get the local binding using symbol
         assert!(env.get_symbol(local_sym).is_some());
-        
+
         // Create an extended environment (new frame)
         let mut extended_env = env.extend();
-        
+
         // Set a binding in the new frame using symbol
         let extended_val = new_int(&mut heap, BigInt::from(99));
         extended_env.set_symbol(extended_sym, extended_val);
-        
+
         // Verify we can get the extended binding using symbol
         assert!(extended_env.get_symbol(extended_sym).is_some());
-        
+
         // Verify we can still get the global binding (lexical scoping)
         assert!(extended_env.get_symbol(global_sym).is_some());
-        
+
         // Verify we can still get the local binding from parent frame
         assert!(extended_env.get_symbol(local_sym).is_some());
-        
+
         // Verify the original environment doesn't see the extended binding
         assert!(extended_env.get_symbol(extended_sym).is_some());
         assert!(env.get_symbol(extended_sym).is_none());
-        
+
         // Test that local bindings shadow global ones using symbols
         let shadow_val = new_string(&mut heap, "shadowed");
         extended_env.set_symbol(global_sym, shadow_val);
         assert!(extended_env.get_symbol(global_sym).is_some());
-        
+
         // Test symbol-based has methods
         assert!(env.has_symbol(global_sym));
         assert!(env.has_symbol(local_sym));
         assert!(!env.has_symbol(extended_sym));
-        
-
     }
-} 
+}

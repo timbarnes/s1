@@ -39,8 +39,8 @@ pub fn print_scheme_value(val: &SchemeValue) -> String {
         SchemeValue::Bool(false) => "#f".to_string(),
         SchemeValue::Char(c) => format!("#\\{}", c),
         SchemeValue::Nil => "nil".to_string(),
-        SchemeValue::Closure { params, body, env } => print_callable("Closure", params, *body),
-        SchemeValue::Macro { params, body, env } => print_callable("Macro", params, *body),
+        SchemeValue::Closure { params, body, .. } => print_callable("Closure", params, *body),
+        SchemeValue::Macro { params, body, .. } => print_callable("Macro", params, *body),
         _ => format!("{:?}", val),
     }
 }

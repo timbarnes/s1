@@ -214,16 +214,54 @@ impl Hash for GcObject {
     }
 }
 
+pub struct ListIter {
+    current: Option<GcRef>,
+}
+
+impl ListIter {
+    pub fn new(start: GcRef) -> Self {
+        Self {
+            current: Some(start),
+        }
+    }
+}
+
+impl Iterator for ListIter {
+    type Item = GcRef;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let cur = self.current.take()?;
+        match &cur.value {
+            SchemeValue::Pair(car, cdr) => {
+                self.current = Some(cdr);
+                Some(car)
+            }
+            SchemeValue::Nil => None,
+            _ => None, // not a proper list
+        }
+    }
+}
+
+pub fn is_proper_list(mut val: &GcRef) -> bool {
+    loop {
+        match &val.value {
+            SchemeValue::Pair(_, cdr) => val = cdr,
+            SchemeValue::Nil => return true,
+            _ => return false,
+        }
+    }
+}
+
 /// The garbage-collected heap that manages all Scheme objects.
 pub struct GcHeap {
     // Singleton values for SchemeValueSimple
-    nil_simple: Option<GcRef>,
-    true_simple: Option<GcRef>,
-    false_simple: Option<GcRef>,
+    nil_obj: Option<GcRef>,
+    true_obj: Option<GcRef>,
+    false_obje: Option<GcRef>,
     // Free list for GcRef objects
-    free_list_simple: Vec<GcObject>,
+    free_list: Vec<GcObject>,
     // All allocated GcRef objects (for potential future GC)
-    objects_simple: Vec<GcRef>,
+    objects: Vec<GcRef>,
     // Symbol table for interning symbols (name -> symbol object)
     symbol_table: HashMap<String, GcRef>,
 }
@@ -232,11 +270,11 @@ impl GcHeap {
     /// Create a new empty heap.
     pub fn new() -> Self {
         let mut heap = Self {
-            nil_simple: None,
-            true_simple: None,
-            false_simple: None,
-            free_list_simple: Vec::new(),
-            objects_simple: Vec::new(),
+            nil_obj: None,
+            true_obj: None,
+            false_obje: None,
+            free_list: Vec::new(),
+            objects: Vec::new(),
             symbol_table: HashMap::new(),
         };
 
@@ -253,21 +291,21 @@ impl GcHeap {
             value: SchemeValue::Nil,
             marked: false,
         };
-        self.nil_simple = Some(self.alloc(nil_obj));
+        self.nil_obj = Some(self.alloc(nil_obj));
 
         // Allocate true
         let true_obj = GcObject {
             value: SchemeValue::Bool(true),
             marked: false,
         };
-        self.true_simple = Some(self.alloc(true_obj));
+        self.true_obj = Some(self.alloc(true_obj));
 
         // Allocate false
         let false_obj = GcObject {
             value: SchemeValue::Bool(false),
             marked: false,
         };
-        self.false_simple = Some(self.alloc(false_obj));
+        self.false_obje = Some(self.alloc(false_obj));
     }
 
     /// Allocate a new object on the heap.
@@ -276,28 +314,28 @@ impl GcHeap {
         // In a real implementation, you'd want proper memory management
         let boxed = Box::new(obj);
         let ptr = Box::leak(boxed);
-        self.objects_simple.push(ptr);
+        self.objects.push(ptr);
         ptr
     }
 
     /// Get the singleton nil value.
     pub fn nil_s(&self) -> GcRef {
-        self.nil_simple.unwrap()
+        self.nil_obj.unwrap()
     }
 
     /// Get the singleton true value.
     pub fn true_s(&self) -> GcRef {
-        self.true_simple.unwrap()
+        self.true_obj.unwrap()
     }
 
     /// Get the singleton false value.
     pub fn false_s(&self) -> GcRef {
-        self.false_simple.unwrap()
+        self.false_obje.unwrap()
     }
 
     /// Get statistics about the simple heap.
     pub fn simple_stats(&self) -> (usize, usize) {
-        (self.objects_simple.len(), self.symbol_table.len())
+        (self.objects.len(), self.symbol_table.len())
     }
 
     /// Intern a symbol (ensure only one copy exists for each name).
