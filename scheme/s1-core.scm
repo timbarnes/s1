@@ -75,6 +75,9 @@
 (define even? (lambda (n) (zero? (mod n 2))))
 (define odd? (lambda (n) (not (even? n))))
 
+;; Stack support
+(define push! (macro (val var) `(set! ,var (cons ,val ,var))))
+
 (define map (lambda (f . lists)
   (define any-null? (lambda lsts
     (cond ((nil? lsts) #f)

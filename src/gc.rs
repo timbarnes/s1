@@ -505,6 +505,65 @@ pub fn new_port(heap: &mut GcHeap, kind: crate::io::PortKind) -> GcRef {
     heap.alloc(obj)
 }
 
+pub fn is_nil(expr: GcRef) -> bool {
+    match &expr.value {
+        SchemeValue::Nil => true,
+        _ => false,
+    }
+}
+
+pub fn car(list: GcRef) -> Result<GcRef, String> {
+    match &list.value {
+        SchemeValue::Pair(car, _) => Ok(car),
+        _ => Err("car: not a pair".to_string()),
+    }
+}
+
+pub fn cdr(list: GcRef) -> Result<GcRef, String> {
+    match &list.value {
+        SchemeValue::Pair(_, cdr) => Ok(cdr),
+        _ => Err("cdr: not a pair".to_string()),
+    }
+}
+
+pub fn list_ref(mut list: &GcRef, index: usize) -> Result<GcRef, String> {
+    for _ in 0..index {
+        match &list.value {
+            SchemeValue::Pair(_, cdr) => {
+                list = cdr;
+            }
+            _ => return Err("list_ref: index out of bounds".to_string()),
+        }
+    }
+    match &list.value {
+        SchemeValue::Pair(car, _) => Ok(car.clone()),
+        _ => Err("list_ref: not a proper list".to_string()),
+    }
+}
+
+pub fn list_from_vec(exprs: Vec<GcRef>, heap: &mut GcHeap) -> GcRef {
+    let mut list = crate::gc::get_nil(heap);
+    for element in exprs.iter().rev() {
+        list = crate::gc::new_pair(heap, *element, list);
+    }
+    list
+}
+
+// General utility to convert a Scheme list into a Vec of GcRefs
+pub fn list_to_vec(mut list: GcRef) -> Result<Vec<GcRef>, String> {
+    let mut result = Vec::new();
+    loop {
+        match &list.value {
+            SchemeValue::Nil => break Ok(result), // normal case
+            SchemeValue::Pair(car, cdr) => {
+                result.push(*car);
+                list = *cdr;
+            }
+            _ => break Err("expected proper list".to_string()),
+        }
+    }
+}
+
 mod tests {
     use super::*;
 

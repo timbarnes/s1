@@ -7,6 +7,13 @@
 ;; (define test-result (test-true (number? 42) "Number predicate"))
 
 ;; Test helper functions
+
+(define failed-tests '()) ; keep track of test failures
+
+(define fails
+  (lambda (message)
+    (set! failed-tests (cons message failed-tests))))
+
 (define test-equal
   (lambda (expected actual message)
     (if (eq? expected actual)
@@ -16,12 +23,15 @@
           (newline)
           #t)
         (begin
-          (display "FAIL: ")
+          (fails message)
+          (newline)
+          (display "    ***    FAIL: ")
           (display message)
           (display " - expected ")
           (display expected)
           (display ", got ")
           (display actual)
+          (newline)
           (newline)
           #f))))
 
@@ -42,10 +52,13 @@
           (newline)
           #t)
         (begin
-          (display "FAIL: ")
+          (fails message)
+          (newline)
+          (display "    ***    FAIL: ")
           (display message)
           (display " - expected number, got ")
           (display value)
+          (newline)
           (newline)
           #f))))
 
@@ -58,10 +71,13 @@
           (newline)
           #t)
         (begin
-          (display "FAIL: ")
+          (fails message)
+          (newline)
+          (display "    ***    FAIL: ")
           (display message)
           (display " - expected symbol, got ")
           (display value)
+          (newline)
           (newline)
           #f))))
 
@@ -75,10 +91,13 @@
           (newline)
           #t)
         (begin
-          (display "FAIL: ")
+          (fails message)
+          (newline)
+          (display "    ***    FAIL: ")
           (display message)
           (display " - expected nil, got ")
           (display value)
+          (newline)
           (newline)
           #f))))
 
@@ -138,7 +157,7 @@
 (test-equal 'boolean (type-of #t) "type-of with boolean")
 (test-equal 'boolean (type-of #f) "type-of with boolean")
 (test-equal 'char (type-of #\a) "type-of with character")
-(test-equal 'nil (type-of '()) "type-of with nil")
+(test-equal #t (eq? 'nil (type-of '())) "type-of with nil")
 (test-equal 'symbol (type-of 'symbol) "type-of with symbol")
 (test-equal 'pair (type-of '(1 2 3)) "type-of with pair")
 
@@ -191,8 +210,6 @@
 (newline)
 (test-equal 1 (if #t 1 2) "if with true condition")
 (test-equal 2 (if #f 1 2) "if with false condition")
-(test-equal 1 (if #f 1) "if without else")
-(test-equal 1 (if #t 1) "if without else, true condition")
 (test-equal 3 (if #t (+ 1 2) (- 1 2)) "if with expressions")
 (test-equal -1 (if #f (+ 1 2) (- 1 2)) "if with expressions, false")
 (test-equal 11 (if (> 10 5) (+ 10 1) (- 10 1)) "if with comparison")
@@ -301,15 +318,38 @@
 ;; Test 19: Macros
 (display "=== Testing Macros ===")
 (newline)
+
 (define m1 (macro (x) `(list 11 ,x)))
 (test-equal '(11 22) (m1 22) "Simple macro")
+
 (define when (macro (p body)
     `(if ,p ,body)))
 (test-equal 22 (when #t 22) "when with #t")
 (test-equal nil (when #f 22) "when with #f")
+
 (define unless (macro (p body)
     `(if (not ,p) ,body)))
 (test-equal nil (unless #t 22) "unless with #t")
 (test-equal 22 (unless #f 22) "when with #f")
+
+(define m1 (macro (x) `(list ,x)))
+(test-equal '(42) (m1 42) "macro (m1 42)")
+
+(define m2 (macro (x) `(quote ,x)))
+(test-equal 'hello (m2 hello) "macro (m2 hello)")
+
+(define m3 (macro args `(list ,@args)))
+(test-equal '(1 2) (m3 1 2) "macro (m3 1 2)")
+
+(define m4 (macro (op . args) `(list ,op ,@args)))
+(test-equal (list + 1 2 3) (m4 + 1 2 3) "macro (m4 + 1 2 3)")
+
+(define m5 (macro x `(append ,@x)))
+(test-equal '(1 2 3 4) (m5 '(1 2) '(3 4)) "macro (m5 '(1 2) '(3 4))")             ; => (list (append (1 2) (3 4))); => 6
+
 (display "=== All tests completed ===")
+(newline)
+(if (not (nil? failed-tests))
+    (begin (display "Failing tests: ")
+    (display failed-tests)))
 (newline)

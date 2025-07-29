@@ -6,9 +6,11 @@
 
 use crate::env::{Environment, Frame};
 use crate::gc::{
-    GcHeap, GcRef, SchemeValue, get_nil, new_closure, new_macro, new_pair, new_vector,
+    GcHeap, GcRef, SchemeValue, get_nil, list_from_vec, list_to_vec, new_closure, new_macro,
+    new_pair, new_vector,
 };
 use crate::io::Port;
+use crate::macros::expand_macro;
 use crate::parser::{ParseError, Parser};
 use crate::printer::print_scheme_value;
 use std::cell::RefCell;
@@ -176,50 +178,6 @@ fn eval_apply(func: GcRef, args: &[GcRef], evaluator: &mut Evaluator) -> Result<
     }
 }
 
-/// Macro expansion logic, operates on pre-bound macro parameters and body
-fn expand_macro(expr: &GcRef, depth: usize, evaluator: &mut Evaluator) -> Result<GcRef, String> {
-    match &expr.value {
-        SchemeValue::Pair(car, cdr) => {
-            match &car.value {
-                SchemeValue::Symbol(s) if s == "unquote" => {
-                    if depth == 1 {
-                        eval_logic(list_ref(expr, 1)?, evaluator) // immediate expansion
-                    } else {
-                        let inner = list_ref(expr, 1)?;
-                        let rebuilt = list_from_vec(
-                            vec![
-                                evaluator.heap.intern_symbol("unquote"),
-                                expand_macro(&inner, depth - 1, evaluator)?,
-                            ],
-                            &mut evaluator.heap,
-                        );
-                        Ok(rebuilt)
-                    }
-                }
-                SchemeValue::Symbol(s) if s == "quasiquote" => {
-                    let inner = list_ref(expr, 1)?;
-                    let expanded = expand_macro(&inner, depth + 1, evaluator)?;
-                    if depth == 0 {
-                        // strip the outer backquote
-                        Ok(expanded)
-                    } else {
-                        Ok(list_from_vec(
-                            vec![evaluator.heap.intern_symbol("quasiquote"), expanded],
-                            &mut evaluator.heap,
-                        ))
-                    }
-                }
-                _ => {
-                    let new_car = expand_macro(car, depth, evaluator)?;
-                    let new_cdr = expand_macro(cdr, depth, evaluator)?;
-                    Ok(new_pair(&mut evaluator.heap, new_car, new_cdr))
-                }
-            }
-        }
-        _ => Ok(expr),
-    }
-}
-
 fn eval_macro_logic(
     params: &[GcRef],
     body: GcRef,
@@ -236,7 +194,7 @@ fn eval_macro_logic(
     // Expand the macro
     //println!("Unexpanded macro: {}", print_scheme_value(&body.value));
     let expanded = expand_macro(&body, 0, evaluator)?;
-    //println!("After expansion: {}", print_scheme_value(&expanded.value));
+    println!("After expansion: {}", print_scheme_value(&expanded.value));
 
     evaluator.env_mut().set_current_frame(original_env);
     eval_logic(expanded, evaluator)
@@ -458,7 +416,7 @@ fn if_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
 
 fn cond_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     evaluator.depth -= 1;
-    let args = expect_at_least_n_args(expr, 2)?;
+    let args = expect_n_args(expr, 3)?;
 
     for clause in &args[1..] {
         match &clause.value {
@@ -791,43 +749,6 @@ fn wrap_body_in_begin(body_exprs: Vec<GcRef>, heap: &mut GcHeap) -> GcRef {
     }
 }
 
-fn list_ref(mut list: &GcRef, index: usize) -> Result<GcRef, String> {
-    for _ in 0..index {
-        match &list.value {
-            SchemeValue::Pair(_, cdr) => {
-                list = cdr;
-            }
-            _ => return Err("list_ref: index out of bounds".to_string()),
-        }
-    }
-    match &list.value {
-        SchemeValue::Pair(car, _) => Ok(car.clone()),
-        _ => Err("list_ref: not a proper list".to_string()),
-    }
-}
-
-fn list_from_vec(exprs: Vec<GcRef>, heap: &mut GcHeap) -> GcRef {
-    let mut list = crate::gc::get_nil(heap);
-    for element in exprs.iter().rev() {
-        list = crate::gc::new_pair(heap, *element, list);
-    }
-    list
-}
-
-// General utility to convert a Scheme list into a Vec of GcRefs
-pub fn list_to_vec(mut list: GcRef) -> Result<Vec<GcRef>, String> {
-    let mut result = Vec::new();
-    loop {
-        match &list.value {
-            SchemeValue::Nil => break Ok(result), // normal case
-            SchemeValue::Pair(car, cdr) => {
-                result.push(*car);
-                list = *cdr;
-            }
-            _ => break Err("expected proper list".to_string()),
-        }
-    }
-}
 // Convert a parameter list, returning the list and a flag indicating the type of list
 fn params_to_vec(mut list: GcRef) -> (Vec<GcRef>, Ptype) {
     let mut result = Vec::new();

@@ -7,6 +7,7 @@ mod tokenizer;
 mod builtin;
 mod env;
 mod eval;
+mod macros;
 mod printer;
 
 //use crate::parser::Parser;
