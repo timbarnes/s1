@@ -8,7 +8,14 @@
 
 (fib 30)
 
-(define def (macro x
-    (cond ((symbol? (car x)) `(define ,(car x), ,(cadr x)))
-        ((pair? (car x)) `(define ,(caar x) (lambda ,(cadar x) ,(cadr x))))
+(define def (macro (front . back)
+    (cond ((symbol? front) `(define ,front ,back))
+        ((pair? front) `(define ,(car front) (lambda ,(cdr front) ,@back)))
     (else (display "Invalid syntax")))))
+
+(define fac-acc (lambda (n)
+    (define f (lambda (n acc)
+        (if (zero? n)
+            acc
+            (f (- n 1) (* acc n)))))
+    (f n 1)))

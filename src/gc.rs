@@ -91,12 +91,12 @@ impl PartialEq for SchemeValue {
             (SchemeValue::Char(a), SchemeValue::Char(b)) => a == b,
             (SchemeValue::Callable(a), SchemeValue::Callable(b)) => match (a, b) {
                 (Callable::Builtin { func: f1, .. }, Callable::Builtin { func: f2, .. }) => {
-                    f1 == f2
+                    std::ptr::fn_addr_eq(*f1, *f2)
                 }
                 (
                     Callable::SpecialForm { func: f1, .. },
                     Callable::SpecialForm { func: f2, .. },
-                ) => f1 == f2,
+                ) => std::ptr::fn_addr_eq(*f1, *f2),
                 (
                     Callable::Closure {
                         params: p1,
