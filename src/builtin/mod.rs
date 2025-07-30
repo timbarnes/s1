@@ -3,7 +3,7 @@ pub mod list;
 pub mod number;
 pub mod predicate;
 
-use crate::gc::{GcHeap, GcRef, SchemeValue, new_bool, new_string};
+use crate::gc::{GcHeap, GcRef, SchemeValue, get_nil, new_string};
 // use num_bigint::BigInt;
 //  use crate::gc::SchemeValue;
 use fileio::open_input_file_builtin;
@@ -69,8 +69,8 @@ pub fn newline_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, Strin
     // In a full implementation, we'd write to the specified port
     println!();
 
-    // Return undefined (we'll use #f for now)
-    Ok(new_bool(heap, false))
+    // Return undefined (we'll use nil for now)
+    Ok(get_nil(heap))
 }
 
 /// Builtin function: (quit)

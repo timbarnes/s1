@@ -20,7 +20,6 @@
 //! ```
 
 #![allow(dead_code)]
-
 use crate::eval::Evaluator;
 use num_bigint::BigInt;
 use std::cell::RefCell;
@@ -35,7 +34,7 @@ pub enum Callable {
         doc: String,
     },
     SpecialForm {
-        func: fn(&mut GcHeap, &mut Evaluator) -> Result<GcRef, String>,
+        func: fn(GcRef, &mut Evaluator) -> Result<GcRef, String>,
         doc: String,
     },
     Closure {
@@ -476,6 +475,19 @@ pub fn new_primitive(
     doc: String,
 ) -> GcRef {
     let primitive = SchemeValue::Callable(Callable::Primitive { func: f, doc });
+    let obj = GcObject {
+        value: primitive,
+        marked: false,
+    };
+    heap.alloc(obj)
+}
+/// Create a new special form.
+pub fn new_special_form(
+    heap: &mut GcHeap,
+    f: fn(GcRef, &mut Evaluator) -> Result<GcRef, String>,
+    doc: String,
+) -> GcRef {
+    let primitive = SchemeValue::Callable(Callable::SpecialForm { func: f, doc });
     let obj = GcObject {
         value: primitive,
         marked: false,

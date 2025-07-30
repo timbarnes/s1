@@ -1,35 +1,54 @@
-use crate::env::Frame;
+/// special_forms.rs
+/// Definitions of special forms implemented internally
+///
 use crate::eval::{
-    Evaluator, bind_params, eval_logic, expect_at_least_n_args, expect_n_args, expect_symbol,
+    Evaluator, deduplicate_symbols_preserve_params, eval_main, eval_symbol, expect_at_least_n_args,
+    expect_n_args, expect_symbol,
 };
-use crate::gc::{GcRef, SchemeValue, get_nil};
-use crate::macros::expand_macro;
-use crate::printer::print_scheme_value;
-use std::cell::RefCell;
-//use std::collections::HashMap;
-use std::rc::Rc;
+use crate::gc::{GcHeap, GcRef, SchemeValue, get_nil, list_from_vec, new_macro, new_special_form};
+use std::collections::HashMap;
 
-/// Macro handler
-pub fn eval_macro_logic(
-    params: &[GcRef],
-    body: GcRef,
-    env: &Rc<RefCell<Frame>>,
-    args: &[GcRef],
-    evaluator: &mut Evaluator,
-) -> Result<GcRef, String> {
-    // Bind unevaluated arguments to macro parameters
-    let new_env = bind_params(params, args, env, evaluator.heap_mut())?;
-    let original_env = evaluator.env_mut().current_frame();
-    evaluator
-        .env_mut()
-        .set_current_frame(new_env.current_frame());
-    // Expand the macro
-    //println!("Unexpanded macro: {}", print_scheme_value(&body.value));
-    let expanded = expand_macro(&body, 0, evaluator)?;
-    println!("After expansion: {}", print_scheme_value(&expanded.value));
+enum Ptype {
+    Empty,    // No arguments to function
+    Variadic, // Variadic argument to function
+    List,     // List of arguments to function
+    Dotted,   // Dotted list of arguments to function
+}
 
-    evaluator.env_mut().set_current_frame(original_env);
-    eval_logic(expanded, evaluator)
+/// Macro to register special forms in the environment
+///
+/// Usage: register_special_form!(heap, env,
+///     "name" => function,
+///     "another" => another_function,
+/// );
+macro_rules! register_special_form {
+    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
+        $(
+            $env.set_symbol($heap.intern_symbol($name),
+                new_special_form($heap, $func,
+                    concat!($name, ": special form").to_string()));
+        )*
+    };
+}
+
+pub fn register_special_forms(heap: &mut GcHeap, env: &mut crate::env::Environment) {
+    register_special_form!(heap, env,
+        "eval" => eval_main,
+        "apply" => apply_sf,
+        "trace" => trace_sf,
+        "quote" => quote_sf,
+        "define" => define_sf,
+        "set!" => set_sf,
+        "if" => if_sf,
+        "cond" => cond_sf,
+        "begin" => begin_sf,
+        "and" => and_sf,
+        "or" => or_sf,
+        "push-port!" => push_port_sf,
+        "pop-port!" => pop_port_sf,
+        "lambda" => callable_logic,
+        "macro" => callable_logic,
+    );
 }
 
 // fn quasiquote_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
@@ -39,13 +58,126 @@ pub fn eval_macro_logic(
 //     crate::macros::expand_macro(&body, 0, evaluator)
 // }
 
+/// Callable logic: create a closure or a macro with captured environment
+/// (lambda (params...) body1 body2 ...) => return closure
+/// (macro (params...) body1 body2 ...) => return macro
+///     params can take one of four forms:
+///     - an empty vec, meaning no arguments
+///     - a vec with a single entry, meaning variadic arguments bound as a list
+///     - a vec with multiple entries following a nil first entry, meaning named arguments
+///     - a vec with variadic arguments bound as a list and named arguments
+fn callable_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+    // (lambda params body ..)
+    use crate::gc::new_closure;
+    //use crate::gc_util::{list_from_vec, list_to_vec};
+    evaluator.depth -= 1;
+
+    let form = expect_at_least_n_args(expr, 3)?;
+    // Process argument lists
+    let (params, ptype) = params_to_vec(&form[1]); // Special processing for the range of argument structures
+    let mut args: Vec<&crate::gc::GcObject> = Vec::new();
+    match ptype {
+        Ptype::Empty => {}
+        Ptype::List => {
+            args.push(get_nil(evaluator.heap_mut()));
+            for arg in params.iter() {
+                match &arg.value {
+                    SchemeValue::Symbol(name) => {
+                        args.push(evaluator.heap_mut().intern_symbol(&name));
+                    }
+                    _ => (),
+                }
+            }
+        }
+        Ptype::Variadic => match &params[0].value {
+            SchemeValue::Symbol(name) => {
+                args.push(evaluator.heap_mut().intern_symbol(&name));
+            }
+            _ => (),
+        },
+        Ptype::Dotted => {
+            for arg in params.iter() {
+                match &arg.value {
+                    SchemeValue::Symbol(name) => {
+                        args.push(evaluator.heap_mut().intern_symbol(&name));
+                    }
+                    _ => (),
+                }
+            }
+        }
+    }
+    // Process body
+    let body_exprs = form[2..].to_vec();
+
+    // Wrap the body expressions in (begin ...) if needed
+    let wrapped_body = wrap_body_in_begin(body_exprs, evaluator.heap_mut());
+
+    // Intern and preserve parameter symbols
+    let mut param_map = HashMap::new();
+    for param in &params {
+        match &param.value {
+            SchemeValue::Symbol(name) => {
+                param_map.insert(name.clone(), *param);
+            }
+            _ => {
+                return Err("lambda: parameter must be a symbol".to_string());
+            }
+        }
+    }
+
+    let deduplicated_body =
+        deduplicate_symbols_preserve_params(wrapped_body, evaluator.heap_mut(), &param_map);
+
+    let captured_frame = evaluator.env().current_frame();
+    match &form[0].value {
+        SchemeValue::Symbol(name) => {
+            if name == "lambda" {
+                let new_closure = new_closure(
+                    evaluator.heap_mut(),
+                    args,
+                    deduplicated_body,
+                    captured_frame,
+                );
+                Ok(new_closure)
+            } else if name == "macro" {
+                let new_macro = new_macro(
+                    evaluator.heap_mut(),
+                    args,
+                    deduplicated_body,
+                    captured_frame,
+                );
+                Ok(new_macro)
+            } else {
+                return Err("Callable must be lambda or macro".to_string());
+            }
+        }
+        _ => return Err("Callable type must be a symbol".to_string()),
+    }
+}
+
+fn eval_eval_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+    evaluator.depth -= 1;
+    let args = expect_n_args(expr, 2)?;
+    let result = eval_main(args[1], evaluator)?;
+    eval_main(result, evaluator)
+}
+
+fn apply_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+    evaluator.depth -= 1;
+    let args = expect_n_args(expr, 3)?;
+    let func = eval_main(args[1], evaluator)?;
+    let arg = eval_main(args[2], evaluator)?;
+    let argvec = crate::gc::list_to_vec(arg)?;
+    eval_symbol(func, &argvec, evaluator)
+}
+
 /// Trace logic: turn the trace function on or off
 /// This function takes an integer value, and sets evaluator.trace to match the argument.
-fn trace_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn trace_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     use num_traits::ToPrimitive;
     evaluator.depth -= 1;
     let args = expect_n_args(expr, 2)?;
-    let trace_val = eval_logic(args[1], evaluator)?;
+    let trace_val = eval_main(args[1], evaluator)?;
     match &trace_val.value {
         SchemeValue::Int(v) => match v.to_i32() {
             Some(value) => {
@@ -59,7 +191,7 @@ fn trace_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> 
 }
 
 /// Quote logic: return first argument unevaluated
-fn quote_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn quote_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     // (quote x) => return x unevaluated
     evaluator.depth -= 1;
     match &expr.value {
@@ -72,7 +204,7 @@ fn quote_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> 
 }
 
 /// (begin form1 ..)
-fn begin_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn begin_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     // (begin expr1 expr2 ... exprN) => evaluate each in sequence, return last
     evaluator.depth -= 1;
     match &expr.value {
@@ -83,7 +215,7 @@ fn begin_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> 
                 match &current.value {
                     SchemeValue::Nil => break,
                     SchemeValue::Pair(car, next) => {
-                        last_result = Some(eval_logic(*car, evaluator)?);
+                        last_result = Some(eval_main(*car, evaluator)?);
                         current = *next;
                     }
                     _ => return Err("Malformed begin: improper list".to_string()),
@@ -96,29 +228,29 @@ fn begin_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> 
 }
 
 /// (define sym expr)
-pub fn define_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+pub fn define_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     // (define symbol expr)
     let args = expect_n_args(expr, 3)?; // including 'define
     let sym = expect_symbol(&args[1])?;
-    let value = eval_logic(args[2], evaluator)?;
+    let value = eval_main(args[2], evaluator)?;
     evaluator.env_mut().set_symbol(sym, value);
     Ok(sym)
 }
 
 /// (if test consequent alternate)
 /// Requires three arguments.
-pub fn if_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+pub fn if_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     // (if test consequent [alternate])
     let args = expect_at_least_n_args(expr, 2)?;
-    let test = eval_logic(args[1], evaluator)?;
+    let test = eval_main(args[1], evaluator)?;
     match test.value {
         SchemeValue::Bool(val) => {
             if val {
-                return eval_logic(args[2], evaluator);
+                return eval_main(args[2], evaluator);
             } else {
                 if args.len() == 4 {
-                    return eval_logic(args[3], evaluator);
+                    return eval_main(args[3], evaluator);
                 } else {
                     return Ok(get_nil(&mut evaluator.heap));
                 }
@@ -129,7 +261,7 @@ pub fn if_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String>
 }
 
 /// (cond (test1 expr) [(test 2...)] [(else expr)])
-pub fn cond_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+pub fn cond_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     let args = expect_n_args(expr, 3)?;
 
@@ -139,7 +271,7 @@ pub fn cond_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Strin
                 let test_result = match &test.value {
                     SchemeValue::Symbol(s) if s == "else" => true,
                     _ => {
-                        let evaluated = eval_logic(test, evaluator)?;
+                        let evaluated = eval_main(test, evaluator)?;
                         !matches!(evaluated.value, SchemeValue::Bool(false))
                     }
                 };
@@ -149,7 +281,7 @@ pub fn cond_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Strin
                     let mut result = get_nil(&mut evaluator.heap);
                     let mut current = *body;
                     while let SchemeValue::Pair(car, cdr) = &current.value {
-                        result = eval_logic(car, evaluator)?;
+                        result = eval_main(car, evaluator)?;
                         current = cdr;
                     }
                     return Ok(result);
@@ -164,7 +296,7 @@ pub fn cond_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Strin
 
 /// (and expr1 expr2 ... exprN)
 /// Stops on first false value
-pub fn and_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+pub fn and_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     // (and expr1 expr2 ... exprN)
     match &expr.value {
@@ -175,7 +307,7 @@ pub fn and_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String
                 match &current.value {
                     SchemeValue::Nil => break,
                     SchemeValue::Pair(car, next) => {
-                        let val = eval_logic(*car, evaluator)?;
+                        let val = eval_main(*car, evaluator)?;
                         match &val.value {
                             SchemeValue::Bool(false) => return Ok(val),
                             _ => last = val,
@@ -193,7 +325,7 @@ pub fn and_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String
 
 /// (or expr1 expr2 ... exprN)
 /// Stops on first true value
-pub fn or_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+pub fn or_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     // (or expr1 expr2 ... exprN)
     match &expr.value {
@@ -203,7 +335,7 @@ pub fn or_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String>
                 match &current.value {
                     SchemeValue::Nil => break,
                     SchemeValue::Pair(car, next) => {
-                        let val = eval_logic(*car, evaluator)?;
+                        let val = eval_main(*car, evaluator)?;
                         match &val.value {
                             SchemeValue::Bool(false) => current = *next,
                             _ => return Ok(val),
@@ -220,11 +352,11 @@ pub fn or_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String>
 
 /// (set! sym expr)
 /// sym must have been previously defined.
-pub fn set_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+pub fn set_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     let args = expect_n_args(expr, 3)?;
     let sym = expect_symbol(&args[1])?;
-    let value = eval_logic(args[2], evaluator)?;
+    let value = eval_main(args[2], evaluator)?;
 
     if evaluator.env().get_symbol(sym).is_some() {
         evaluator.env_mut().set_symbol(sym, value);
@@ -244,7 +376,7 @@ pub fn set_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String
 /// let mut evaluator = Evaluator::new();
 /// evaluator.push_port("example.txt");
 /// ```
-pub fn push_port_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+pub fn push_port_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     // (push-port! port)
     evaluator.depth -= 1;
     match &expr.value {
@@ -253,7 +385,7 @@ pub fn push_port_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, 
             match &cdr.value {
                 SchemeValue::Pair(arg, _) => {
                     // Evaluate the argument to get the port value
-                    let port = eval_logic(*arg, evaluator)?;
+                    let port = eval_main(*arg, evaluator)?;
                     let port_stack_sym = evaluator.heap.intern_symbol("**port-stack**");
                     let current_stack = evaluator
                         .env()
@@ -271,7 +403,7 @@ pub fn push_port_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, 
     }
 }
 
-pub fn pop_port_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+pub fn pop_port_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     // (pop-port!)
     use crate::gc::SchemeValue;
     evaluator.depth -= 1;
@@ -298,5 +430,45 @@ pub fn pop_port_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, S
             }
         }
         _ => Err("pop-port!: expected 0 arguments".to_string()),
+    }
+}
+
+fn wrap_body_in_begin(body_exprs: Vec<GcRef>, heap: &mut GcHeap) -> GcRef {
+    if body_exprs.len() == 1 {
+        body_exprs[0]
+    } else {
+        // Create (begin expr1 expr2 ...)
+        let begin_sym = heap.intern_symbol("begin");
+        let mut exprs = body_exprs;
+        exprs.insert(0, begin_sym);
+        list_from_vec(exprs, heap)
+    }
+}
+
+// Convert a parameter list, returning the list and a flag indicating the type of list
+fn params_to_vec(mut list: GcRef) -> (Vec<GcRef>, Ptype) {
+    let mut result = Vec::new();
+    match &list.value {
+        SchemeValue::Nil => return (result, Ptype::Empty),
+        SchemeValue::Symbol(_) => {
+            result.push(&list);
+            return (result, Ptype::Variadic);
+        }
+        _ => (),
+    }
+    loop {
+        match &list.value {
+            SchemeValue::Nil => break (result, Ptype::List), // norma case
+            SchemeValue::Pair(car, cdr) => {
+                result.push(*car);
+                list = *cdr;
+            }
+            SchemeValue::Symbol(_) => {
+                // Dotted list tail
+                result.insert(0, list);
+                return (result, Ptype::Dotted);
+            }
+            _ => (),
+        }
     }
 }

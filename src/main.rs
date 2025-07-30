@@ -12,7 +12,7 @@ mod tokenizer;
 
 //use crate::parser::Parser;
 //use crate::io::{Port, PortKind};
-use crate::eval::{Evaluator, eval_logic, parse_and_deduplicate};
+use crate::eval::{Evaluator, eval_main, parse_and_deduplicate};
 use argh::FromArgs;
 use std::io as stdio;
 //use stdio::Write;
@@ -134,7 +134,7 @@ fn repl(evaluator: &mut Evaluator) {
             stdio::stdout().flush().unwrap();
         }
         match parse_and_deduplicate(&mut parser, &mut current_port, evaluator.heap_mut()) {
-            Ok(expr) => match eval_logic(expr, evaluator) {
+            Ok(expr) => match eval_main(expr, evaluator) {
                 Ok(result) => {
                     if interactive {
                         println!("=> {}", print_scheme_value(&result.value));

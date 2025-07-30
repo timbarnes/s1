@@ -6,13 +6,13 @@
 
 use crate::env::{Environment, Frame};
 use crate::gc::{
-    Callable, GcHeap, GcRef, SchemeValue, get_nil, list_from_vec, list_to_vec, new_closure,
-    new_macro, new_pair, new_vector,
+    Callable, GcHeap, GcRef, SchemeValue, list_from_vec, list_to_vec, new_closure, new_pair,
+    new_vector,
 };
 use crate::io::Port;
+use crate::macros::expand_macro;
 use crate::parser::{ParseError, Parser};
 use crate::printer::print_scheme_value;
-use crate::special_forms::eval_macro_logic;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -34,12 +34,6 @@ struct TailCall {
     pub args: Vec<GcRef>,
 }
 
-enum Ptype {
-    Empty,    // No arguments to function
-    Variadic, // Variadic argument to function
-    List,     // List of arguments to function
-    Dotted,   // Dotted list of arguments to function
-}
 impl Evaluator {
     pub fn new() -> Self {
         let mut evaluator = Self {
@@ -53,7 +47,7 @@ impl Evaluator {
 
         // Register built-ins in the evaluator's heap and environment
         crate::builtin::register_builtins(&mut evaluator.heap, &mut evaluator.env);
-
+        crate::special_forms::register_special_forms(&mut evaluator.heap, &mut evaluator.env);
         evaluator
     }
 
@@ -134,7 +128,7 @@ impl Evaluator {
                 Err(ParseError::Eof) => return Ok(last_result),
                 Ok(expr) => {
                     let expr = crate::eval::deduplicate_symbols(expr, &mut self.heap);
-                    last_result = eval_logic(expr, self)?;
+                    last_result = eval_main(expr, self)?;
                 }
             }
         }
@@ -142,8 +136,12 @@ impl Evaluator {
 }
 
 /// Apply function to pre-evaluated arguments
-/// Handles environment access for symbol lookup and function application
-fn eval_apply(func: GcRef, args: &[GcRef], evaluator: &mut Evaluator) -> Result<GcRef, String> {
+/// Handles environment access for symbol lookup application
+pub fn eval_symbol(
+    func: GcRef,
+    args: &[GcRef],
+    evaluator: &mut Evaluator,
+) -> Result<GcRef, String> {
     if evaluator.trace > evaluator.depth {
         for v in args {
             print_scheme_value(&v.value);
@@ -159,27 +157,12 @@ fn eval_apply(func: GcRef, args: &[GcRef], evaluator: &mut Evaluator) -> Result<
                 .get_symbol(func)
                 .ok_or_else(|| format!("Unbound variable: {}", name))
         }
-        // SchemeValue::Callable(callable) => {
-        //     match callable {
-        //         Callable::Primitive { func, .. } => {
-        //             let evaluated_args = eval_args(args, evaluator)?;
-        //             func(&mut evaluator.heap, evaluated_args)
-        //         },
-        //         Callable::SpecialForm { func, .. } =>
-        //             func(expr, evaluator),
-        //         Callable::Closure { params, body, env } =>
-        //             eval_closure_logic(params, body, env, args, evaluator),
-        //         Callable::Macro { params, body, env } =>
-        //             eval_macro_logic(params, body, env, args, evaluator),
-        //         _ => Err("eval_apply: function is not a symbol, primitive, macro or closure".to_string()),
-        //     }
-        // }
         _ => Err("eval_apply: function is not a symbol, primitive, macro or closure".to_string()),
     }
 }
 
 /// Main evaluation walker - handles self-evaluating forms, symbol resolution, and nested calls
-pub fn eval_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+pub fn eval_main(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     evaluator.depth += 1;
 
     if evaluator.trace > evaluator.depth {
@@ -190,7 +173,7 @@ pub fn eval_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Strin
     }
 
     if let Some(tail_call) = evaluator.tail_call.take() {
-        return eval_apply(tail_call.func, &tail_call.args, evaluator);
+        return eval_symbol(tail_call.func, &tail_call.args, evaluator);
     }
 
     match &expr.value {
@@ -204,11 +187,11 @@ pub fn eval_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Strin
         | SchemeValue::Callable { .. } => Ok(expr),
 
         // 2. Symbols
-        SchemeValue::Symbol(_) => eval_apply(expr, &[], evaluator),
+        SchemeValue::Symbol(_) => eval_symbol(expr, &[], evaluator),
 
         // 3. Pairs (function or macro call)
         SchemeValue::Pair(car, cdr) => {
-            let func = eval_logic(*car, evaluator)?;
+            let func = eval_main(*car, evaluator)?;
             match &func.value {
                 SchemeValue::Callable(callable) => match callable {
                     Callable::Primitive { func, .. } => {
@@ -234,137 +217,8 @@ pub fn eval_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Strin
     }
 }
 
-pub fn eval_args(args: &GcRef, evaluator: &mut Evaluator) -> Result<Vec<GcRef>, String> {
-    let mut processed_args = Vec::new();
-    let mut current = *args;
-    loop {
-        match &current.value {
-            SchemeValue::Nil => break,
-            SchemeValue::Pair(arg, next) => {
-                processed_args.push(eval_logic(*arg, evaluator)?);
-                current = *next;
-            }
-            _ => return Err("Improper list in function call".to_string()),
-        }
-    }
-    Ok(processed_args)
-}
-
-fn eval_eval_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
-    evaluator.depth -= 1;
-    let args = expect_n_args(expr, 2)?;
-    let result = eval_logic(args[1], evaluator)?;
-    eval_logic(result, evaluator)
-}
-
-fn eval_apply_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
-    evaluator.depth -= 1;
-    let args = expect_n_args(expr, 3)?;
-    let func = eval_logic(args[1], evaluator)?;
-    let arg = eval_logic(args[2], evaluator)?;
-    let argvec = list_to_vec(arg)?;
-    eval_apply(func, &argvec, evaluator)
-}
-
-/// Callable logic: create a closure or a macro with captured environment
-/// (lambda (params...) body1 body2 ...) => return closure
-/// (macro (params...) body1 body2 ...) => return macro
-///     params can take one of four forms:
-///     - an empty vec, meaning no arguments
-///     - a vec with a single entry, meaning variadic arguments bound as a list
-///     - a vec with multiple entries following a nil first entry, meaning named arguments
-///     - a vec with variadic arguments bound as a list and named arguments
-fn callable_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
-    // (lambda params body ..)
-    use crate::gc::new_closure;
-    //use crate::gc_util::{list_from_vec, list_to_vec};
-    evaluator.depth -= 1;
-
-    let form = expect_at_least_n_args(expr, 3)?;
-    // Process argument lists
-    let (params, ptype) = params_to_vec(&form[1]); // Special processing for the range of argument structures
-    let mut args: Vec<&crate::gc::GcObject> = Vec::new();
-    match ptype {
-        Ptype::Empty => {}
-        Ptype::List => {
-            args.push(get_nil(evaluator.heap_mut()));
-            for arg in params.iter() {
-                match &arg.value {
-                    SchemeValue::Symbol(name) => {
-                        args.push(evaluator.heap_mut().intern_symbol(&name));
-                    }
-                    _ => (),
-                }
-            }
-        }
-        Ptype::Variadic => match &params[0].value {
-            SchemeValue::Symbol(name) => {
-                args.push(evaluator.heap_mut().intern_symbol(&name));
-            }
-            _ => (),
-        },
-        Ptype::Dotted => {
-            for arg in params.iter() {
-                match &arg.value {
-                    SchemeValue::Symbol(name) => {
-                        args.push(evaluator.heap_mut().intern_symbol(&name));
-                    }
-                    _ => (),
-                }
-            }
-        }
-    }
-    // Process body
-    let body_exprs = form[2..].to_vec();
-
-    // Wrap the body expressions in (begin ...) if needed
-    let wrapped_body = wrap_body_in_begin(body_exprs, evaluator.heap_mut());
-
-    // Intern and preserve parameter symbols
-    let mut param_map = HashMap::new();
-    for param in &params {
-        match &param.value {
-            SchemeValue::Symbol(name) => {
-                param_map.insert(name.clone(), *param);
-            }
-            _ => {
-                return Err("lambda: parameter must be a symbol".to_string());
-            }
-        }
-    }
-
-    let deduplicated_body =
-        deduplicate_symbols_preserve_params(wrapped_body, evaluator.heap_mut(), &param_map);
-
-    let captured_frame = evaluator.env().current_frame();
-    match &form[0].value {
-        SchemeValue::Symbol(name) => {
-            if name == "lambda" {
-                let new_closure = new_closure(
-                    evaluator.heap_mut(),
-                    args,
-                    deduplicated_body,
-                    captured_frame,
-                );
-                Ok(new_closure)
-            } else if name == "macro" {
-                let new_macro = new_macro(
-                    evaluator.heap_mut(),
-                    args,
-                    deduplicated_body,
-                    captured_frame,
-                );
-                Ok(new_macro)
-            } else {
-                return Err("Callable must be lambda or macro".to_string());
-            }
-        }
-        _ => return Err("Callable type must be a symbol".to_string()),
-    }
-}
-
 /// Evaluate a closure by creating a new environment frame and evaluating the body
-pub fn eval_closure_logic(
+fn eval_closure_logic(
     params: &[GcRef],
     body: GcRef,
     env: &Rc<RefCell<Frame>>,
@@ -393,7 +247,7 @@ pub fn eval_closure_logic(
     }
 
     // Evaluate the body in the new environment
-    let result = eval_logic(body, evaluator);
+    let result = eval_main(body, evaluator);
 
     // Restore the original environment
     evaluator.env_mut().set_current_frame(original_env);
@@ -401,20 +255,47 @@ pub fn eval_closure_logic(
     result
 }
 
+/// Macro handler
+fn eval_macro_logic(
+    params: &[GcRef],
+    body: GcRef,
+    env: &Rc<RefCell<Frame>>,
+    args: &[GcRef],
+    evaluator: &mut Evaluator,
+) -> Result<GcRef, String> {
+    // Bind unevaluated arguments to macro parameters
+    let new_env = bind_params(params, args, env, evaluator.heap_mut())?;
+    let original_env = evaluator.env_mut().current_frame();
+    evaluator
+        .env_mut()
+        .set_current_frame(new_env.current_frame());
+    // Expand the macro
+    //println!("Unexpanded macro: {}", print_scheme_value(&body.value));
+    let expanded = expand_macro(&body, 0, evaluator)?;
+    println!("After expansion: {}", print_scheme_value(&expanded.value));
+
+    evaluator.env_mut().set_current_frame(original_env);
+    eval_main(expanded, evaluator)
+}
+
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 
-fn wrap_body_in_begin(body_exprs: Vec<GcRef>, heap: &mut GcHeap) -> GcRef {
-    if body_exprs.len() == 1 {
-        body_exprs[0]
-    } else {
-        // Create (begin expr1 expr2 ...)
-        let begin_sym = heap.intern_symbol("begin");
-        let mut exprs = body_exprs;
-        exprs.insert(0, begin_sym);
-        list_from_vec(exprs, heap)
+fn eval_args(args: &GcRef, evaluator: &mut Evaluator) -> Result<Vec<GcRef>, String> {
+    let mut processed_args = Vec::new();
+    let mut current = *args;
+    loop {
+        match &current.value {
+            SchemeValue::Nil => break,
+            SchemeValue::Pair(arg, next) => {
+                processed_args.push(eval_main(*arg, evaluator)?);
+                current = *next;
+            }
+            _ => return Err("Improper list in function call".to_string()),
+        }
     }
+    Ok(processed_args)
 }
 
 fn is_macro(func: &GcRef) -> bool {
@@ -456,34 +337,6 @@ pub fn bind_params(
         }
     }
     Ok(new_env)
-}
-
-// Convert a parameter list, returning the list and a flag indicating the type of list
-pub fn params_to_vec(mut list: GcRef) -> (Vec<GcRef>, Ptype) {
-    let mut result = Vec::new();
-    match &list.value {
-        SchemeValue::Nil => return (result, Ptype::Empty),
-        SchemeValue::Symbol(_) => {
-            result.push(&list);
-            return (result, Ptype::Variadic);
-        }
-        _ => (),
-    }
-    loop {
-        match &list.value {
-            SchemeValue::Nil => break (result, Ptype::List), // norma case
-            SchemeValue::Pair(car, cdr) => {
-                result.push(*car);
-                list = *cdr;
-            }
-            SchemeValue::Symbol(_) => {
-                // Dotted list tail
-                result.insert(0, list);
-                return (result, Ptype::Dotted);
-            }
-            _ => (),
-        }
-    }
 }
 
 // Expect exactly N arguments in a proper list
@@ -578,25 +431,101 @@ fn is_special_form(func: GcRef) -> Option<&'static str> {
     }
 }
 
-/// Check if an expression is self-evaluating (doesn't need evaluation)
-fn is_self_evaluating(expr: GcRef) -> bool {
-    match &expr.value {
-        SchemeValue::Int(_) => true,
-        SchemeValue::Float(_) => true,
-        SchemeValue::Str(_) => true,
-        SchemeValue::Bool(_) => true,
-        SchemeValue::Char(_) => true,
-        SchemeValue::Nil => true,
-        SchemeValue::Callable { .. } => true,
-        _ => false,
-    }
-}
-
 /// Check if an expression is a tail call (function call in tail position)
 /// For now, we'll be conservative and not treat any calls as tail calls
 /// until we implement proper tail position detection
 fn is_tail_call(_expr: GcRef) -> bool {
     false // Conservative approach - no tail call optimization for now
+}
+
+/// Recursively deduplicate symbols in an expression tree, preserving parameter symbols.
+///
+/// This function is used when creating a closure to ensure that the parameter symbols
+/// in the body are the same as those in the parameter list, avoiding potential
+/// symbol mismatch issues.
+///
+/// # Examples
+///
+/// ```rust
+/// use s1::gc::GcHeap;
+/// use s1::evalsimple::deduplicate_symbols_preserve_params;
+///
+/// let mut heap = GcHeap::new();
+/// let expr = heap.intern_symbol("foo"); // Already interned
+/// let param_map = HashMap::new(); // No parameters
+/// let deduplicated = deduplicate_symbols_preserve_params(expr, &mut heap, &param_map);
+/// assert!(std::ptr::eq(expr, deduplicated)); // Same object
+/// ```
+pub fn deduplicate_symbols_preserve_params(
+    expr: GcRef,
+    heap: &mut GcHeap,
+    param_map: &HashMap<String, GcRef>,
+) -> GcRef {
+    match &expr.value {
+        SchemeValue::Symbol(name) => {
+            // If the symbol is a parameter, return it directly
+            if let Some(param_sym) = param_map.get(name) {
+                *param_sym
+            } else {
+                // Otherwise, deduplicate it
+                heap.intern_symbol(name)
+            }
+        }
+        SchemeValue::Pair(car, cdr) => {
+            // Recursively deduplicate car and cdr
+            let new_car = deduplicate_symbols_preserve_params(*car, heap, param_map);
+            let new_cdr = deduplicate_symbols_preserve_params(*cdr, heap, param_map);
+
+            // Only create new pair if something changed
+            if std::ptr::eq(*car, new_car) && std::ptr::eq(*cdr, new_cdr) {
+                expr // No change, return original
+            } else {
+                new_pair(heap, new_car, new_cdr)
+            }
+        }
+        SchemeValue::Vector(elements) => {
+            // Recursively deduplicate all vector elements
+            let mut new_elements = Vec::new();
+            let mut changed = false;
+
+            for element in elements {
+                let new_element = deduplicate_symbols_preserve_params(*element, heap, param_map);
+                new_elements.push(new_element);
+                if !std::ptr::eq(*element, new_element) {
+                    changed = true;
+                }
+            }
+
+            if changed {
+                new_vector(heap, new_elements)
+            } else {
+                expr // No change, return original
+            }
+        }
+        SchemeValue::Callable(callable) => {
+            match callable {
+                Callable::Closure { params, body, env } | Callable::Macro { params, body, env } => {
+                    // Deduplicate the body, but params are already symbols (interned)
+                    let new_body = deduplicate_symbols_preserve_params(*body, heap, param_map);
+
+                    if std::ptr::eq(*body, new_body) {
+                        expr // No change, return original
+                    } else {
+                        new_closure(heap, params.clone(), new_body, env.clone())
+                    }
+                }
+                _ => expr,
+            }
+        }
+        // Self-evaluating forms and other types return unchanged
+        SchemeValue::Int(_)
+        | SchemeValue::Float(_)
+        | SchemeValue::Str(_)
+        | SchemeValue::Bool(_)
+        | SchemeValue::Char(_)
+        | SchemeValue::Nil
+        | SchemeValue::Port { .. } => expr,
+    }
 }
 
 /// Recursively deduplicate symbols in an expression tree.
@@ -672,96 +601,6 @@ fn deduplicate_symbols(expr: GcRef, heap: &mut GcHeap) -> GcRef {
     }
 }
 
-/// Recursively deduplicate symbols in an expression tree, preserving parameter symbols.
-///
-/// This function is used when creating a closure to ensure that the parameter symbols
-/// in the body are the same as those in the parameter list, avoiding potential
-/// symbol mismatch issues.
-///
-/// # Examples
-///
-/// ```rust
-/// use s1::gc::GcHeap;
-/// use s1::evalsimple::deduplicate_symbols_preserve_params;
-///
-/// let mut heap = GcHeap::new();
-/// let expr = heap.intern_symbol("foo"); // Already interned
-/// let param_map = HashMap::new(); // No parameters
-/// let deduplicated = deduplicate_symbols_preserve_params(expr, &mut heap, &param_map);
-/// assert!(std::ptr::eq(expr, deduplicated)); // Same object
-/// ```
-fn deduplicate_symbols_preserve_params(
-    expr: GcRef,
-    heap: &mut GcHeap,
-    param_map: &HashMap<String, GcRef>,
-) -> GcRef {
-    match &expr.value {
-        SchemeValue::Symbol(name) => {
-            // If the symbol is a parameter, return it directly
-            if let Some(param_sym) = param_map.get(name) {
-                *param_sym
-            } else {
-                // Otherwise, deduplicate it
-                heap.intern_symbol(name)
-            }
-        }
-        SchemeValue::Pair(car, cdr) => {
-            // Recursively deduplicate car and cdr
-            let new_car = deduplicate_symbols_preserve_params(*car, heap, param_map);
-            let new_cdr = deduplicate_symbols_preserve_params(*cdr, heap, param_map);
-
-            // Only create new pair if something changed
-            if std::ptr::eq(*car, new_car) && std::ptr::eq(*cdr, new_cdr) {
-                expr // No change, return original
-            } else {
-                new_pair(heap, new_car, new_cdr)
-            }
-        }
-        SchemeValue::Vector(elements) => {
-            // Recursively deduplicate all vector elements
-            let mut new_elements = Vec::new();
-            let mut changed = false;
-
-            for element in elements {
-                let new_element = deduplicate_symbols_preserve_params(*element, heap, param_map);
-                new_elements.push(new_element);
-                if !std::ptr::eq(*element, new_element) {
-                    changed = true;
-                }
-            }
-
-            if changed {
-                new_vector(heap, new_elements)
-            } else {
-                expr // No change, return original
-            }
-        }
-        SchemeValue::Callable(callable) => {
-            match callable {
-                Callable::Closure { params, body, env } | Callable::Macro { params, body, env } => {
-                    // Deduplicate the body, but params are already symbols (interned)
-                    let new_body = deduplicate_symbols_preserve_params(*body, heap, param_map);
-
-                    if std::ptr::eq(*body, new_body) {
-                        expr // No change, return original
-                    } else {
-                        new_closure(heap, params.clone(), new_body, env.clone())
-                    }
-                }
-                _ => expr,
-            }
-        }
-        // Self-evaluating forms and other types return unchanged
-        SchemeValue::Int(_)
-        | SchemeValue::Float(_)
-        | SchemeValue::Str(_)
-        | SchemeValue::Bool(_)
-        | SchemeValue::Char(_)
-        | SchemeValue::Nil
-        | SchemeValue::Port { .. } => expr,
-    }
-}
-
 /// Parse an expression and deduplicate symbols before evaluation.
 ///
 /// This wrapper function calls the parser and then runs symbol deduplication
@@ -815,7 +654,7 @@ mod tests {
             let heap = evaluator.heap_mut();
             int_val = new_int(heap, num_bigint::BigInt::from(42));
         }
-        let result = eval_logic(int_val, &mut evaluator).unwrap();
+        let result = eval_main(int_val, &mut evaluator).unwrap();
         assert_eq!(result.value, int_val.value);
     }
 
@@ -830,7 +669,7 @@ mod tests {
             symbol = get_symbol(heap, "x");
         }
         evaluator.env_mut().set_symbol(symbol, value);
-        let result = eval_logic(symbol, &mut evaluator).unwrap();
+        let result = eval_main(symbol, &mut evaluator).unwrap();
         assert_eq!(result.value, value.value);
     }
 
@@ -869,7 +708,7 @@ mod tests {
             expr = new_pair(heap, plus_sym, args);
         }
         evaluator.env_mut().set_symbol(plus_sym, plus);
-        let result = eval_logic(expr, &mut evaluator).unwrap();
+        let result = eval_main(expr, &mut evaluator).unwrap();
         match &result.value {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "5"),
             _ => panic!("Expected integer result"),
@@ -914,7 +753,7 @@ mod tests {
         }
         evaluator.env_mut().set_symbol(plus_sym, plus);
         evaluator.env_mut().set_symbol(star_sym, times);
-        let result = eval_logic(expr, &mut evaluator).unwrap();
+        let result = eval_main(expr, &mut evaluator).unwrap();
         match &result.value {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "54"),
             _ => panic!("Expected integer result"),
@@ -990,7 +829,7 @@ mod tests {
         }
         evaluator.env_mut().set_symbol(star_sym, times);
         evaluator.env_mut().set_symbol(plus_sym, plus);
-        let result = eval_logic(expr, &mut evaluator).unwrap();
+        let result = eval_main(expr, &mut evaluator).unwrap();
         match &result.value {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "10"),
             _ => panic!("Expected integer result"),
@@ -1045,7 +884,7 @@ mod tests {
         evaluator.env_mut().set_symbol(plus_sym, plus);
         evaluator.env_mut().set_symbol(times_sym, times);
         evaluator.env_mut().set_symbol(minus_sym, minus);
-        let result = eval_logic(expr, &mut evaluator).unwrap();
+        let result = eval_main(expr, &mut evaluator).unwrap();
         match &result.value {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "-1"),
             _ => panic!("Expected integer result"),
@@ -1066,7 +905,7 @@ mod tests {
             expr = new_pair(heap, quote_sym, sym_list);
             // quoted = sym;
         }
-        let result = eval_logic(expr, &mut evaluator).unwrap();
+        let result = eval_main(expr, &mut evaluator).unwrap();
         match &result.value {
             SchemeValue::Symbol(s) => assert_eq!(s, "foo"),
             _ => panic!("Expected quoted symbol"),
@@ -1086,7 +925,7 @@ mod tests {
             expr2 = new_pair(heap, quote_sym, foo_bar_list_pair);
             // let quoted_list = foo_bar_list;
         }
-        let result2 = eval_logic(expr2, &mut evaluator).unwrap();
+        let result2 = eval_main(expr2, &mut evaluator).unwrap();
         match &result2.value {
             SchemeValue::Pair(_, _) => (),
             _ => panic!("Expected quoted list"),
@@ -1125,7 +964,7 @@ mod tests {
             expr = new_pair(heap, begin_sym, begin_args);
         }
         evaluator.env_mut().set_symbol(plus_sym, plus);
-        let result = eval_logic(expr, &mut evaluator).unwrap();
+        let result = eval_main(expr, &mut evaluator).unwrap();
         match &result.value {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "3"),
             _ => panic!("Expected integer result from begin"),
@@ -1147,7 +986,7 @@ mod tests {
             let define_sym = get_symbol(heap, "define");
             expr = new_pair(heap, define_sym, args);
         }
-        let result = eval_logic(expr, &mut evaluator).unwrap();
+        let result = eval_main(expr, &mut evaluator).unwrap();
         match &result.value {
             SchemeValue::Symbol(s) => assert_eq!(s.to_string(), "y"),
             _ => panic!("Expected symbol result"),
@@ -1184,12 +1023,12 @@ mod tests {
             let f_pair = new_pair(heap, f, one_pair2);
             expr_false = new_pair(heap, if_sym, f_pair);
         }
-        let result_true = eval_logic(expr_true, &mut evaluator).unwrap();
+        let result_true = eval_main(expr_true, &mut evaluator).unwrap();
         match &result_true.value {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
             _ => panic!("Expected integer result for true branch"),
         }
-        let result_false = eval_logic(expr_false, &mut evaluator).unwrap();
+        let result_false = eval_main(expr_false, &mut evaluator).unwrap();
         match &result_false.value {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
             _ => panic!("Expected integer result for false branch"),
@@ -1205,7 +1044,7 @@ mod tests {
             let and_sym = get_symbol(heap, "and");
             let nil = heap.nil_s();
             let and_empty = new_pair(heap, and_sym, nil);
-            let result = eval_logic(and_empty, &mut evaluator).unwrap();
+            let result = eval_main(and_empty, &mut evaluator).unwrap();
             assert!(matches!(&result.value, SchemeValue::Bool(true)));
         }
         // (and #t 1 2)
@@ -1221,7 +1060,7 @@ mod tests {
             let one_pair = new_pair(heap, one, two_pair);
             let t_pair = new_pair(heap, t, one_pair);
             let and_expr = new_pair(heap, and_sym, t_pair);
-            let result = eval_logic(and_expr, &mut evaluator).unwrap();
+            let result = eval_main(and_expr, &mut evaluator).unwrap();
             match &result.value {
                 SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
                 _ => panic!("Expected integer result for and"),
@@ -1240,7 +1079,7 @@ mod tests {
             let f_pair = new_pair(heap, f, two_pair);
             let t_pair2 = new_pair(heap, t, f_pair);
             let and_expr2 = new_pair(heap, and_sym, t_pair2);
-            let result = eval_logic(and_expr2, &mut evaluator).unwrap();
+            let result = eval_main(and_expr2, &mut evaluator).unwrap();
             assert!(matches!(&result.value, SchemeValue::Bool(false)));
         }
         // (or)
@@ -1250,7 +1089,7 @@ mod tests {
             let or_sym = get_symbol(heap, "or");
             let nil = heap.nil_s();
             let or_empty = new_pair(heap, or_sym, nil);
-            let result = eval_logic(or_empty, &mut evaluator).unwrap();
+            let result = eval_main(or_empty, &mut evaluator).unwrap();
             assert!(matches!(&result.value, SchemeValue::Bool(false)));
         }
         // (or #f 1 2)
@@ -1266,7 +1105,7 @@ mod tests {
             let one_pair = new_pair(heap, one, two_pair);
             let f_pair = new_pair(heap, f, one_pair);
             let or_expr = new_pair(heap, or_sym, f_pair);
-            let result = eval_logic(or_expr, &mut evaluator).unwrap();
+            let result = eval_main(or_expr, &mut evaluator).unwrap();
             match &result.value {
                 SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
                 _ => panic!("Expected integer result for or"),
@@ -1284,7 +1123,7 @@ mod tests {
             let f_pair2 = new_pair(heap, f, two_pair);
             let f_pair3 = new_pair(heap, f, f_pair2);
             let or_expr2 = new_pair(heap, or_sym, f_pair3);
-            let result = eval_logic(or_expr2, &mut evaluator).unwrap();
+            let result = eval_main(or_expr2, &mut evaluator).unwrap();
             match &result.value {
                 SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
                 _ => panic!("Expected integer result for or"),
@@ -1301,7 +1140,7 @@ mod tests {
             let f_pair2 = new_pair(heap, f, f_pair);
             let f_pair3 = new_pair(heap, f, f_pair2);
             let or_expr3 = new_pair(heap, or_sym, f_pair3);
-            let result = eval_logic(or_expr3, &mut evaluator).unwrap();
+            let result = eval_main(or_expr3, &mut evaluator).unwrap();
             assert!(matches!(&result.value, SchemeValue::Bool(false)));
         }
     }
@@ -1347,7 +1186,7 @@ mod tests {
         }
 
         // Evaluate the lambda to create a closure
-        add1 = eval_logic(lambda_expr, &mut evaluator).unwrap();
+        add1 = eval_main(lambda_expr, &mut evaluator).unwrap();
 
         // Verify it's a closure
         match &add1.value {
@@ -1389,7 +1228,7 @@ mod tests {
         }
 
         // Evaluate the application
-        result = eval_logic(apply_expr, &mut evaluator).unwrap();
+        result = eval_main(apply_expr, &mut evaluator).unwrap();
 
         // Should return 6
         match &result.value {
@@ -1451,7 +1290,7 @@ mod tests {
         }
 
         // Evaluate the application
-        result = eval_logic(apply_expr, &mut evaluator).unwrap();
+        result = eval_main(apply_expr, &mut evaluator).unwrap();
 
         // Should return 7
         match &result.value {
@@ -1743,7 +1582,7 @@ mod tests {
         }
 
         // This should work because we're using the same interned symbol
-        let result = eval_logic(apply_expr, &mut evaluator).unwrap();
+        let result = eval_main(apply_expr, &mut evaluator).unwrap();
         match &result.value {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "6"),
             _ => panic!("Expected integer result"),
