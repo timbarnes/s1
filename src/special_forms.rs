@@ -6,9 +6,10 @@ use crate::eval::{
     expect_at_least_n_args, expect_n_args, expect_symbol,
 };
 use crate::gc::{
-    GcHeap, GcRef, SchemeValue, cdr, get_nil, list_from_vec, new_macro, new_special_form,
+    GcHeap, GcRef, SchemeValue, cdr, get_nil, list_from_vec, new_float, new_macro, new_special_form,
 };
 use std::collections::HashMap;
+use std::time::Instant;
 
 enum Ptype {
     Empty,    // No arguments to function
@@ -50,6 +51,7 @@ pub fn register_special_forms(heap: &mut GcHeap, env: &mut crate::env::Environme
         "pop-port!" => pop_port_sf,
         "lambda" => callable_logic,
         "macro" => callable_logic,
+        "with-timer" => with_timer_sf,
     );
 }
 
@@ -422,6 +424,15 @@ pub fn pop_port_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Stri
         }
         _ => Err("pop-port!: expected 0 arguments".to_string()),
     }
+}
+
+fn with_timer_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+    let args = expect_n_args(expr, 2)?;
+    let timer = Instant::now();
+    eval_main(args[1], evaluator)?;
+    let elapsed_time = timer.elapsed().as_secs_f64();
+    let time = new_float(&mut evaluator.heap, elapsed_time);
+    Ok(time)
 }
 
 /// Utility functions
