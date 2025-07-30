@@ -265,6 +265,7 @@ pub fn eval_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Strin
             match &car.value {
                 SchemeValue::Symbol(name) => match name.as_str() {
                     "quote" => return quote_logic(expr, evaluator),
+                    "quasiquote" => return quasiquote_logic(expr, evaluator),
                     "begin" => return begin_logic(expr, evaluator),
                     "define" => return define_logic(expr, evaluator),
                     "cond" => return cond_logic(expr, evaluator),
@@ -326,6 +327,13 @@ fn eval_apply_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Str
     let arg = eval_logic(args[2], evaluator)?;
     let argvec = list_to_vec(arg)?;
     eval_apply(func, &argvec, evaluator)
+}
+
+fn quasiquote_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+    evaluator.depth -= 1;
+    let args = expect_n_args(expr, 2)?;
+    let body = args[1];
+    crate::macros::expand_macro(&body, 0, evaluator)
 }
 
 /// Trace logic: turn the trace function on or off
@@ -589,8 +597,7 @@ fn callable_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Strin
         }
     }
     // Process body
-    let mut body_exprs = Vec::new();
-    body_exprs = form[2..].to_vec();
+    let body_exprs = form[2..].to_vec();
 
     // Wrap the body expressions in (begin ...) if needed
     let wrapped_body = wrap_body_in_begin(body_exprs, evaluator.heap_mut());
@@ -861,7 +868,8 @@ fn extract_args(expr: GcRef) -> Result<Vec<GcRef>, String> {
 fn is_special_form(func: GcRef) -> Option<&'static str> {
     match &func.value {
         SchemeValue::Symbol(name) => match name.as_str() {
-            "quote" | "if" | "define" | "begin" | "and" | "or" | "set!" | "lambda" => Some(name),
+            "quote" | "quasiquote" | "if" | "define" | "begin" | "and" | "or" | "set!"
+            | "lambda" => Some(name),
             _ => None,
         },
         _ => None,

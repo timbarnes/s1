@@ -53,22 +53,15 @@ pub enum SchemeValue {
         doc: String,
         is_special_form: bool,
     },
-
     /// Closures (functions with captured environment)
     Closure {
-        /// Parameter symbols (interned symbol pointers)
         params: Vec<GcRef>,
-        /// Function body expression
         body: GcRef,
-        /// Captured environment frame
         env: Rc<RefCell<crate::env::Frame>>,
     },
     Macro {
-        /// Parameter symbols (interned symbol pointers)
         params: Vec<GcRef>,
-        /// Function body expression
         body: GcRef,
-        /// Captured environment frame
         env: Rc<RefCell<crate::env::Frame>>,
     },
     /// Empty list (nil)
@@ -536,7 +529,7 @@ pub fn list_ref(mut list: &GcRef, index: usize) -> Result<GcRef, String> {
         }
     }
     match &list.value {
-        SchemeValue::Pair(car, _) => Ok(car.clone()),
+        SchemeValue::Pair(car, _) => Ok(car),
         _ => Err("list_ref: not a proper list".to_string()),
     }
 }

@@ -1,10 +1,9 @@
 11
 ;; Dummy
 (display "Dummy file loaded")
-(define x 22)
 
-(define def
-    (lambda (args body)
-        (if (symbol? args)
-            (define args body)
-            (define (car args) (lambda (cdr args) body)))))
+(define fib
+    (lambda (n)
+        (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))))
+
+(fib 30)
