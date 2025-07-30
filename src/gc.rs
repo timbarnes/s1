@@ -29,7 +29,7 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 pub enum Callable {
-    Primitive {
+    Builtin {
         func: fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>,
         doc: String,
     },
@@ -90,7 +90,7 @@ impl PartialEq for SchemeValue {
             (SchemeValue::Bool(a), SchemeValue::Bool(b)) => a == b,
             (SchemeValue::Char(a), SchemeValue::Char(b)) => a == b,
             (SchemeValue::Callable(a), SchemeValue::Callable(b)) => match (a, b) {
-                (Callable::Primitive { func: f1, .. }, Callable::Primitive { func: f2, .. }) => {
+                (Callable::Builtin { func: f1, .. }, Callable::Builtin { func: f2, .. }) => {
                     f1 == f2
                 }
                 (
@@ -168,7 +168,7 @@ impl std::fmt::Debug for SchemeValue {
             SchemeValue::Bool(b) => write!(f, "Bool({})", b),
             SchemeValue::Char(c) => write!(f, "Char({:?})", c),
             SchemeValue::Callable(c) => match c {
-                Callable::Primitive { doc, .. } => write!(f, "Primitive({:?})", doc),
+                Callable::Builtin { doc, .. } => write!(f, "Primitive({:?})", doc),
                 Callable::SpecialForm { doc, .. } => write!(f, "SpecialForm({:?})", doc),
                 Callable::Macro { params, body, .. } => {
                     let param_names: Vec<String> = params
@@ -474,7 +474,7 @@ pub fn new_primitive(
     f: fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>,
     doc: String,
 ) -> GcRef {
-    let primitive = SchemeValue::Callable(Callable::Primitive { func: f, doc });
+    let primitive = SchemeValue::Callable(Callable::Builtin { func: f, doc });
     let obj = GcObject {
         value: primitive,
         marked: false,

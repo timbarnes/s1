@@ -190,27 +190,7 @@ pub fn eval_main(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String
         SchemeValue::Symbol(_) => eval_symbol(expr, &[], evaluator),
 
         // 3. Pairs (function or macro call)
-        SchemeValue::Pair(car, cdr) => {
-            let func = eval_main(*car, evaluator)?;
-            match &func.value {
-                SchemeValue::Callable(callable) => match callable {
-                    Callable::Primitive { func, .. } => {
-                        let processed_args = eval_args(cdr, evaluator)?;
-                        func(&mut evaluator.heap, &processed_args)
-                    }
-                    Callable::SpecialForm { func, .. } => func(expr, evaluator),
-                    Callable::Closure { params, body, env } => {
-                        let processed_args = eval_args(cdr, evaluator)?;
-                        eval_closure_logic(params, *body, env, &processed_args, evaluator)
-                    }
-                    Callable::Macro { params, body, env } => {
-                        let processed_args = list_to_vec(*cdr)?;
-                        eval_macro_logic(params, *body, env, &processed_args, evaluator)
-                    }
-                },
-                _ => Err("Not a callable".to_string()),
-            }
-        }
+        SchemeValue::Pair(_, _) => eval_callable(expr, evaluator),
 
         // 4. Other
         _ => Err("eval_logic: unsupported expression type".to_string()),
@@ -218,7 +198,7 @@ pub fn eval_main(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String
 }
 
 /// Evaluate a closure by creating a new environment frame and evaluating the body
-fn eval_closure_logic(
+fn eval_closure(
     params: &[GcRef],
     body: GcRef,
     env: &Rc<RefCell<Frame>>,
@@ -256,7 +236,7 @@ fn eval_closure_logic(
 }
 
 /// Macro handler
-fn eval_macro_logic(
+fn eval_macro(
     params: &[GcRef],
     body: GcRef,
     env: &Rc<RefCell<Frame>>,
@@ -270,7 +250,7 @@ fn eval_macro_logic(
         .env_mut()
         .set_current_frame(new_env.current_frame());
     // Expand the macro
-    //println!("Unexpanded macro: {}", print_scheme_value(&body.value));
+    println!("Unexpanded macro: {}", print_scheme_value(&body.value));
     let expanded = expand_macro(&body, 0, evaluator)?;
     println!("After expansion: {}", print_scheme_value(&expanded.value));
 
@@ -281,6 +261,33 @@ fn eval_macro_logic(
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
+
+pub fn eval_callable(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+    match &expr.value {
+        SchemeValue::Pair(car, cdr) => {
+            let func = eval_main(*car, evaluator)?;
+            match &func.value {
+                SchemeValue::Callable(callable) => match callable {
+                    Callable::Builtin { func, .. } => {
+                        let processed_args = eval_args(cdr, evaluator)?;
+                        func(&mut evaluator.heap, &processed_args)
+                    }
+                    Callable::SpecialForm { func, .. } => func(expr, evaluator),
+                    Callable::Closure { params, body, env } => {
+                        let processed_args = eval_args(cdr, evaluator)?;
+                        eval_closure(params, *body, env, &processed_args, evaluator)
+                    }
+                    Callable::Macro { params, body, env } => {
+                        let processed_args = list_to_vec(*cdr)?;
+                        eval_macro(params, *body, env, &processed_args, evaluator)
+                    }
+                },
+                _ => Err("Not a callable".to_string()),
+            }
+        }
+        _ => Err("Not a callable".to_string()),
+    }
+}
 
 fn eval_args(args: &GcRef, evaluator: &mut Evaluator) -> Result<Vec<GcRef>, String> {
     let mut processed_args = Vec::new();
@@ -296,16 +303,6 @@ fn eval_args(args: &GcRef, evaluator: &mut Evaluator) -> Result<Vec<GcRef>, Stri
         }
     }
     Ok(processed_args)
-}
-
-fn is_macro(func: &GcRef) -> bool {
-    match &func.value {
-        SchemeValue::Callable(callable_type) => match callable_type {
-            Callable::Macro { .. } => true,
-            _ => false,
-        },
-        _ => false,
-    }
 }
 
 pub fn bind_params(

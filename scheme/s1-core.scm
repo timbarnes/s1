@@ -12,7 +12,7 @@
 (define char? (lambda (x) (eq? (type-of x) 'char)))
 (define primitive? (lambda (x) (eq? (type-of x) 'primitive)))
 (define env-frame? (lambda (x) (eq? (type-of x) 'env-frame)))
-(define nil? (lambda (x) (eq? x '())))
+(define null? (lambda (x) (eq? x '())))
 
 ;; List accessor functions (compositions of car and cdr)
 ;; These provide convenient access to nested list elements
@@ -45,7 +45,7 @@
 (define cddddr (lambda (l) (cdr (cdr (cdr (cdr l)))))) ;; Cdr of cdr of cdr of cdr
 
 (define map (lambda (f . lists)
-    (if (nil? args)
+    (if (null? args)
         '()
         (cons (f (car args)) (map f (cdr args))))))
 
@@ -80,8 +80,8 @@
 
 (define map (lambda (f . lists)
   (define any-null? (lambda lsts
-    (cond ((nil? lsts) #f)
-          ((nil? (car lsts)) #t)
+    (cond ((null? lsts) #f)
+          ((null? (car lsts)) #t)
           (else (any-null? (cdr lsts))))))
 
   (define loop (lambda lists

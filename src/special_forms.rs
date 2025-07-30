@@ -2,10 +2,12 @@
 /// Definitions of special forms implemented internally
 ///
 use crate::eval::{
-    Evaluator, deduplicate_symbols_preserve_params, eval_main, eval_symbol, expect_at_least_n_args,
-    expect_n_args, expect_symbol,
+    Evaluator, deduplicate_symbols_preserve_params, eval_callable, eval_main,
+    expect_at_least_n_args, expect_n_args, expect_symbol,
 };
-use crate::gc::{GcHeap, GcRef, SchemeValue, get_nil, list_from_vec, new_macro, new_special_form};
+use crate::gc::{
+    GcHeap, GcRef, SchemeValue, cdr, get_nil, list_from_vec, new_macro, new_special_form,
+};
 use std::collections::HashMap;
 
 enum Ptype {
@@ -33,7 +35,7 @@ macro_rules! register_special_form {
 
 pub fn register_special_forms(heap: &mut GcHeap, env: &mut crate::env::Environment) {
     register_special_form!(heap, env,
-        "eval" => eval_main,
+        "eval" => eval_eval_sf,
         "apply" => apply_sf,
         "trace" => trace_sf,
         "quote" => quote_sf,
@@ -50,13 +52,6 @@ pub fn register_special_forms(heap: &mut GcHeap, env: &mut crate::env::Environme
         "macro" => callable_logic,
     );
 }
-
-// fn quasiquote_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
-//     evaluator.depth -= 1;
-//     let args = expect_n_args(expr, 2)?;
-//     let body = args[1];
-//     crate::macros::expand_macro(&body, 0, evaluator)
-// }
 
 /// Callable logic: create a closure or a macro with captured environment
 /// (lambda (params...) body1 body2 ...) => return closure
@@ -164,11 +159,7 @@ fn eval_eval_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String>
 
 fn apply_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     evaluator.depth -= 1;
-    let args = expect_n_args(expr, 3)?;
-    let func = eval_main(args[1], evaluator)?;
-    let arg = eval_main(args[2], evaluator)?;
-    let argvec = crate::gc::list_to_vec(arg)?;
-    eval_symbol(func, &argvec, evaluator)
+    eval_callable(cdr(expr)?, evaluator)
 }
 
 /// Trace logic: turn the trace function on or off
@@ -432,6 +423,9 @@ pub fn pop_port_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Stri
         _ => Err("pop-port!: expected 0 arguments".to_string()),
     }
 }
+
+/// Utility functions
+///
 
 fn wrap_body_in_begin(body_exprs: Vec<GcRef>, heap: &mut GcHeap) -> GcRef {
     if body_exprs.len() == 1 {

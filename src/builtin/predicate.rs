@@ -34,7 +34,7 @@ pub fn type_of(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
         SchemeValue::Bool(_) => "boolean",
         SchemeValue::Char(_) => "char",
         SchemeValue::Callable(c) => match c {
-            Callable::Primitive { .. } => "builtin",
+            Callable::Builtin { .. } => "builtin",
             Callable::SpecialForm { .. } => "special-form",
             Callable::Closure { .. } => "closure",
             Callable::Macro { .. } => "macro",
@@ -278,7 +278,7 @@ mod tests {
         let nil_val = crate::gc::get_nil(&mut heap);
         let result = type_of(&mut heap, &[nil_val]);
         assert!(result.is_ok());
-        assert_eq!(as_type(&result.unwrap()), "nil");
+        assert_eq!(as_type(&result.unwrap()), "null");
 
         // Test error case: no arguments
         let result = type_of(&mut heap, &[]);
@@ -299,7 +299,7 @@ mod tests {
                 "char" => "char",
                 "primitive" => "primitive",
                 "closure" => "closure",
-                "nil" => "nil",
+                "null" => "null",
                 _ => panic!("unexpected symbol from type_of: {}", s),
             },
             _ => panic!("type_of did not return a symbol"),

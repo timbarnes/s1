@@ -106,13 +106,23 @@ fn expand_list_pair(
         (Expanded::Single(h), Expanded::Single(t)) => {
             Ok(Expanded::Single(new_pair(&mut evaluator.heap, h, t)))
         }
-        (Expanded::Single(h), Expanded::Splice(mut ts)) => {
-            let mut vec = vec![h];
-            vec.append(&mut ts);
-            Ok(Expanded::Splice(vec))
+        (Expanded::Single(h), Expanded::Splice(ts)) => {
+            // When splice occurs in cdr position, create a proper list
+            // instead of propagating the splice upward
+            if ts.is_empty() {
+                // If nothing to splice, just return the head element
+                Ok(Expanded::Single(h))
+            } else {
+                let mut vec = vec![h];
+                vec.extend(ts);
+                Ok(Expanded::Single(list_from_vec(vec, &mut evaluator.heap)))
+            }
         }
         (Expanded::Splice(mut hs), Expanded::Single(t)) => {
-            hs.push(t);
+            // Don't include nil at the end when it comes from empty cdr after splicing
+            if !matches!(t.value, SchemeValue::Nil) {
+                hs.push(t);
+            }
             Ok(Expanded::Splice(hs))
         }
         (Expanded::Splice(mut hs), Expanded::Splice(mut ts)) => {

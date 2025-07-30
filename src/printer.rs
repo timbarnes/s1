@@ -40,7 +40,7 @@ pub fn print_scheme_value(val: &SchemeValue) -> String {
         SchemeValue::Char(c) => format!("#\\{}", c),
         SchemeValue::Nil => "nil".to_string(),
         SchemeValue::Callable(variant) => match variant {
-            Callable::Primitive { doc, .. } => format!("Primitive: {}", doc),
+            Callable::Builtin { doc, .. } => format!("Primitive: {}", doc),
             Callable::SpecialForm { doc, .. } => format!("SpecialForm: {}", doc),
             Callable::Closure { params, body, .. } => print_callable("Closure", params, body),
             Callable::Macro { params, body, .. } => print_callable("Macro", params, body),

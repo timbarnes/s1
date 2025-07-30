@@ -345,7 +345,12 @@
 (test-equal (list + 1 2 3) (m4 + 1 2 3) "macro (m4 + 1 2 3)")
 
 (define m5 (macro x `(append ,@x)))
-(test-equal '(1 2 3 4) (m5 '(1 2) '(3 4)) "macro (m5 '(1 2) '(3 4))")             ; => (list (append (1 2) (3 4))); => 6
+(test-equal '(1 2 3 4) (m5 '(1 2) '(3 4)) "macro (m5 '(1 2) '(3 4))")
+
+(define m6 (macro (test . body) ; => (list (append (1 2) (3 4))); => 6
+    `(if ,test (begin ,@body) nil)))
+(test-equal 22 (m6 #t 22) "macro (m6 #t 11 22)")
+(test-equal nil (m6 #f 22) "macro (m6 #f 22)")
 
 (display "=== All tests completed ===")
 (newline)
