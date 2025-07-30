@@ -263,7 +263,7 @@ pub fn if_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
 /// (cond (test1 expr) [(test 2...)] [(else expr)])
 pub fn cond_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
     evaluator.depth -= 1;
-    let args = expect_n_args(expr, 3)?;
+    let args = expect_at_least_n_args(expr, 2)?;
 
     for clause in &args[1..] {
         match &clause.value {

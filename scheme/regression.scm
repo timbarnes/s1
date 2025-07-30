@@ -157,7 +157,7 @@
 (test-equal 'boolean (type-of #t) "type-of with boolean")
 (test-equal 'boolean (type-of #f) "type-of with boolean")
 (test-equal 'char (type-of #\a) "type-of with character")
-(test-equal #t (eq? 'nil (type-of '())) "type-of with nil")
+(test-equal 'null (type-of ()) "type-of with nil")
 (test-equal 'symbol (type-of 'symbol) "type-of with symbol")
 (test-equal 'pair (type-of '(1 2 3)) "type-of with pair")
 

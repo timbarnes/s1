@@ -39,7 +39,7 @@ pub fn type_of(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
             Callable::Closure { .. } => "closure",
             Callable::Macro { .. } => "macro",
         },
-        SchemeValue::Nil => "nil",
+        SchemeValue::Nil => "null",
         _ => "unknown",
     };
     Ok(get_symbol(heap, type_name))
