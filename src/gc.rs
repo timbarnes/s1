@@ -21,6 +21,7 @@
 
 #![allow(dead_code)]
 
+use crate::eval::Evaluator;
 use num_bigint::BigInt;
 use std::cell::RefCell;
 use std::cmp::PartialEq;
@@ -28,32 +29,15 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-/// Simple Scheme values that use GcRefSimple references.
-/// This is the new system that eliminates Rc<RefCell<T>> overhead.
-pub enum SchemeValue {
-    /// Integer values (arbitrary precision)
-    Int(BigInt),
-    /// Floating-point values (f64)
-    Float(f64),
-    /// Symbols (interned identifiers)
-    Symbol(String),
-    /// Cons cells for building lists and pairs
-    Pair(GcRef, GcRef),
-    /// String literals
-    Str(String),
-    /// Vectors (fixed-size arrays)
-    Vector(Vec<GcRef>),
-    /// Boolean values (#t and #f)
-    Bool(bool),
-    /// Character literals
-    Char(char),
-    /// Built-in procedures (native Rust functions) with doc string
+pub enum Callable {
     Primitive {
         func: fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>,
         doc: String,
-        is_special_form: bool,
     },
-    /// Closures (functions with captured environment)
+    SpecialForm {
+        func: fn(&mut GcHeap, &mut Evaluator) -> Result<GcRef, String>,
+        doc: String,
+    },
     Closure {
         params: Vec<GcRef>,
         body: GcRef,
@@ -64,13 +48,22 @@ pub enum SchemeValue {
         body: GcRef,
         env: Rc<RefCell<crate::env::Frame>>,
     },
-    /// Empty list (nil)
+}
+
+/// Simple Scheme values that use GcRefSimple references.
+/// This is the new system that eliminates Rc<RefCell<T>> overhead.
+pub enum SchemeValue {
+    Int(BigInt),
+    Float(f64),
+    Symbol(String),
+    Pair(GcRef, GcRef),
+    Str(String),
+    Vector(Vec<GcRef>),
+    Bool(bool),
+    Char(char),
+    Callable(Callable),
     Nil,
-    /// Port objects for input/output operations
-    Port {
-        /// Port type and configuration
-        kind: crate::io::PortKind,
-    },
+    Port { kind: crate::io::PortKind },
     // Extend with more types as needed.
 }
 
@@ -97,31 +90,61 @@ impl PartialEq for SchemeValue {
             }
             (SchemeValue::Bool(a), SchemeValue::Bool(b)) => a == b,
             (SchemeValue::Char(a), SchemeValue::Char(b)) => a == b,
-            // For Primitive, just compare type (not function pointer)
-            (SchemeValue::Primitive { .. }, SchemeValue::Primitive { .. }) => true,
-            // For Closure, compare params and body (not env since it's captured)
-            (
-                SchemeValue::Closure {
-                    params: p1,
-                    body: b1,
-                    ..
-                },
-                SchemeValue::Closure {
-                    params: p2,
-                    body: b2,
-                    ..
-                },
-            ) => {
-                if p1.len() != p2.len() {
-                    return false;
+            (SchemeValue::Callable(a), SchemeValue::Callable(b)) => match (a, b) {
+                (Callable::Primitive { func: f1, .. }, Callable::Primitive { func: f2, .. }) => {
+                    f1 == f2
                 }
-                for (param1, param2) in p1.iter().zip(p2.iter()) {
-                    if param1.value != param2.value {
+                (
+                    Callable::SpecialForm { func: f1, .. },
+                    Callable::SpecialForm { func: f2, .. },
+                ) => f1 == f2,
+                (
+                    Callable::Closure {
+                        params: p1,
+                        body: b1,
+                        ..
+                    },
+                    Callable::Closure {
+                        params: p2,
+                        body: b2,
+                        ..
+                    },
+                ) => {
+                    if p1.len() != p2.len() {
                         return false;
                     }
+                    for (param1, param2) in p1.iter().zip(p2.iter()) {
+                        if param1.value != param2.value {
+                            return false;
+                        }
+                    }
+                    b1.value == b2.value
                 }
-                b1.value == b2.value
-            }
+                (
+                    Callable::Macro {
+                        params: p1,
+                        body: b1,
+                        ..
+                    },
+                    Callable::Macro {
+                        params: p2,
+                        body: b2,
+                        ..
+                    },
+                ) => {
+                    if p1.len() != p2.len() {
+                        return false;
+                    }
+                    for (param1, param2) in p1.iter().zip(p2.iter()) {
+                        if param1.value != param2.value {
+                            return false;
+                        }
+                    }
+                    b1.value == b2.value
+                }
+                _ => false,
+            },
+            // For Primitive, just compare type (not function pointer)
             (SchemeValue::Nil, SchemeValue::Nil) => true,
             (SchemeValue::Port { kind: k1 }, SchemeValue::Port { kind: k2 }) => k1 == k2,
             _ => false,
@@ -145,27 +168,30 @@ impl std::fmt::Debug for SchemeValue {
             SchemeValue::Vector(v) => f.debug_tuple("Vector").field(v).finish(),
             SchemeValue::Bool(b) => write!(f, "Bool({})", b),
             SchemeValue::Char(c) => write!(f, "Char({:?})", c),
-            SchemeValue::Primitive { doc, .. } => write!(f, "Primitive({})", doc),
-            SchemeValue::Closure { params, body, .. } => {
-                let param_names: Vec<String> = params
-                    .iter()
-                    .map(|p| match &p.value {
-                        SchemeValue::Symbol(name) => name.clone(),
-                        _ => "?".to_string(),
-                    })
-                    .collect();
-                write!(f, "Closure({:?}, {:?})", param_names, &body.value)
-            }
-            SchemeValue::Macro { params, body, .. } => {
-                let param_names: Vec<String> = params
-                    .iter()
-                    .map(|p| match &p.value {
-                        SchemeValue::Symbol(name) => name.clone(),
-                        _ => "?".to_string(),
-                    })
-                    .collect();
-                write!(f, "Macro({:?}, {:?})", param_names, &body.value)
-            }
+            SchemeValue::Callable(c) => match c {
+                Callable::Primitive { doc, .. } => write!(f, "Primitive({:?})", doc),
+                Callable::SpecialForm { doc, .. } => write!(f, "SpecialForm({:?})", doc),
+                Callable::Macro { params, body, .. } => {
+                    let param_names: Vec<String> = params
+                        .iter()
+                        .map(|p| match &p.value {
+                            SchemeValue::Symbol(name) => name.clone(),
+                            _ => "?".to_string(),
+                        })
+                        .collect();
+                    write!(f, "Macro({:?}, {:?})", param_names, &body.value)
+                }
+                Callable::Closure { params, body, .. } => {
+                    let param_names: Vec<String> = params
+                        .iter()
+                        .map(|p| match &p.value {
+                            SchemeValue::Symbol(name) => name.clone(),
+                            _ => "?".to_string(),
+                        })
+                        .collect();
+                    write!(f, "Closure({:?}, {:?})", param_names, &body.value)
+                }
+            },
             SchemeValue::Nil => write!(f, "Nil"),
             SchemeValue::Port { kind } => write!(f, "Port({:?})", kind),
         }
@@ -448,14 +474,10 @@ pub fn new_primitive(
     heap: &mut GcHeap,
     f: fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>,
     doc: String,
-    is_special_form: bool,
 ) -> GcRef {
+    let primitive = SchemeValue::Callable(Callable::Primitive { func: f, doc });
     let obj = GcObject {
-        value: SchemeValue::Primitive {
-            func: f,
-            doc,
-            is_special_form,
-        },
+        value: primitive,
         marked: false,
     };
     heap.alloc(obj)
@@ -468,8 +490,9 @@ pub fn new_closure(
     body: GcRef,
     env: Rc<RefCell<crate::env::Frame>>,
 ) -> GcRef {
+    let closure = SchemeValue::Callable(Callable::Closure { params, body, env });
     let obj = GcObject {
-        value: SchemeValue::Closure { params, body, env },
+        value: closure,
         marked: false,
     };
     heap.alloc(obj)
@@ -482,8 +505,9 @@ pub fn new_macro(
     body: GcRef,
     env: Rc<RefCell<crate::env::Frame>>,
 ) -> GcRef {
+    let new_macro = SchemeValue::Callable(Callable::Macro { params, body, env });
     let obj = GcObject {
-        value: SchemeValue::Macro { params, body, env },
+        value: new_macro,
         marked: false,
     };
     heap.alloc(obj)
@@ -558,6 +582,7 @@ pub fn list_to_vec(mut list: GcRef) -> Result<Vec<GcRef>, String> {
 }
 
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
 
     #[test]

@@ -302,7 +302,7 @@ impl FileTable {
 
 /// Helper function to read a line from a string port and update its position
 fn read_line_from_string_port(port: &Port) -> Option<(String, Port)> {
-    if let PortKind::StringPortInput { content, pos } = &port.kind {
+    if let PortKind::StringPortInput { content, .. } = &port.kind {
         let current_pos = get_string_port_pos(port).unwrap();
         let mut lines = content.lines();
         // Skip to the current position
@@ -429,7 +429,7 @@ pub fn write_line(port: &Port, file_table: &mut FileTable, line: &str) -> bool {
                 false
             }
         }
-        PortKind::StringPortOutput { content } => {
+        PortKind::StringPortOutput { .. } => {
             // We need to modify the content, so we need a mutable reference
             // This is a limitation of the current design - we'll need to handle this differently
             false
@@ -490,7 +490,7 @@ pub fn read_char(port: &Port, file_table: &mut FileTable) -> Option<char> {
                 None
             }
         }
-        PortKind::StringPortInput { content, pos } => {
+        PortKind::StringPortInput { content, .. } => {
             let current_pos = get_string_port_pos(port).unwrap();
             if current_pos < content.len() {
                 let ch = content.chars().nth(current_pos).unwrap();
@@ -549,7 +549,7 @@ pub fn write_char(port: &Port, file_table: &mut FileTable, ch: char) -> bool {
                 false
             }
         }
-        PortKind::StringPortOutput { content } => {
+        PortKind::StringPortOutput { .. } => {
             // We need to modify the content, so we need a mutable reference
             // This is a limitation of the current design - we'll need to handle this differently
             false
@@ -717,8 +717,6 @@ pub fn extract_port_from_stack_val(port_stack_val: &SchemeValue) -> Result<Port,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::{File, remove_file};
-    use std::io::Write;
 
     #[test]
     fn test_port_conversion() {

@@ -1,14 +1,14 @@
 #![allow(dead_code)]
-mod gc;
-mod io;
-mod parser;
-mod tokenizer;
-
 mod builtin;
 mod env;
 mod eval;
+mod gc;
+mod io;
 mod macros;
+mod parser;
 mod printer;
+mod special_forms;
+mod tokenizer;
 
 //use crate::parser::Parser;
 //use crate::io::{Port, PortKind};
@@ -90,7 +90,7 @@ fn repl(evaluator: &mut Evaluator) {
 
     let mut parser = Parser::new();
     let port_stack_sym = evaluator.heap.intern_symbol("**port-stack**");
-    let mut interactive = false;
+    let mut interactive;
     println!("Welcome to the s1 Scheme REPL");
 
     // Initialize the current port from the top of the stack

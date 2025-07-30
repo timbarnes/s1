@@ -221,12 +221,12 @@ impl Parser {
 }
 
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
-    use crate::gc::SchemeValue;
-    use crate::io::{Port, PortKind};
 
     #[test]
     fn parse_number() {
+        use crate::gc::SchemeValue;
         let mut heap = GcHeap::new();
         let mut port = crate::io::new_string_port_input("42");
         let mut parser = Parser::new();
@@ -244,7 +244,7 @@ mod tests {
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {
-            SchemeValue::Symbol(s) => assert_eq!(s, "hello"),
+            crate::gc::SchemeValue::Symbol(s) => assert_eq!(s, "hello"),
             _ => panic!("Expected symbol, got {:?}", expr.value),
         }
     }
@@ -256,7 +256,7 @@ mod tests {
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {
-            SchemeValue::Str(s) => assert_eq!(s, "hello world"),
+            crate::gc::SchemeValue::Str(s) => assert_eq!(s, "hello world"),
             _ => panic!("Expected string, got {:?}", expr.value),
         }
     }
@@ -268,13 +268,14 @@ mod tests {
         let mut parser = Parser::new();
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {
-            SchemeValue::Nil => assert!(true), // Success
+            crate::gc::SchemeValue::Nil => assert!(true), // Success
             _ => panic!("Expected nil, got {:?}", expr.value),
         }
     }
 
     #[test]
     fn parse_list() {
+        use crate::gc::SchemeValue;
         let mut heap = GcHeap::new();
         let mut port = crate::io::new_string_port_input("(1 2 3)");
         let mut parser = Parser::new();
@@ -289,13 +290,15 @@ mod tests {
                 match &cdr.value {
                     SchemeValue::Pair(car2, cdr2) => {
                         match &car2.value {
-                            SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
+                            crate::gc::SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
                             _ => panic!("Expected integer 2, got {:?}", car2.value),
                         }
                         match &cdr2.value {
-                            SchemeValue::Pair(car3, cdr3) => {
+                            crate::gc::SchemeValue::Pair(car3, cdr3) => {
                                 match &car3.value {
-                                    SchemeValue::Int(i) => assert_eq!(i.to_string(), "3"),
+                                    crate::gc::SchemeValue::Int(i) => {
+                                        assert_eq!(i.to_string(), "3")
+                                    }
                                     _ => panic!("Expected integer 3, got {:?}", car3.value),
                                 }
                                 match &cdr3.value {
@@ -321,19 +324,20 @@ mod tests {
 
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {
-            SchemeValue::Bool(b) => assert_eq!(*b, true),
+            crate::gc::SchemeValue::Bool(b) => assert_eq!(*b, true),
             _ => panic!("Expected true, got {:?}", expr.value),
         }
 
         let expr = parser.parse(&mut heap, &mut port).unwrap();
         match &expr.value {
-            SchemeValue::Bool(b) => assert_eq!(*b, false),
+            crate::gc::SchemeValue::Bool(b) => assert_eq!(*b, false),
             _ => panic!("Expected false, got {:?}", expr.value),
         }
     }
 
     #[test]
     fn parse_character() {
+        use crate::gc::SchemeValue;
         let mut heap = GcHeap::new();
         let mut port = crate::io::new_string_port_input("#\\a #\\space");
         let mut parser = Parser::new();
@@ -353,6 +357,7 @@ mod tests {
 
     #[test]
     fn parse_quoted() {
+        use crate::gc::SchemeValue;
         let mut heap = GcHeap::new();
         let mut port = crate::io::new_string_port_input("'hello");
         let mut parser = Parser::new();
@@ -384,6 +389,7 @@ mod tests {
 
     #[test]
     fn parse_dotted_pair() {
+        use crate::gc::SchemeValue;
         let mut heap = GcHeap::new();
         let mut port = crate::io::new_string_port_input("(1 . 2)");
         let mut parser = Parser::new();
@@ -406,6 +412,7 @@ mod tests {
 
     #[test]
     fn parse_vector() {
+        use crate::gc::SchemeValue;
         let mut heap = GcHeap::new();
         let mut port = crate::io::new_string_port_input("#(1 2 3)");
         let mut parser = Parser::new();
@@ -433,6 +440,7 @@ mod tests {
 
     #[test]
     fn parse_float() {
+        use crate::gc::SchemeValue;
         let mut heap = GcHeap::new();
         let mut port = crate::io::new_string_port_input("3.14");
         let mut parser = Parser::new();

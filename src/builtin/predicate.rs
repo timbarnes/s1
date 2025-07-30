@@ -1,4 +1,4 @@
-use crate::gc::{GcHeap, GcRef, SchemeValue, get_symbol, new_bool};
+use crate::gc::{Callable, GcHeap, GcRef, SchemeValue, get_symbol, new_bool};
 
 pub fn number_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     let arg = args.get(0).ok_or("number?: expected 1 argument")?;
@@ -33,9 +33,12 @@ pub fn type_of(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
         SchemeValue::Vector(_) => "vector",
         SchemeValue::Bool(_) => "boolean",
         SchemeValue::Char(_) => "char",
-        SchemeValue::Primitive { .. } => "primitive",
-        SchemeValue::Closure { .. } => "closure",
-        SchemeValue::Macro { .. } => "macro",
+        SchemeValue::Callable(c) => match c {
+            Callable::Primitive { .. } => "builtin",
+            Callable::SpecialForm { .. } => "special-form",
+            Callable::Closure { .. } => "closure",
+            Callable::Macro { .. } => "macro",
+        },
         SchemeValue::Nil => "nil",
         _ => "unknown",
     };

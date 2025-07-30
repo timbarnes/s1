@@ -1,6 +1,6 @@
+use crate::gc::{GcRef, SchemeValue, new_bool, new_float, new_int};
 use num_bigint::BigInt;
-use num_traits::{ToPrimitive, Zero, One};
-use crate::gc::{GcRef, new_int, new_float, new_bool, SchemeValue};
+use num_traits::{One, ToPrimitive, Zero};
 
 pub fn plus_builtin(heap: &mut crate::gc::GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() < 2 {
@@ -173,7 +173,7 @@ pub fn eq_builtin(heap: &mut crate::gc::GcHeap, args: &[GcRef]) -> Result<GcRef,
     if args.len() < 2 {
         return Err("=: expects at least 2 arguments".to_string());
     }
-    
+
     // Convert all arguments to f64 for comparison
     let mut numbers = Vec::new();
     for arg in args {
@@ -184,11 +184,11 @@ pub fn eq_builtin(heap: &mut crate::gc::GcHeap, args: &[GcRef]) -> Result<GcRef,
         };
         numbers.push(num);
     }
-    
+
     // Check if all numbers are equal
     let first = numbers[0];
     let all_equal = numbers.iter().all(|&n| n == first);
-    
+
     Ok(new_bool(heap, all_equal))
 }
 
@@ -196,7 +196,7 @@ pub fn lt_builtin(heap: &mut crate::gc::GcHeap, args: &[GcRef]) -> Result<GcRef,
     if args.len() < 2 {
         return Err("<: expects at least 2 arguments".to_string());
     }
-    
+
     // Convert all arguments to f64 for comparison
     let mut numbers = Vec::new();
     for arg in args {
@@ -207,7 +207,7 @@ pub fn lt_builtin(heap: &mut crate::gc::GcHeap, args: &[GcRef]) -> Result<GcRef,
         };
         numbers.push(num);
     }
-    
+
     // Check if numbers are in strictly increasing order
     let mut prev = numbers[0];
     for &num in &numbers[1..] {
@@ -216,7 +216,7 @@ pub fn lt_builtin(heap: &mut crate::gc::GcHeap, args: &[GcRef]) -> Result<GcRef,
         }
         prev = num;
     }
-    
+
     Ok(new_bool(heap, true))
 }
 
@@ -224,7 +224,7 @@ pub fn gt_builtin(heap: &mut crate::gc::GcHeap, args: &[GcRef]) -> Result<GcRef,
     if args.len() < 2 {
         return Err(">: expects at least 2 arguments".to_string());
     }
-    
+
     // Convert all arguments to f64 for comparison
     let mut numbers = Vec::new();
     for arg in args {
@@ -235,7 +235,7 @@ pub fn gt_builtin(heap: &mut crate::gc::GcHeap, args: &[GcRef]) -> Result<GcRef,
         };
         numbers.push(num);
     }
-    
+
     // Check if numbers are in strictly decreasing order
     let mut prev = numbers[0];
     for &num in &numbers[1..] {
@@ -244,17 +244,17 @@ pub fn gt_builtin(heap: &mut crate::gc::GcHeap, args: &[GcRef]) -> Result<GcRef,
         }
         prev = num;
     }
-    
+
     Ok(new_bool(heap, true))
 }
 
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
-    use crate::gc::GcHeap;
 
     #[test]
     fn test_plus_builtin() {
-        let mut heap = GcHeap::new();
+        let mut heap = crate::gc::GcHeap::new();
         let args = vec![
             new_int(&mut heap, BigInt::from(1)),
             new_int(&mut heap, BigInt::from(2)),
@@ -269,7 +269,7 @@ mod tests {
 
     #[test]
     fn test_minus_builtin() {
-        let mut heap = GcHeap::new();
+        let mut heap = crate::gc::GcHeap::new();
         let args = vec![
             new_int(&mut heap, BigInt::from(10)),
             new_int(&mut heap, BigInt::from(3)),
@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn test_times_builtin() {
-        let mut heap = GcHeap::new();
+        let mut heap = crate::gc::GcHeap::new();
         let args = vec![
             new_int(&mut heap, BigInt::from(2)),
             new_int(&mut heap, BigInt::from(3)),
@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn test_div_builtin() {
-        let mut heap = GcHeap::new();
+        let mut heap = crate::gc::GcHeap::new();
         let args = vec![
             new_int(&mut heap, BigInt::from(10)),
             new_int(&mut heap, BigInt::from(2)),
@@ -312,7 +312,7 @@ mod tests {
 
     #[test]
     fn test_mod_builtin() {
-        let mut heap = GcHeap::new();
+        let mut heap = crate::gc::GcHeap::new();
         let args = vec![
             new_int(&mut heap, BigInt::from(7)),
             new_int(&mut heap, BigInt::from(3)),
@@ -326,8 +326,8 @@ mod tests {
 
     #[test]
     fn test_eq_builtin() {
-        let mut heap = GcHeap::new();
-        
+        let mut heap = crate::gc::GcHeap::new();
+
         // Test equal integers
         let args = vec![
             new_int(&mut heap, BigInt::from(5)),
@@ -335,7 +335,7 @@ mod tests {
         ];
         let result = eq_builtin(&mut heap, &args).unwrap();
         assert!(matches!(&result.value, SchemeValue::Bool(true)));
-        
+
         // Test unequal integers
         let args = vec![
             new_int(&mut heap, BigInt::from(5)),
@@ -343,7 +343,7 @@ mod tests {
         ];
         let result = eq_builtin(&mut heap, &args).unwrap();
         assert!(matches!(&result.value, SchemeValue::Bool(false)));
-        
+
         // Test mixed int and float
         let args = vec![
             new_int(&mut heap, BigInt::from(5)),
@@ -351,7 +351,7 @@ mod tests {
         ];
         let result = eq_builtin(&mut heap, &args).unwrap();
         assert!(matches!(&result.value, SchemeValue::Bool(true)));
-        
+
         // Test multiple equal values
         let args = vec![
             new_int(&mut heap, BigInt::from(5)),
@@ -360,7 +360,7 @@ mod tests {
         ];
         let result = eq_builtin(&mut heap, &args).unwrap();
         assert!(matches!(&result.value, SchemeValue::Bool(true)));
-        
+
         // Test multiple unequal values
         let args = vec![
             new_int(&mut heap, BigInt::from(5)),
@@ -373,8 +373,8 @@ mod tests {
 
     #[test]
     fn test_lt_builtin() {
-        let mut heap = GcHeap::new();
-        
+        let mut heap = crate::gc::GcHeap::new();
+
         // Test strictly increasing integers
         let args = vec![
             new_int(&mut heap, BigInt::from(1)),
@@ -383,7 +383,7 @@ mod tests {
         ];
         let result = lt_builtin(&mut heap, &args).unwrap();
         assert!(matches!(&result.value, SchemeValue::Bool(true)));
-        
+
         // Test not strictly increasing
         let args = vec![
             new_int(&mut heap, BigInt::from(1)),
@@ -392,7 +392,7 @@ mod tests {
         ];
         let result = lt_builtin(&mut heap, &args).unwrap();
         assert!(matches!(&result.value, SchemeValue::Bool(false)));
-        
+
         // Test mixed int and float
         let args = vec![
             new_int(&mut heap, BigInt::from(1)),
@@ -401,7 +401,7 @@ mod tests {
         ];
         let result = lt_builtin(&mut heap, &args).unwrap();
         assert!(matches!(&result.value, SchemeValue::Bool(true)));
-        
+
         // Test decreasing sequence
         let args = vec![
             new_int(&mut heap, BigInt::from(3)),
@@ -414,8 +414,8 @@ mod tests {
 
     #[test]
     fn test_gt_builtin() {
-        let mut heap = GcHeap::new();
-        
+        let mut heap = crate::gc::GcHeap::new();
+
         // Test strictly decreasing integers
         let args = vec![
             new_int(&mut heap, BigInt::from(3)),
@@ -424,7 +424,7 @@ mod tests {
         ];
         let result = gt_builtin(&mut heap, &args).unwrap();
         assert!(matches!(&result.value, SchemeValue::Bool(true)));
-        
+
         // Test not strictly decreasing
         let args = vec![
             new_int(&mut heap, BigInt::from(3)),
@@ -433,7 +433,7 @@ mod tests {
         ];
         let result = gt_builtin(&mut heap, &args).unwrap();
         assert!(matches!(&result.value, SchemeValue::Bool(false)));
-        
+
         // Test mixed int and float
         let args = vec![
             new_int(&mut heap, BigInt::from(3)),
@@ -442,7 +442,7 @@ mod tests {
         ];
         let result = gt_builtin(&mut heap, &args).unwrap();
         assert!(matches!(&result.value, SchemeValue::Bool(true)));
-        
+
         // Test increasing sequence
         let args = vec![
             new_int(&mut heap, BigInt::from(1)),
@@ -452,4 +452,4 @@ mod tests {
         let result = gt_builtin(&mut heap, &args).unwrap();
         assert!(matches!(&result.value, SchemeValue::Bool(false)));
     }
-} 
+}

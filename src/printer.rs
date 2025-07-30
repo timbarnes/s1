@@ -1,5 +1,5 @@
 // Only keep this function for pretty-printing SchemeValueSimple:
-use crate::gc::{GcObject, SchemeValue};
+use crate::gc::{Callable, GcObject, SchemeValue};
 
 pub fn print_scheme_value(val: &SchemeValue) -> String {
     match val {
@@ -39,8 +39,12 @@ pub fn print_scheme_value(val: &SchemeValue) -> String {
         SchemeValue::Bool(false) => "#f".to_string(),
         SchemeValue::Char(c) => format!("#\\{}", c),
         SchemeValue::Nil => "nil".to_string(),
-        SchemeValue::Closure { params, body, .. } => print_callable("Closure", params, *body),
-        SchemeValue::Macro { params, body, .. } => print_callable("Macro", params, *body),
+        SchemeValue::Callable(variant) => match variant {
+            Callable::Primitive { doc, .. } => format!("Primitive: {}", doc),
+            Callable::SpecialForm { doc, .. } => format!("SpecialForm: {}", doc),
+            Callable::Closure { params, body, .. } => print_callable("Closure", params, body),
+            Callable::Macro { params, body, .. } => print_callable("Macro", params, body),
+        },
         _ => format!("{:?}", val),
     }
 }

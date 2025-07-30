@@ -160,12 +160,12 @@ pub fn append_builtin(heap: &mut crate::gc::GcHeap, args: &[GcRef]) -> Result<Gc
 }
 
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
-    use crate::gc::GcHeap;
 
     #[test]
     fn test_car_builtin() {
-        let mut heap = GcHeap::new();
+        let mut heap = crate::gc::GcHeap::new();
 
         // Create a pair
         let car = crate::gc::new_int(&mut heap, num_bigint::BigInt::from(1));
@@ -190,7 +190,7 @@ mod tests {
 
     #[test]
     fn test_cdr_builtin() {
-        let mut heap = GcHeap::new();
+        let mut heap = crate::gc::GcHeap::new();
 
         // Create a pair
         let car = crate::gc::new_int(&mut heap, num_bigint::BigInt::from(1));
@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn test_cons_builtin() {
-        let mut heap = GcHeap::new();
+        let mut heap = crate::gc::GcHeap::new();
 
         let car = crate::gc::new_int(&mut heap, num_bigint::BigInt::from(1));
         let cdr = crate::gc::new_int(&mut heap, num_bigint::BigInt::from(2));
@@ -232,7 +232,7 @@ mod tests {
 
     #[test]
     fn test_list_builtin() {
-        let mut heap = GcHeap::new();
+        let mut heap = crate::gc::GcHeap::new();
 
         // Test empty list
         let result = list_builtin(&mut heap, &[]).unwrap();
@@ -253,7 +253,7 @@ mod tests {
 
     #[test]
     fn test_append_builtin() {
-        let mut heap = GcHeap::new();
+        let mut heap = crate::gc::GcHeap::new();
 
         // Test empty arguments
         let result = append_builtin(&mut heap, &[]).unwrap();
