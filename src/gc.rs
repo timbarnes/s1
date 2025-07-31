@@ -34,7 +34,7 @@ pub enum Callable {
         doc: String,
     },
     SpecialForm {
-        func: fn(GcRef, &mut Evaluator) -> Result<GcRef, String>,
+        func: fn(GcRef, &mut Evaluator, bool) -> Result<GcRef, String>,
         doc: String,
     },
     Closure {
@@ -484,7 +484,7 @@ pub fn new_primitive(
 /// Create a new special form.
 pub fn new_special_form(
     heap: &mut GcHeap,
-    f: fn(GcRef, &mut Evaluator) -> Result<GcRef, String>,
+    f: fn(GcRef, &mut Evaluator, bool) -> Result<GcRef, String>,
     doc: String,
 ) -> GcRef {
     let primitive = SchemeValue::Callable(Callable::SpecialForm { func: f, doc });

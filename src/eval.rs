@@ -128,7 +128,7 @@ impl Evaluator {
                 Err(ParseError::Eof) => return Ok(last_result),
                 Ok(expr) => {
                     let expr = crate::eval::deduplicate_symbols(expr, &mut self.heap);
-                    last_result = eval_main(expr, self)?;
+                    last_result = eval_main(expr, self, false)?;
                 }
             }
         }
@@ -162,7 +162,7 @@ pub fn eval_symbol(
 }
 
 /// Main evaluation walker - handles self-evaluating forms, symbol resolution, and nested calls
-pub fn eval_main(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+pub fn eval_main(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
     evaluator.depth += 1;
 
     if evaluator.trace > evaluator.depth {
@@ -177,7 +177,7 @@ pub fn eval_main(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String
         if let SchemeValue::Callable(Callable::Closure { params, body, env }) =
             &tail_call.func.value
         {
-            return eval_closure(params, *body, env, &tail_call.args, evaluator);
+            return eval_closure(params, *body, env, &tail_call.args, evaluator, tail);
         } else {
             return Err("Invalid tail call: function is not a closure".to_string());
         }
@@ -197,7 +197,7 @@ pub fn eval_main(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String
         SchemeValue::Symbol(_) => eval_symbol(expr, &[], evaluator),
 
         // 3. Pairs (function or macro call)
-        SchemeValue::Pair(_, _) => eval_callable(expr, evaluator),
+        SchemeValue::Pair(_, _) => eval_callable(expr, evaluator, tail),
 
         // 4. Other
         _ => Err("eval_logic: unsupported expression type".to_string()),
@@ -211,6 +211,7 @@ fn eval_closure(
     env: &Rc<RefCell<Frame>>,
     args: &[GcRef],
     evaluator: &mut Evaluator,
+    tail: bool,
 ) -> Result<GcRef, String> {
     // Create a new environment extending the captured environment
     let new_env = bind_params(params, args, env, evaluator.heap_mut())?;
@@ -221,10 +222,10 @@ fn eval_closure(
         .set_current_frame(new_env.current_frame());
 
     // Check if the body is a tail call
-    if let Ok(true) = is_tail_call(body, evaluator) {
+    if tail {
         // Extract function and arguments from the call
         if let SchemeValue::Pair(func_expr, args_expr) = &body.value {
-            let func = eval_main(*func_expr, evaluator)?;
+            let func = eval_main(*func_expr, evaluator, false)?;
             let args = eval_args(args_expr, evaluator)?;
 
             // Set up tail call optimization
@@ -237,7 +238,7 @@ fn eval_closure(
     }
 
     // Evaluate the body in the new environment
-    let result = eval_main(body, evaluator);
+    let result = eval_main(body, evaluator, tail);
 
     // Restore the original environment
     evaluator.env_mut().set_current_frame(original_env);
@@ -265,27 +266,28 @@ fn eval_macro(
     println!("After expansion: {}", print_scheme_value(&expanded.value));
 
     evaluator.env_mut().set_current_frame(original_env);
-    eval_main(expanded, evaluator)
+    // Review for tail recursion
+    eval_main(expanded, evaluator, false)
 }
 
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 
-pub fn eval_callable(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+pub fn eval_callable(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
     match &expr.value {
         SchemeValue::Pair(car, cdr) => {
-            let func = eval_main(*car, evaluator)?;
+            let func = eval_main(*car, evaluator, tail)?;
             match &func.value {
                 SchemeValue::Callable(callable) => match callable {
                     Callable::Builtin { func, .. } => {
                         let processed_args = eval_args(cdr, evaluator)?;
                         func(&mut evaluator.heap, &processed_args)
                     }
-                    Callable::SpecialForm { func, .. } => func(expr, evaluator),
+                    Callable::SpecialForm { func, .. } => func(expr, evaluator, tail),
                     Callable::Closure { params, body, env } => {
                         let processed_args = eval_args(cdr, evaluator)?;
-                        eval_closure(params, *body, env, &processed_args, evaluator)
+                        eval_closure(params, *body, env, &processed_args, evaluator, tail)
                     }
                     Callable::Macro { params, body, env } => {
                         let processed_args = list_to_vec(*cdr)?;
@@ -306,7 +308,7 @@ fn eval_args(args: &GcRef, evaluator: &mut Evaluator) -> Result<Vec<GcRef>, Stri
         match &current.value {
             SchemeValue::Nil => break,
             SchemeValue::Pair(arg, next) => {
-                processed_args.push(eval_main(*arg, evaluator)?);
+                processed_args.push(eval_main(*arg, evaluator, false)?);
                 current = *next;
             }
             _ => return Err("Improper list in function call".to_string()),
@@ -435,22 +437,6 @@ fn is_special_form(func: GcRef) -> Option<&'static str> {
             _ => None,
         },
         _ => None,
-    }
-}
-
-/// Check if an expression is a tail call (function call in tail position)
-/// Only optimize calls to user-defined functions (closures), not primitives
-fn is_tail_call(expr: GcRef, evaluator: &mut Evaluator) -> Result<bool, String> {
-    match &expr.value {
-        SchemeValue::Pair(car, _) => {
-            // Evaluate the function to see what it is
-            let func = eval_main(*car, evaluator)?;
-            match &func.value {
-                SchemeValue::Callable(Callable::Closure { .. }) => Ok(true),
-                _ => Ok(false), // Don't optimize primitives, special forms, or macros
-            }
-        }
-        _ => Ok(false), // Not a function call
     }
 }
 
@@ -670,7 +656,7 @@ mod tests {
             let heap = evaluator.heap_mut();
             int_val = new_int(heap, num_bigint::BigInt::from(42));
         }
-        let result = eval_main(int_val, &mut evaluator).unwrap();
+        let result = eval_main(int_val, &mut evaluator, false).unwrap();
         assert_eq!(result.value, int_val.value);
     }
 
@@ -685,7 +671,7 @@ mod tests {
             symbol = get_symbol(heap, "x");
         }
         evaluator.env_mut().set_symbol(symbol, value);
-        let result = eval_main(symbol, &mut evaluator).unwrap();
+        let result = eval_main(symbol, &mut evaluator, false).unwrap();
         assert_eq!(result.value, value.value);
     }
 
@@ -724,7 +710,7 @@ mod tests {
             expr = new_pair(heap, plus_sym, args);
         }
         evaluator.env_mut().set_symbol(plus_sym, plus);
-        let result = eval_main(expr, &mut evaluator).unwrap();
+        let result = eval_main(expr, &mut evaluator, false).unwrap();
         match &result.value {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "5"),
             _ => panic!("Expected integer result"),
@@ -769,7 +755,7 @@ mod tests {
         }
         evaluator.env_mut().set_symbol(plus_sym, plus);
         evaluator.env_mut().set_symbol(star_sym, times);
-        let result = eval_main(expr, &mut evaluator).unwrap();
+        let result = eval_main(expr, &mut evaluator, false).unwrap();
         match &result.value {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "54"),
             _ => panic!("Expected integer result"),
@@ -845,7 +831,7 @@ mod tests {
         }
         evaluator.env_mut().set_symbol(star_sym, times);
         evaluator.env_mut().set_symbol(plus_sym, plus);
-        let result = eval_main(expr, &mut evaluator).unwrap();
+        let result = eval_main(expr, &mut evaluator, false).unwrap();
         match &result.value {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "10"),
             _ => panic!("Expected integer result"),
@@ -900,7 +886,7 @@ mod tests {
         evaluator.env_mut().set_symbol(plus_sym, plus);
         evaluator.env_mut().set_symbol(times_sym, times);
         evaluator.env_mut().set_symbol(minus_sym, minus);
-        let result = eval_main(expr, &mut evaluator).unwrap();
+        let result = eval_main(expr, &mut evaluator, false).unwrap();
         match &result.value {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "-1"),
             _ => panic!("Expected integer result"),
@@ -921,7 +907,7 @@ mod tests {
             expr = new_pair(heap, quote_sym, sym_list);
             // quoted = sym;
         }
-        let result = eval_main(expr, &mut evaluator).unwrap();
+        let result = eval_main(expr, &mut evaluator, false).unwrap();
         match &result.value {
             SchemeValue::Symbol(s) => assert_eq!(s, "foo"),
             _ => panic!("Expected quoted symbol"),
@@ -941,7 +927,7 @@ mod tests {
             expr2 = new_pair(heap, quote_sym, foo_bar_list_pair);
             // let quoted_list = foo_bar_list;
         }
-        let result2 = eval_main(expr2, &mut evaluator).unwrap();
+        let result2 = eval_main(expr2, &mut evaluator, false).unwrap();
         match &result2.value {
             SchemeValue::Pair(_, _) => (),
             _ => panic!("Expected quoted list"),
@@ -980,7 +966,7 @@ mod tests {
             expr = new_pair(heap, begin_sym, begin_args);
         }
         evaluator.env_mut().set_symbol(plus_sym, plus);
-        let result = eval_main(expr, &mut evaluator).unwrap();
+        let result = eval_main(expr, &mut evaluator, false).unwrap();
         match &result.value {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "3"),
             _ => panic!("Expected integer result from begin"),
@@ -1002,7 +988,7 @@ mod tests {
             let define_sym = get_symbol(heap, "define");
             expr = new_pair(heap, define_sym, args);
         }
-        let result = eval_main(expr, &mut evaluator).unwrap();
+        let result = eval_main(expr, &mut evaluator, false).unwrap();
         match &result.value {
             SchemeValue::Symbol(s) => assert_eq!(s.to_string(), "y"),
             _ => panic!("Expected symbol result"),
@@ -1039,12 +1025,12 @@ mod tests {
             let f_pair = new_pair(heap, f, one_pair2);
             expr_false = new_pair(heap, if_sym, f_pair);
         }
-        let result_true = eval_main(expr_true, &mut evaluator).unwrap();
+        let result_true = eval_main(expr_true, &mut evaluator, false).unwrap();
         match &result_true.value {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
             _ => panic!("Expected integer result for true branch"),
         }
-        let result_false = eval_main(expr_false, &mut evaluator).unwrap();
+        let result_false = eval_main(expr_false, &mut evaluator, false).unwrap();
         match &result_false.value {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
             _ => panic!("Expected integer result for false branch"),
@@ -1060,7 +1046,7 @@ mod tests {
             let and_sym = get_symbol(heap, "and");
             let nil = heap.nil_s();
             let and_empty = new_pair(heap, and_sym, nil);
-            let result = eval_main(and_empty, &mut evaluator).unwrap();
+            let result = eval_main(and_empty, &mut evaluator, false).unwrap();
             assert!(matches!(&result.value, SchemeValue::Bool(true)));
         }
         // (and #t 1 2)
@@ -1076,7 +1062,7 @@ mod tests {
             let one_pair = new_pair(heap, one, two_pair);
             let t_pair = new_pair(heap, t, one_pair);
             let and_expr = new_pair(heap, and_sym, t_pair);
-            let result = eval_main(and_expr, &mut evaluator).unwrap();
+            let result = eval_main(and_expr, &mut evaluator, false).unwrap();
             match &result.value {
                 SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
                 _ => panic!("Expected integer result for and"),
@@ -1095,7 +1081,7 @@ mod tests {
             let f_pair = new_pair(heap, f, two_pair);
             let t_pair2 = new_pair(heap, t, f_pair);
             let and_expr2 = new_pair(heap, and_sym, t_pair2);
-            let result = eval_main(and_expr2, &mut evaluator).unwrap();
+            let result = eval_main(and_expr2, &mut evaluator, false).unwrap();
             assert!(matches!(&result.value, SchemeValue::Bool(false)));
         }
         // (or)
@@ -1105,7 +1091,7 @@ mod tests {
             let or_sym = get_symbol(heap, "or");
             let nil = heap.nil_s();
             let or_empty = new_pair(heap, or_sym, nil);
-            let result = eval_main(or_empty, &mut evaluator).unwrap();
+            let result = eval_main(or_empty, &mut evaluator, false).unwrap();
             assert!(matches!(&result.value, SchemeValue::Bool(false)));
         }
         // (or #f 1 2)
@@ -1121,7 +1107,7 @@ mod tests {
             let one_pair = new_pair(heap, one, two_pair);
             let f_pair = new_pair(heap, f, one_pair);
             let or_expr = new_pair(heap, or_sym, f_pair);
-            let result = eval_main(or_expr, &mut evaluator).unwrap();
+            let result = eval_main(or_expr, &mut evaluator, false).unwrap();
             match &result.value {
                 SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
                 _ => panic!("Expected integer result for or"),
@@ -1139,7 +1125,7 @@ mod tests {
             let f_pair2 = new_pair(heap, f, two_pair);
             let f_pair3 = new_pair(heap, f, f_pair2);
             let or_expr2 = new_pair(heap, or_sym, f_pair3);
-            let result = eval_main(or_expr2, &mut evaluator).unwrap();
+            let result = eval_main(or_expr2, &mut evaluator, false).unwrap();
             match &result.value {
                 SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
                 _ => panic!("Expected integer result for or"),
@@ -1156,7 +1142,7 @@ mod tests {
             let f_pair2 = new_pair(heap, f, f_pair);
             let f_pair3 = new_pair(heap, f, f_pair2);
             let or_expr3 = new_pair(heap, or_sym, f_pair3);
-            let result = eval_main(or_expr3, &mut evaluator).unwrap();
+            let result = eval_main(or_expr3, &mut evaluator, false).unwrap();
             assert!(matches!(&result.value, SchemeValue::Bool(false)));
         }
     }
@@ -1202,7 +1188,7 @@ mod tests {
         }
 
         // Evaluate the lambda to create a closure
-        add1 = eval_main(lambda_expr, &mut evaluator).unwrap();
+        add1 = eval_main(lambda_expr, &mut evaluator, false).unwrap();
 
         // Verify it's a closure
         match &add1.value {
@@ -1244,7 +1230,7 @@ mod tests {
         }
 
         // Evaluate the application
-        result = eval_main(apply_expr, &mut evaluator).unwrap();
+        result = eval_main(apply_expr, &mut evaluator, false).unwrap();
 
         // Should return 6
         match &result.value {
@@ -1306,7 +1292,7 @@ mod tests {
         }
 
         // Evaluate the application
-        result = eval_main(apply_expr, &mut evaluator).unwrap();
+        result = eval_main(apply_expr, &mut evaluator, false).unwrap();
 
         // Should return 7
         match &result.value {
@@ -1598,7 +1584,7 @@ mod tests {
         }
 
         // This should work because we're using the same interned symbol
-        let result = eval_main(apply_expr, &mut evaluator).unwrap();
+        let result = eval_main(apply_expr, &mut evaluator, false).unwrap();
         match &result.value {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "6"),
             _ => panic!("Expected integer result"),
@@ -1614,7 +1600,7 @@ mod tests {
 
         // Test that is_tail_call is conservative (returns false)
         let test_expr = new_int(evaluator.heap_mut(), num_bigint::BigInt::from(42));
-        assert!(!is_tail_call(test_expr, &mut evaluator).unwrap());
+        //assert!(!is_tail_call(test_expr, &mut evaluator).unwrap());
 
         // Test that we can set a tail call (even though it's not used)
         evaluator.tail_call = Some(TailCall {

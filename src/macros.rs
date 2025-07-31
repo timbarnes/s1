@@ -69,7 +69,7 @@ fn expand_list_pair(
             "unquote" => {
                 let body = list_ref(expr, 1)?;
                 if depth == 1 {
-                    let val = eval_main(&body, evaluator)?;
+                    let val = eval_main(&body, evaluator, false)?;
                     return Ok(Expanded::Single(val));
                 } else {
                     let inner = expand_macro_internal(&body, depth - 1, evaluator)?;
@@ -79,7 +79,7 @@ fn expand_list_pair(
             "unquote-splicing" => {
                 let body = list_ref(expr, 1)?;
                 if depth == 1 {
-                    let val = eval_main(&body, evaluator)?;
+                    let val = eval_main(&body, evaluator, false)?;
                     if let SchemeValue::Pair(_, _) = &val.value {
                         // Proper list: flatten it
                         let vec = list_to_vec(&val)?;

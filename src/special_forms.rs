@@ -63,7 +63,7 @@ pub fn register_special_forms(heap: &mut GcHeap, env: &mut crate::env::Environme
 ///     - a vec with a single entry, meaning variadic arguments bound as a list
 ///     - a vec with multiple entries following a nil first entry, meaning named arguments
 ///     - a vec with variadic arguments bound as a list and named arguments
-fn callable_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn callable_logic(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
     // (lambda params body ..)
     use crate::gc::new_closure;
     //use crate::gc_util::{list_from_vec, list_to_vec};
@@ -152,25 +152,25 @@ fn callable_logic(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Strin
     }
 }
 
-fn eval_eval_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn eval_eval_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     let args = expect_n_args(expr, 2)?;
-    let result = eval_main(args[1], evaluator)?;
-    eval_main(result, evaluator)
+    let result = eval_main(args[1], evaluator, tail)?;
+    eval_main(result, evaluator, tail)
 }
 
-fn apply_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn apply_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
     evaluator.depth -= 1;
-    eval_callable(cdr(expr)?, evaluator)
+    eval_callable(cdr(expr)?, evaluator, tail)
 }
 
 /// Trace logic: turn the trace function on or off
 /// This function takes an integer value, and sets evaluator.trace to match the argument.
-fn trace_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn trace_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
     use num_traits::ToPrimitive;
     evaluator.depth -= 1;
     let args = expect_n_args(expr, 2)?;
-    let trace_val = eval_main(args[1], evaluator)?;
+    let trace_val = eval_main(args[1], evaluator, true)?;
     match &trace_val.value {
         SchemeValue::Int(v) => match v.to_i32() {
             Some(value) => {
@@ -184,7 +184,7 @@ fn trace_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
 }
 
 /// Quote logic: return first argument unevaluated
-fn quote_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn quote_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
     // (quote x) => return x unevaluated
     evaluator.depth -= 1;
     match &expr.value {
@@ -197,7 +197,7 @@ fn quote_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
 }
 
 /// (begin form1 ..)
-fn begin_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn begin_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
     // (begin expr1 expr2 ... exprN) => evaluate each in sequence, return last
     evaluator.depth -= 1;
     match &expr.value {
@@ -208,7 +208,8 @@ fn begin_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
                 match &current.value {
                     SchemeValue::Nil => break,
                     SchemeValue::Pair(car, next) => {
-                        last_result = Some(eval_main(*car, evaluator)?);
+                        // need to recognize last element for tail recursion
+                        last_result = Some(eval_main(*car, evaluator, false)?);
                         current = *next;
                     }
                     _ => return Err("Malformed begin: improper list".to_string()),
@@ -221,29 +222,29 @@ fn begin_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
 }
 
 /// (define sym expr)
-pub fn define_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+pub fn define_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
     // (define symbol expr)
     let args = expect_n_args(expr, 3)?; // including 'define
     let sym = expect_symbol(&args[1])?;
-    let value = eval_main(args[2], evaluator)?;
+    let value = eval_main(args[2], evaluator, tail)?;
     evaluator.env_mut().set_symbol(sym, value);
     Ok(sym)
 }
 
 /// (if test consequent alternate)
 /// Requires three arguments.
-pub fn if_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+pub fn if_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     // (if test consequent [alternate])
     let args = expect_at_least_n_args(expr, 2)?;
-    let test = eval_main(args[1], evaluator)?;
+    let test = eval_main(args[1], evaluator, false)?;
     match test.value {
         SchemeValue::Bool(val) => {
             if val {
-                return eval_main(args[2], evaluator);
+                return eval_main(args[2], evaluator, tail);
             } else {
                 if args.len() == 4 {
-                    return eval_main(args[3], evaluator);
+                    return eval_main(args[3], evaluator, tail);
                 } else {
                     return Ok(get_nil(&mut evaluator.heap));
                 }
@@ -254,7 +255,7 @@ pub fn if_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
 }
 
 /// (cond (test1 expr) [(test 2...)] [(else expr)])
-pub fn cond_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+pub fn cond_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     let args = expect_at_least_n_args(expr, 2)?;
 
@@ -264,7 +265,7 @@ pub fn cond_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> 
                 let test_result = match &test.value {
                     SchemeValue::Symbol(s) if s == "else" => true,
                     _ => {
-                        let evaluated = eval_main(test, evaluator)?;
+                        let evaluated = eval_main(test, evaluator, tail)?;
                         !matches!(evaluated.value, SchemeValue::Bool(false))
                     }
                 };
@@ -274,7 +275,7 @@ pub fn cond_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> 
                     let mut result = get_nil(&mut evaluator.heap);
                     let mut current = *body;
                     while let SchemeValue::Pair(car, cdr) = &current.value {
-                        result = eval_main(car, evaluator)?;
+                        result = eval_main(car, evaluator, false)?;
                         current = cdr;
                     }
                     return Ok(result);
@@ -289,7 +290,7 @@ pub fn cond_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> 
 
 /// (and expr1 expr2 ... exprN)
 /// Stops on first false value
-pub fn and_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+pub fn and_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     // (and expr1 expr2 ... exprN)
     match &expr.value {
@@ -300,7 +301,8 @@ pub fn and_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
                 match &current.value {
                     SchemeValue::Nil => break,
                     SchemeValue::Pair(car, next) => {
-                        let val = eval_main(*car, evaluator)?;
+                        // Review for tail recursion
+                        let val = eval_main(*car, evaluator, false)?;
                         match &val.value {
                             SchemeValue::Bool(false) => return Ok(val),
                             _ => last = val,
@@ -318,7 +320,7 @@ pub fn and_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
 
 /// (or expr1 expr2 ... exprN)
 /// Stops on first true value
-pub fn or_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+pub fn or_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     // (or expr1 expr2 ... exprN)
     match &expr.value {
@@ -328,7 +330,8 @@ pub fn or_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
                 match &current.value {
                     SchemeValue::Nil => break,
                     SchemeValue::Pair(car, next) => {
-                        let val = eval_main(*car, evaluator)?;
+                        // Review for tail recursion
+                        let val = eval_main(*car, evaluator, false)?;
                         match &val.value {
                             SchemeValue::Bool(false) => current = *next,
                             _ => return Ok(val),
@@ -345,11 +348,11 @@ pub fn or_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
 
 /// (set! sym expr)
 /// sym must have been previously defined.
-pub fn set_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+pub fn set_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     let args = expect_n_args(expr, 3)?;
     let sym = expect_symbol(&args[1])?;
-    let value = eval_main(args[2], evaluator)?;
+    let value = eval_main(args[2], evaluator, tail)?;
 
     if evaluator.env().get_symbol(sym).is_some() {
         evaluator.env_mut().set_symbol(sym, value);
@@ -369,7 +372,7 @@ pub fn set_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
 /// let mut evaluator = Evaluator::new();
 /// evaluator.push_port("example.txt");
 /// ```
-pub fn push_port_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+pub fn push_port_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
     // (push-port! port)
     evaluator.depth -= 1;
     match &expr.value {
@@ -378,7 +381,7 @@ pub fn push_port_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Str
             match &cdr.value {
                 SchemeValue::Pair(arg, _) => {
                     // Evaluate the argument to get the port value
-                    let port = eval_main(*arg, evaluator)?;
+                    let port = eval_main(*arg, evaluator, true)?;
                     let port_stack_sym = evaluator.heap.intern_symbol("**port-stack**");
                     let current_stack = evaluator
                         .env()
@@ -396,7 +399,7 @@ pub fn push_port_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Str
     }
 }
 
-pub fn pop_port_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+pub fn pop_port_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
     // (pop-port!)
     use crate::gc::SchemeValue;
     evaluator.depth -= 1;
@@ -426,10 +429,10 @@ pub fn pop_port_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, Stri
     }
 }
 
-fn with_timer_sf(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+fn with_timer_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
     let args = expect_n_args(expr, 2)?;
     let timer = Instant::now();
-    eval_main(args[1], evaluator)?;
+    eval_main(args[1], evaluator, tail)?;
     let elapsed_time = timer.elapsed().as_secs_f64();
     let time = new_float(&mut evaluator.heap, elapsed_time);
     Ok(time)
