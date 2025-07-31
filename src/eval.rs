@@ -169,62 +169,45 @@ pub fn eval_main(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<G
         for _ in 1..evaluator.depth {
             print!(">");
         }
-        println!("{}", print_scheme_value(&expr.value));
+        println!(" {}", print_scheme_value(&expr.value));
     }
 
-    match &expr.value {
-        // 1. Self-evaluating
+    let mut result = match &expr.value {
         SchemeValue::Int(_)
         | SchemeValue::Float(_)
         | SchemeValue::Str(_)
         | SchemeValue::Bool(_)
         | SchemeValue::Char(_)
         | SchemeValue::Nil
-        | SchemeValue::Callable { .. } => return Ok(expr),
-
-        // 2. Symbols
-        SchemeValue::Symbol(_) => return eval_symbol(expr, &[], evaluator),
-
-        // 3. Pairs (function or macro call)
-        SchemeValue::Pair(_, _) => {
-            let result = eval_callable(expr, evaluator, tail);
-            while let Some(tail_call) = evaluator.tail_call.take() {
-                // println!(
-                //     "Processing tail call to: {}",
-                //     print_scheme_value(&tail_call.func.value)
-                //);
-                if let SchemeValue::Callable(Callable::Closure { params, body, env }) =
-                    &tail_call.func.value
-                {
-                    // println!(
-                    //     "About to call eval_closure with body: {}",
-                    //     print_scheme_value(&body.value)
-                    // );
-                    let result =
-                        eval_closure(params, *body, env, &tail_call.args, evaluator, false)?;
-                    // println!(
-                    //     "eval_closure returned: {}",
-                    //     print_scheme_value(&result.value)
-                    // );
-
-                    if evaluator.tail_call.is_none() {
-                        //println!(
-                        //     "No more tail calls, returning: {}",
-                        //     print_scheme_value(&result.value)
-                        // );
-                        return Ok(result);
-                    } else {
-                        // println!("Another tail call was set up, continuing loop...");
-                    }
-                } else {
-                    return Err("Invalid tail call: function is not a closure".to_string());
-                }
-            }
-            return result;
+        | SchemeValue::Callable { .. } => {
+            evaluator.depth -= 1;
+            Ok(expr)
         }
-        // 4. Other
-        _ => return Err("eval_logic: unsupported expression type".to_string()),
+        SchemeValue::Symbol(_) => eval_symbol(expr, &[], evaluator),
+        SchemeValue::Pair(_, _) => eval_callable(expr, evaluator, tail),
+        _ => Err("eval_logic: unsupported expression type".to_string()),
+    };
+
+    while let Some(tail_call) = evaluator.tail_call.take() {
+        if let SchemeValue::Callable(Callable::Closure { params, body, env }) =
+            &tail_call.func.value
+        {
+            // Set up a new environment
+            let new_env = bind_params(params, &tail_call.args, env, evaluator.heap_mut())?;
+            let original_env = evaluator.env_mut().current_frame();
+            evaluator
+                .env_mut()
+                .set_current_frame(new_env.current_frame());
+
+            result = eval_main(*body, evaluator, true);
+            evaluator.depth -= 1;
+            // Restore environment
+            evaluator.env_mut().set_current_frame(original_env);
+        } else {
+            return Err("Invalid tail call: not a closure".to_string());
+        }
     }
+    result
 }
 
 /// Evaluate a closure by creating a new environment frame and evaluating the body
@@ -235,8 +218,9 @@ fn eval_closure(
     env: &Rc<RefCell<Frame>>,
     args: &[GcRef],
     evaluator: &mut Evaluator,
-    tail: bool,
+    _tail: bool,
 ) -> Result<GcRef, String> {
+    evaluator.depth -= 2;
     // Create a new environment extending the captured environment
     let new_env = bind_params(params, args, env, evaluator.heap_mut())?;
     let original_env = evaluator.env_mut().current_frame();
@@ -246,7 +230,7 @@ fn eval_closure(
         .set_current_frame(new_env.current_frame());
 
     // Evaluate the body in the new environment
-    let result = eval_main(body, evaluator, tail);
+    let result = eval_main(body, evaluator, true);
 
     // Restore the original environment
     evaluator.env_mut().set_current_frame(original_env);
