@@ -135,7 +135,34 @@ impl Evaluator {
     }
 }
 
-/// Apply function to pre-evaluated arguments
+/// Top level evaluator with tail call management
+pub fn eval(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+    let mut result = eval_main(expr, evaluator, false)?;
+
+    while let Some(tail_call) = evaluator.tail_call.take() {
+        if let SchemeValue::Callable(Callable::Closure { params, body, env }) =
+            &tail_call.func.value
+        {
+            // Bind parameters
+            let new_env = bind_params(params, &tail_call.args, env, evaluator.heap_mut())?;
+            let original_env = evaluator.env_mut().current_frame();
+
+            evaluator
+                .env_mut()
+                .set_current_frame(new_env.current_frame());
+
+            // Always evaluate body in tail position
+            result = eval_main(*body, evaluator, true)?;
+
+            evaluator.env_mut().set_current_frame(original_env);
+        } else {
+            return Err("Invalid tail call: not a closure".to_string());
+        }
+    }
+
+    Ok(result)
+}
+
 /// Handles environment access for symbol lookup application
 pub fn eval_symbol(
     func: GcRef,
@@ -169,45 +196,21 @@ pub fn eval_main(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<G
         for _ in 1..evaluator.depth {
             print!(">");
         }
-        println!(" {}", print_scheme_value(&expr.value));
+        println!("{}", print_scheme_value(&expr.value));
     }
 
-    let mut result = match &expr.value {
+    match &expr.value {
         SchemeValue::Int(_)
         | SchemeValue::Float(_)
         | SchemeValue::Str(_)
         | SchemeValue::Bool(_)
         | SchemeValue::Char(_)
         | SchemeValue::Nil
-        | SchemeValue::Callable { .. } => {
-            evaluator.depth -= 1;
-            Ok(expr)
-        }
+        | SchemeValue::Callable { .. } => Ok(expr),
         SchemeValue::Symbol(_) => eval_symbol(expr, &[], evaluator),
         SchemeValue::Pair(_, _) => eval_callable(expr, evaluator, tail),
-        _ => Err("eval_logic: unsupported expression type".to_string()),
-    };
-
-    while let Some(tail_call) = evaluator.tail_call.take() {
-        if let SchemeValue::Callable(Callable::Closure { params, body, env }) =
-            &tail_call.func.value
-        {
-            // Set up a new environment
-            let new_env = bind_params(params, &tail_call.args, env, evaluator.heap_mut())?;
-            let original_env = evaluator.env_mut().current_frame();
-            evaluator
-                .env_mut()
-                .set_current_frame(new_env.current_frame());
-
-            result = eval_main(*body, evaluator, true);
-            evaluator.depth -= 1;
-            // Restore environment
-            evaluator.env_mut().set_current_frame(original_env);
-        } else {
-            return Err("Invalid tail call: not a closure".to_string());
-        }
+        _ => Err("eval_main: unsupported expression type".to_string()),
     }
-    result
 }
 
 /// Evaluate a closure by creating a new environment frame and evaluating the body

@@ -222,18 +222,18 @@ fn begin_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef,
 }
 
 /// (define sym expr)
-pub fn define_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
+pub fn define_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
     // (define symbol expr)
     let args = expect_n_args(expr, 3)?; // including 'define
     let sym = expect_symbol(&args[1])?;
-    let value = eval_main(args[2], evaluator, tail)?;
+    let value = eval_main(args[2], evaluator, true)?;
     evaluator.env_mut().set_symbol(sym, value);
     Ok(sym)
 }
 
 /// (if test consequent alternate)
 /// Requires three arguments.
-pub fn if_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
+pub fn if_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     // (if test consequent [alternate])
     let args = expect_at_least_n_args(expr, 2)?;
