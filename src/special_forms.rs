@@ -6,8 +6,10 @@ use crate::eval::{
     expect_at_least_n_args, expect_n_args, expect_symbol,
 };
 use crate::gc::{
-    GcHeap, GcRef, SchemeValue, cdr, get_nil, list_from_vec, new_float, new_macro, new_special_form,
+    GcHeap, GcRef, SchemeValue, car, cdr, cons, get_nil, list_from_vec, new_float, new_macro,
+    new_special_form,
 };
+use crate::printer::print_scheme_value;
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -49,8 +51,8 @@ pub fn register_special_forms(heap: &mut GcHeap, env: &mut crate::env::Environme
         "or" => or_sf,
         "push-port!" => push_port_sf,
         "pop-port!" => pop_port_sf,
-        "lambda" => callable_logic,
-        "macro" => callable_logic,
+        "lambda" => create_callable,
+        "macro" => create_callable,
         "with-timer" => with_timer_sf,
     );
 }
@@ -63,7 +65,7 @@ pub fn register_special_forms(heap: &mut GcHeap, env: &mut crate::env::Environme
 ///     - a vec with a single entry, meaning variadic arguments bound as a list
 ///     - a vec with multiple entries following a nil first entry, meaning named arguments
 ///     - a vec with variadic arguments bound as a list and named arguments
-fn callable_logic(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
+fn create_callable(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
     // (lambda params body ..)
     use crate::gc::new_closure;
     //use crate::gc_util::{list_from_vec, list_to_vec};
@@ -161,16 +163,20 @@ fn eval_eval_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<Gc
 
 fn apply_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
     evaluator.depth -= 1;
-    eval_callable(cdr(expr)?, evaluator, tail)
+    let func = car(cdr(expr)?)?;
+    let unevaluated_args = car(cdr(cdr(expr)?)?)?;
+    let args = eval_main(unevaluated_args, evaluator, tail)?;
+    let apply_expr = cons(func, args, &mut evaluator.heap)?;
+    eval_callable(apply_expr, evaluator, tail)
 }
 
 /// Trace logic: turn the trace function on or off
 /// This function takes an integer value, and sets evaluator.trace to match the argument.
-fn trace_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
+fn trace_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
     use num_traits::ToPrimitive;
     evaluator.depth -= 1;
     let args = expect_n_args(expr, 2)?;
-    let trace_val = eval_main(args[1], evaluator, true)?;
+    let trace_val = eval_main(args[1], evaluator, tail)?;
     match &trace_val.value {
         SchemeValue::Int(v) => match v.to_i32() {
             Some(value) => {
@@ -200,25 +206,12 @@ fn quote_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef
 fn begin_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
     // (begin expr1 expr2 ... exprN) => evaluate each in sequence, return last
     evaluator.depth -= 1;
-    match &expr.value {
-        SchemeValue::Pair(_, cdr) => {
-            let mut current = *cdr;
-            let mut last_result = None;
-            loop {
-                match &current.value {
-                    SchemeValue::Nil => break,
-                    SchemeValue::Pair(car, next) => {
-                        // need to recognize last element for tail recursion
-                        last_result = Some(eval_main(*car, evaluator, false)?);
-                        current = *next;
-                    }
-                    _ => return Err("Malformed begin: improper list".to_string()),
-                }
-            }
-            last_result.ok_or_else(|| "Malformed begin: no expressions".to_string())
-        }
-        _ => Err("Malformed begin: not a pair".to_string()),
+    let argvec = expect_at_least_n_args(expr, 2)?;
+    let mut result = get_nil(&mut evaluator.heap);
+    for (i, arg) in argvec.iter().enumerate() {
+        result = eval_main(*arg, evaluator, tail && i == argvec.len() - 1)?;
     }
+    Ok(result)
 }
 
 /// (define sym expr)

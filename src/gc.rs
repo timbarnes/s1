@@ -555,6 +555,14 @@ pub fn cdr(list: GcRef) -> Result<GcRef, String> {
     }
 }
 
+pub fn cons(car: GcRef, cdr: GcRef, heap: &mut GcHeap) -> Result<GcRef, String> {
+    let obj = GcObject {
+        value: SchemeValue::Pair(car, cdr),
+        marked: false,
+    };
+    Ok(heap.alloc(obj))
+}
+
 pub fn list_ref(mut list: &GcRef, index: usize) -> Result<GcRef, String> {
     for _ in 0..index {
         match &list.value {
