@@ -241,10 +241,10 @@ pub fn if_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef
     match test.value {
         SchemeValue::Bool(val) => {
             if val {
-                return eval_main(args[2], evaluator, tail);
+                return eval_main(args[2], evaluator, true);
             } else {
                 if args.len() == 4 {
-                    return eval_main(args[3], evaluator, tail);
+                    return eval_main(args[3], evaluator, true);
                 } else {
                     return Ok(get_nil(&mut evaluator.heap));
                 }

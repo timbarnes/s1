@@ -1,12 +1,12 @@
 11
 ;; Dummy
-(display "Dummy file loaded")
+(display "Test file loaded")
 
 (define fib
     (lambda (n)
         (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))))
 
-(fib 30)
+(define fib-30 (fib 30))
 
 (define def (macro (front . back)
     (cond ((symbol? front) `(define ,front ,back))
@@ -19,3 +19,7 @@
             acc
             (f (- n 1) (* acc n)))))
     (f n 1)))
+
+(define f3000 (fac-acc 3000))
+
+;;(quit)

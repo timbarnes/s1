@@ -172,17 +172,6 @@ pub fn eval_main(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<G
         println!("{}", print_scheme_value(&expr.value));
     }
 
-    if let Some(tail_call) = evaluator.tail_call.take() {
-        // Process the tail call - the function should be a closure at this point
-        if let SchemeValue::Callable(Callable::Closure { params, body, env }) =
-            &tail_call.func.value
-        {
-            return eval_closure(params, *body, env, &tail_call.args, evaluator, tail);
-        } else {
-            return Err("Invalid tail call: function is not a closure".to_string());
-        }
-    }
-
     match &expr.value {
         // 1. Self-evaluating
         SchemeValue::Int(_)
@@ -191,20 +180,55 @@ pub fn eval_main(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<G
         | SchemeValue::Bool(_)
         | SchemeValue::Char(_)
         | SchemeValue::Nil
-        | SchemeValue::Callable { .. } => Ok(expr),
+        | SchemeValue::Callable { .. } => return Ok(expr),
 
         // 2. Symbols
-        SchemeValue::Symbol(_) => eval_symbol(expr, &[], evaluator),
+        SchemeValue::Symbol(_) => return eval_symbol(expr, &[], evaluator),
 
         // 3. Pairs (function or macro call)
-        SchemeValue::Pair(_, _) => eval_callable(expr, evaluator, tail),
+        SchemeValue::Pair(_, _) => {
+            let result = eval_callable(expr, evaluator, tail);
+            while let Some(tail_call) = evaluator.tail_call.take() {
+                // println!(
+                //     "Processing tail call to: {}",
+                //     print_scheme_value(&tail_call.func.value)
+                //);
+                if let SchemeValue::Callable(Callable::Closure { params, body, env }) =
+                    &tail_call.func.value
+                {
+                    // println!(
+                    //     "About to call eval_closure with body: {}",
+                    //     print_scheme_value(&body.value)
+                    // );
+                    let result =
+                        eval_closure(params, *body, env, &tail_call.args, evaluator, false)?;
+                    // println!(
+                    //     "eval_closure returned: {}",
+                    //     print_scheme_value(&result.value)
+                    // );
 
+                    if evaluator.tail_call.is_none() {
+                        //println!(
+                        //     "No more tail calls, returning: {}",
+                        //     print_scheme_value(&result.value)
+                        // );
+                        return Ok(result);
+                    } else {
+                        // println!("Another tail call was set up, continuing loop...");
+                    }
+                } else {
+                    return Err("Invalid tail call: function is not a closure".to_string());
+                }
+            }
+            return result;
+        }
         // 4. Other
-        _ => Err("eval_logic: unsupported expression type".to_string()),
+        _ => return Err("eval_logic: unsupported expression type".to_string()),
     }
 }
 
 /// Evaluate a closure by creating a new environment frame and evaluating the body
+#[inline(always)]
 fn eval_closure(
     params: &[GcRef],
     body: GcRef,
@@ -220,22 +244,6 @@ fn eval_closure(
     evaluator
         .env_mut()
         .set_current_frame(new_env.current_frame());
-
-    // Check if the body is a tail call
-    if tail {
-        // Extract function and arguments from the call
-        if let SchemeValue::Pair(func_expr, args_expr) = &body.value {
-            let func = eval_main(*func_expr, evaluator, false)?;
-            let args = eval_args(args_expr, evaluator)?;
-
-            // Set up tail call optimization
-            evaluator.tail_call = Some(TailCall { func, args });
-            // Restore the original environment
-            evaluator.env_mut().set_current_frame(original_env);
-            // Return a placeholder - the actual evaluation will happen in the next eval_logic call
-            return Ok(evaluator.heap.nil_s());
-        }
-    }
 
     // Evaluate the body in the new environment
     let result = eval_main(body, evaluator, tail);
@@ -277,7 +285,7 @@ fn eval_macro(
 pub fn eval_callable(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
     match &expr.value {
         SchemeValue::Pair(car, cdr) => {
-            let func = eval_main(*car, evaluator, tail)?;
+            let func = eval_main(*car, evaluator, false)?;
             match &func.value {
                 SchemeValue::Callable(callable) => match callable {
                     Callable::Builtin { func, .. } => {
@@ -287,7 +295,21 @@ pub fn eval_callable(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Resu
                     Callable::SpecialForm { func, .. } => func(expr, evaluator, tail),
                     Callable::Closure { params, body, env } => {
                         let processed_args = eval_args(cdr, evaluator)?;
-                        eval_closure(params, *body, env, &processed_args, evaluator, tail)
+                        if tail {
+                            // Resolve the function first
+                            let func = eval_main(*car, evaluator, false)?;
+                            // println!(
+                            //     "Setting up tail call to: {}",
+                            //     print_scheme_value(&expr.value)
+                            // );
+                            evaluator.tail_call = Some(TailCall {
+                                func: func, // Store the resolved closure, not the call expression
+                                args: processed_args,
+                            });
+                            return Ok(evaluator.heap.nil_s());
+                        } else {
+                            eval_closure(params, *body, env, &processed_args, evaluator, false)
+                        }
                     }
                     Callable::Macro { params, body, env } => {
                         let processed_args = list_to_vec(*cdr)?;
