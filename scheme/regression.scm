@@ -362,7 +362,9 @@
 
 (display "=== All tests completed ===")
 (newline)
-(if (not (nil? failed-tests))
+(if (null? failed-tests)
+    (begin (display "All tests passed!")
+        (newline))
     (begin (display "Failing tests: ")
-    (display failed-tests)))
-(newline)
+        (display failed-tests)
+        (newline)))

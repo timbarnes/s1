@@ -173,7 +173,14 @@ pub fn eval_main(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String
     }
 
     if let Some(tail_call) = evaluator.tail_call.take() {
-        return eval_symbol(tail_call.func, &tail_call.args, evaluator);
+        // Process the tail call - the function should be a closure at this point
+        if let SchemeValue::Callable(Callable::Closure { params, body, env }) =
+            &tail_call.func.value
+        {
+            return eval_closure(params, *body, env, &tail_call.args, evaluator);
+        } else {
+            return Err("Invalid tail call: function is not a closure".to_string());
+        }
     }
 
     match &expr.value {
@@ -214,16 +221,19 @@ fn eval_closure(
         .set_current_frame(new_env.current_frame());
 
     // Check if the body is a tail call
-    if is_tail_call(body) {
-        // Set up tail call optimization
-        evaluator.tail_call = Some(TailCall {
-            func: body,
-            args: Vec::new(),
-        });
-        // Restore the original environment
-        evaluator.env_mut().set_current_frame(original_env);
-        // Return a placeholder - the actual evaluation will happen in the next eval_logic call
-        return Ok(evaluator.heap.nil_s());
+    if let Ok(true) = is_tail_call(body, evaluator) {
+        // Extract function and arguments from the call
+        if let SchemeValue::Pair(func_expr, args_expr) = &body.value {
+            let func = eval_main(*func_expr, evaluator)?;
+            let args = eval_args(args_expr, evaluator)?;
+
+            // Set up tail call optimization
+            evaluator.tail_call = Some(TailCall { func, args });
+            // Restore the original environment
+            evaluator.env_mut().set_current_frame(original_env);
+            // Return a placeholder - the actual evaluation will happen in the next eval_logic call
+            return Ok(evaluator.heap.nil_s());
+        }
     }
 
     // Evaluate the body in the new environment
@@ -429,10 +439,19 @@ fn is_special_form(func: GcRef) -> Option<&'static str> {
 }
 
 /// Check if an expression is a tail call (function call in tail position)
-/// For now, we'll be conservative and not treat any calls as tail calls
-/// until we implement proper tail position detection
-fn is_tail_call(_expr: GcRef) -> bool {
-    false // Conservative approach - no tail call optimization for now
+/// Only optimize calls to user-defined functions (closures), not primitives
+fn is_tail_call(expr: GcRef, evaluator: &mut Evaluator) -> Result<bool, String> {
+    match &expr.value {
+        SchemeValue::Pair(car, _) => {
+            // Evaluate the function to see what it is
+            let func = eval_main(*car, evaluator)?;
+            match &func.value {
+                SchemeValue::Callable(Callable::Closure { .. }) => Ok(true),
+                _ => Ok(false), // Don't optimize primitives, special forms, or macros
+            }
+        }
+        _ => Ok(false), // Not a function call
+    }
 }
 
 /// Recursively deduplicate symbols in an expression tree, preserving parameter symbols.
@@ -1595,7 +1614,7 @@ mod tests {
 
         // Test that is_tail_call is conservative (returns false)
         let test_expr = new_int(evaluator.heap_mut(), num_bigint::BigInt::from(42));
-        assert!(!is_tail_call(test_expr));
+        assert!(!is_tail_call(test_expr, &mut evaluator).unwrap());
 
         // Test that we can set a tail call (even though it's not used)
         evaluator.tail_call = Some(TailCall {
