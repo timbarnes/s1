@@ -38,10 +38,23 @@ fn expand_macro_internal(
     depth: usize,
     evaluator: &mut Evaluator,
 ) -> Result<Expanded, String> {
-    match &expr.value {
+    let expanded = match &expr.value {
         SchemeValue::Pair(_, _) => expand_list_pair(expr, depth, evaluator),
         SchemeValue::Symbol(_) => expand_atom(expr),
         _ => Ok(Expanded::Single(*expr)),
+    }?;
+
+    // Fix: if we're at top-level (depth == 0), Splice must be wrapped into a list
+    if depth == 0 {
+        match expanded {
+            Expanded::Single(_) => Ok(expanded),
+            Expanded::Splice(vec) => {
+                let list = list_from_vec(vec, &mut evaluator.heap);
+                Ok(Expanded::Single(list))
+            }
+        }
+    } else {
+        Ok(expanded)
     }
 }
 
@@ -100,34 +113,53 @@ fn expand_list_pair(
     let cdr = cdr(expr)?;
 
     let car_expanded = expand_macro_internal(&car, depth, evaluator)?;
-    let cdr_expanded = expand_macro_internal(&cdr, depth, evaluator)?;
 
-    match (car_expanded, cdr_expanded) {
-        (Expanded::Single(h), Expanded::Single(t)) => {
-            Ok(Expanded::Single(new_pair(&mut evaluator.heap, h, t)))
-        }
-        (Expanded::Single(h), Expanded::Splice(ts)) => {
-            // When splice occurs in cdr position, create a proper list
-            // instead of propagating the splice upward
-            if ts.is_empty() {
-                // If nothing to splice, just return the head element
-                Ok(Expanded::Single(h))
-            } else {
-                let mut vec = vec![h];
-                vec.extend(ts);
-                Ok(Expanded::Single(list_from_vec(vec, &mut evaluator.heap)))
-            }
-        }
-        (Expanded::Splice(mut hs), Expanded::Single(t)) => {
-            // Don't include nil at the end when it comes from empty cdr after splicing
-            if !matches!(t.value, SchemeValue::Nil) {
-                hs.push(t);
+    // Special handling when car is a splice - we need to expand cdr elements individually
+    match car_expanded {
+        Expanded::Splice(mut hs) => {
+            // Extract elements from the cdr and add them individually
+            let mut current = cdr;
+            while !matches!(current.value, SchemeValue::Nil) {
+                match &current.value {
+                    SchemeValue::Pair(car_elem, cdr_elem) => {
+                        let elem_expanded = expand_macro_internal(car_elem, depth, evaluator)?;
+                        match elem_expanded {
+                            Expanded::Single(elem) => hs.push(elem),
+                            Expanded::Splice(mut elems) => hs.append(&mut elems),
+                        }
+                        current = *cdr_elem;
+                    }
+                    _ => return Err("Invalid list structure in cdr".to_string()),
+                }
             }
             Ok(Expanded::Splice(hs))
         }
-        (Expanded::Splice(mut hs), Expanded::Splice(mut ts)) => {
-            hs.append(&mut ts);
-            Ok(Expanded::Splice(hs))
+        _ => {
+            // Regular case - expand cdr as a whole
+            let cdr_expanded = expand_macro_internal(&cdr, depth, evaluator)?;
+
+            match (car_expanded, cdr_expanded) {
+                (Expanded::Single(h), Expanded::Single(t)) => {
+                    Ok(Expanded::Single(new_pair(&mut evaluator.heap, h, t)))
+                }
+                (Expanded::Single(h), Expanded::Splice(ts)) => {
+                    // When splice occurs in cdr position, create a proper list
+                    let mut vec = vec![h];
+                    vec.extend(ts);
+                    Ok(Expanded::Single(list_from_vec(vec, &mut evaluator.heap)))
+                }
+                (Expanded::Splice(mut hs), Expanded::Single(t)) => {
+                    // This case should not happen with the new logic above
+                    if !matches!(t.value, SchemeValue::Nil) {
+                        hs.push(t);
+                    }
+                    Ok(Expanded::Splice(hs))
+                }
+                (Expanded::Splice(mut hs), Expanded::Splice(mut ts)) => {
+                    hs.append(&mut ts);
+                    Ok(Expanded::Single(list_from_vec(hs, &mut evaluator.heap)))
+                }
+            }
         }
     }
 }
