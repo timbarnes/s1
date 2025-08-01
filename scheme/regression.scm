@@ -309,7 +309,7 @@
 (test-true (eq? (apply + '(1 2)) 3) "apply")
 (test-true (eq? (eval '(+ 1 2)) (apply + '(1 2))) "eval and apply")
 
-;; Test 18: Factorial (recursion
+;; Test 18: Recursion
 (display "=== Testing Recursion ===")
 (define fact
     (lambda (n)
@@ -322,6 +322,10 @@
         (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))))
 (test-equal 13 (fib 7) "Fibonacci(7)")
 (test-equal 6765 (fib 20) "Fibonacci(20)")
+(test-equal '(720)(list (fac-acc 6)) "Tail recursion inside a form")
+(define test-tail (lambda (n) (if (= n 0) #t (test-tail (- n 1)))))
+(test-tail 10000)
+(test-true #t "Deep tail recursion - OK if no stack overflow")
 
 ;; Test 19: Macros
 (display "=== Testing Macros ===")
@@ -355,15 +359,23 @@
 (define m5 (macro x `(append ,@x)))
 (test-equal '(1 2 3 4) (m5 '(1 2) '(3 4)) "macro (m5 '(1 2) '(3 4))")
 
-(define m6 (macro (test . body) ; => (list (append (1 2) (3 4))); => 6
+(define m6 (macro (test . body)
     `(if ,test (begin ,@body) nil)))
 (test-equal 22 (m6 #t 22) "macro (m6 #t 11 22)")
 (test-equal nil (m6 #f 22) "macro (m6 #f 22)")
 
+;; Test 20: let
+(display "=== Testing let ===")
+(newline)
+
+(test-equal 6 (let ((x 2) (y 3)) (* x y)) "Two binding let with single body expression")
+(test-equal 9 (let ((x 3)) (displayln "Returns 9") (* x x)) "Two binding let with single body expression")
+(test-equal 42 (let ((x 6)) (let ((y (+ x 1))) (* x y))) "Nested let expression")
+(newline)
 (display "=== All tests completed ===")
 (newline)
 (if (null? failed-tests)
-    (begin (display "All tests passed!")
+    (begin (display "===  All tests passed!  ===")
         (newline))
     (begin
         (displayln "Failing tests: ")

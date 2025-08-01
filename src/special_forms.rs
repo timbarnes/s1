@@ -6,10 +6,10 @@ use crate::eval::{
     expect_at_least_n_args, expect_n_args, expect_symbol,
 };
 use crate::gc::{
-    GcHeap, GcRef, SchemeValue, car, cdr, cons, get_nil, list_from_vec, new_float, new_macro,
-    new_special_form,
+    GcHeap, GcObject, GcRef, SchemeValue, car, cdr, cons, get_nil, list_from_vec, list_to_vec,
+    new_float, new_macro, new_special_form,
 };
-//use crate::printer::print_scheme_value;
+use crate::printer::print_scheme_value;
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -44,6 +44,7 @@ pub fn register_special_forms(heap: &mut GcHeap, env: &mut crate::env::Environme
         "quote" => quote_sf,
         "define" => define_sf,
         "set!" => set_sf,
+        "let" => let_sf,
         "if" => if_sf,
         "cond" => cond_sf,
         "begin" => begin_sf,
@@ -65,16 +66,26 @@ pub fn register_special_forms(heap: &mut GcHeap, env: &mut crate::env::Environme
 ///     - a vec with a single entry, meaning variadic arguments bound as a list
 ///     - a vec with multiple entries following a nil first entry, meaning named arguments
 ///     - a vec with variadic arguments bound as a list and named arguments
-fn create_callable(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
+///
+fn create_callable(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
+    let form = expect_at_least_n_args(expr, 3)?;
+    let (params, ptype) = params_to_vec(&form[1]);
+    create_lambda_or_macro(&form, &params, ptype, evaluator, tail)
+}
+
+fn create_lambda_or_macro(
+    form: &Vec<GcRef>,
+    params: &Vec<GcRef>,
+    ptype: Ptype,
+    evaluator: &mut Evaluator,
+    _tail: bool,
+) -> Result<GcRef, String> {
     // (lambda params body ..)
     use crate::gc::new_closure;
-    //use crate::gc_util::{list_from_vec, list_to_vec};
     evaluator.depth -= 1;
 
-    let form = expect_at_least_n_args(expr, 3)?;
     // Process argument lists
-    let (params, ptype) = params_to_vec(&form[1]); // Special processing for the range of argument structures
-    let mut args: Vec<&crate::gc::GcObject> = Vec::new();
+    let mut args: Vec<&GcObject> = Vec::new();
     match ptype {
         Ptype::Empty => {}
         Ptype::List => {
@@ -113,7 +124,7 @@ fn create_callable(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Resul
 
     // Intern and preserve parameter symbols
     let mut param_map = HashMap::new();
-    for param in &params {
+    for param in params {
         match &param.value {
             SchemeValue::Symbol(name) => {
                 param_map.insert(name.clone(), *param);
@@ -130,7 +141,7 @@ fn create_callable(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Resul
     let captured_frame = evaluator.env().current_frame();
     match &form[0].value {
         SchemeValue::Symbol(name) => {
-            if name == "lambda" {
+            if name == "lambda" || name == "let" {
                 let new_closure = new_closure(
                     evaluator.heap_mut(),
                     args,
@@ -281,6 +292,38 @@ pub fn cond_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<Gc
     Ok(get_nil(&mut evaluator.heap))
 }
 
+/// let (basic version, without labels)
+pub fn let_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
+    let formvec = expect_at_least_n_args(expr, 3)?;
+    let bindings = list_to_vec(formvec[1])?; // (let bindings . body)
+
+    // Separate bindings into variables and expressions
+    let mut vars = get_nil(evaluator.heap_mut());
+    let mut exprs = vars;
+    // Build them up as lists
+    for binding in bindings.into_iter().rev() {
+        match &binding.value {
+            SchemeValue::Pair(var, binding_expr) => {
+                let var_sym = expect_symbol(&var)?;
+                let binding_expr = car(binding_expr)?;
+                vars = cons(var_sym, vars, evaluator.heap_mut())?;
+                exprs = cons(binding_expr, exprs, evaluator.heap_mut())?;
+            }
+            _ => return Err("Invalid binding in let".to_string()),
+        }
+    }
+    // println!("let vars: {}", print_scheme_value(&vars.value));
+    // println!("let exprs: {}", print_scheme_value(&exprs.value));
+    let (params, ptype) = params_to_vec(&vars);
+    // println!("let params: {:?}", params);
+    let lambda_expr = create_lambda_or_macro(&formvec, &params, ptype, evaluator, false)?;
+
+    // cons the lambda to the list of values
+    let call = cons(&lambda_expr, exprs, evaluator.heap_mut())?;
+
+    eval_main(call, evaluator, tail)
+}
+
 /// (and expr1 expr2 ... exprN)
 /// Stops on first false value
 pub fn and_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
@@ -426,7 +469,7 @@ pub fn pop_port_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Resul
     }
 }
 
-fn with_timer_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
+fn with_timer_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
     let args = expect_n_args(expr, 2)?;
     let timer = Instant::now();
     eval_main(args[1], evaluator, false)?;
