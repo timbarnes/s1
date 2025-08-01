@@ -110,6 +110,20 @@ impl Environment {
         None
     }
 
+    /// Retrieve a binding by symbol, returning its value and the frame it was found in
+    pub fn get_symbol_and_frame(&self, symbol: GcRef) -> Option<(GcRef, Rc<RefCell<Frame>>)> {
+        let mut current = Some(self.current_frame.clone());
+
+        while let Some(frame_rc) = current {
+            let frame = frame_rc.borrow();
+            if let Some(value) = frame.get_local(symbol) {
+                return Some((value, frame_rc.clone())); // clone Rc to return
+            }
+            current = frame.parent.clone();
+        }
+        None
+    }
+
     /// Set a binding in the current frame using a symbol key
     pub fn set_symbol(&mut self, symbol: GcRef, value: GcRef) {
         let mut frame = self.current_frame.borrow_mut();

@@ -8,11 +8,11 @@
 
 ;; Test helper functions
 
-(define failed-tests '()) ; keep track of test failures
+(define failed-tests '(22)) ; keep track of test failures
 
 (define fails
   (lambda (message)
-    (set! failed-tests (cons message failed-tests))))
+      (set! failed-tests (cons message failed-tests))))
 
 (define test-equal
   (lambda (expected actual message)
@@ -29,7 +29,7 @@
           (display message)
           (display " - expected ")
           (display expected)
-          (display ", got ")
+          (display ", received ")
           (display actual)
           (newline)
           (newline)
@@ -56,7 +56,7 @@
           (newline)
           (display "    ***    FAIL: ")
           (display message)
-          (display " - expected number, got ")
+          (display " - expected number, recieved ")
           (display value)
           (newline)
           (newline)
@@ -75,7 +75,7 @@
           (newline)
           (display "    ***    FAIL: ")
           (display message)
-          (display " - expected symbol, got ")
+          (display " - expected symbol, received ")
           (display value)
           (newline)
           (newline)
@@ -95,7 +95,7 @@
           (newline)
           (display "    ***    FAIL: ")
           (display message)
-          (display " - expected nil, got ")
+          (display " - expected nil, recieved ")
           (display value)
           (newline)
           (newline)
@@ -365,6 +365,7 @@
 (if (null? failed-tests)
     (begin (display "All tests passed!")
         (newline))
-    (begin (display "Failing tests: ")
-        (display failed-tests)
-        (newline)))
+    (begin
+        (displayln "Failing tests: ")
+        (displayln "==============")
+        (map displayln failed-tests)))

@@ -44,10 +44,10 @@
 (define cdddr (lambda (l) (cdr (cdr (cdr l)))))      ;; Cdr of cdr of cdr
 (define cddddr (lambda (l) (cdr (cdr (cdr (cdr l)))))) ;; Cdr of cdr of cdr of cdr
 
-(define map (lambda (f . lists)
-    (if (null? args)
+(define map (lambda (f l)
+    (if (null? l)
         '()
-        (cons (f (car args)) (map f (cdr args))))))
+        (cons (f (car l)) (map f (cdr l))))))
 
 (define displayln (lambda s
     (map display+ s)
@@ -78,16 +78,16 @@
 ;; Stack support
 (define push! (macro (val var) `(set! ,var (cons ,val ,var))))
 
-(define map (lambda (f . lists)
-  (define any-null? (lambda lsts
-    (cond ((null? lsts) #f)
-          ((null? (car lsts)) #t)
-          (else (any-null? (cdr lsts))))))
+; (define map (lambda (f . lists)
+;   (define any-null? (lambda lsts
+;     (cond ((null? lsts) #f)
+;           ((null? (car lsts)) #t)
+;           (else (any-null? (cdr lsts))))))
 
-  (define loop (lambda lists
-    (if (any-null? lists)
-        '()
-        (cons (apply f (map car lists))
-              (loop (map cdr lists))))))
+;   (define loop (lambda lists
+;     (if (any-null? lists)
+;         '()
+;         (cons (apply f (map car lists))
+;               (loop (map cdr lists))))))
 
-  (loop lists)))
+;   (loop lists)))

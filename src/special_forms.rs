@@ -347,11 +347,15 @@ pub fn set_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRe
     let sym = expect_symbol(&args[1])?;
     let value = eval_main(args[2], evaluator, tail)?;
 
-    if evaluator.env().get_symbol(sym).is_some() {
-        evaluator.env_mut().set_symbol(sym, value);
-        Ok(value)
-    } else {
-        Err("set!: unbound variable".to_string())
+    match evaluator.env_mut().get_symbol_and_frame(sym) {
+        Some((_, sym_frame)) => {
+            let current_frame = evaluator.env_mut().current_frame();
+            evaluator.env_mut().set_current_frame(sym_frame);
+            evaluator.env_mut().set_symbol(sym, value);
+            evaluator.env_mut().set_current_frame(current_frame);
+            return Ok(value);
+        }
+        None => return Err("set!: symbol not found".to_string()),
     }
 }
 
