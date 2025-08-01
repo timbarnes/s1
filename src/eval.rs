@@ -137,8 +137,12 @@ impl Evaluator {
 
 /// Top level evaluator with tail call management
 pub fn eval(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
-    let mut result = eval_main(expr, evaluator, false)?;
-
+    let tail_stub = evaluator.heap.tail_call_s();
+    let mut result = eval_main(expr, evaluator, true)?;
+    //println!("eval: top level result: {:?}", result);
+    if evaluator.tail_call.is_none() && result != tail_stub {
+        return Ok(result);
+    }
     while let Some(tail_call) = evaluator.tail_call.take() {
         if let SchemeValue::Callable(Callable::Closure { params, body, env }) =
             &tail_call.func.value
@@ -153,7 +157,7 @@ pub fn eval(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
 
             // Always evaluate body in tail position
             result = eval_main(*body, evaluator, true)?;
-
+            //println!("eval: tail call result: {:?}", result);
             evaluator.env_mut().set_current_frame(original_env);
         } else {
             return Err("Invalid tail call: not a closure".to_string());
@@ -164,6 +168,7 @@ pub fn eval(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
 }
 
 /// Handles environment access for symbol lookup application
+#[inline(always)]
 pub fn eval_symbol(
     func: GcRef,
     args: &[GcRef],
@@ -208,7 +213,10 @@ pub fn eval_main(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<G
         | SchemeValue::Nil
         | SchemeValue::Callable { .. } => Ok(expr),
         SchemeValue::Symbol(_) => eval_symbol(expr, &[], evaluator),
-        SchemeValue::Pair(_, _) => eval_callable(expr, evaluator, tail),
+        SchemeValue::Pair(_, _) => {
+            let result = eval_callable(expr, evaluator, tail)?;
+            validate_tail_result(result, tail)
+        }
         _ => Err("eval_main: unsupported expression type".to_string()),
     }
 }
@@ -221,7 +229,7 @@ fn eval_closure(
     env: &Rc<RefCell<Frame>>,
     args: &[GcRef],
     evaluator: &mut Evaluator,
-    _tail: bool,
+    tail: bool,
 ) -> Result<GcRef, String> {
     evaluator.depth -= 2;
     // Create a new environment extending the captured environment
@@ -233,7 +241,7 @@ fn eval_closure(
         .set_current_frame(new_env.current_frame());
 
     // Evaluate the body in the new environment
-    let result = eval_main(body, evaluator, true);
+    let result = eval_main(body, evaluator, tail);
 
     // Restore the original environment
     evaluator.env_mut().set_current_frame(original_env);
@@ -285,15 +293,11 @@ pub fn eval_callable(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Resu
                         if tail {
                             // Resolve the function first
                             let func = eval_main(*car, evaluator, false)?;
-                            // println!(
-                            //     "Setting up tail call to: {}",
-                            //     print_scheme_value(&expr.value)
-                            // );
                             evaluator.tail_call = Some(TailCall {
-                                func: func, // Store the resolved closure, not the call expression
+                                func, // Store the resolved closure, not the call expression
                                 args: processed_args,
                             });
-                            return Ok(evaluator.heap.nil_s());
+                            return Ok(evaluator.heap.tail_call_s());
                         } else {
                             eval_closure(params, *body, env, &processed_args, evaluator, false)
                         }
@@ -449,6 +453,19 @@ fn is_special_form(func: GcRef) -> Option<&'static str> {
     }
 }
 
+fn validate_tail_result(result: GcRef, tail: bool) -> Result<GcRef, String> {
+    match &result.value {
+        SchemeValue::TailCallScheduled => {
+            if tail {
+                Ok(result)
+            } else {
+                Err("Tail call scheduled in non-tail position".to_string())
+            }
+        }
+        _ => Ok(result),
+    }
+}
+
 /// Recursively deduplicate symbols in an expression tree, preserving parameter symbols.
 ///
 /// This function is used when creating a closure to ensure that the parameter symbols
@@ -535,7 +552,8 @@ pub fn deduplicate_symbols_preserve_params(
         | SchemeValue::Bool(_)
         | SchemeValue::Char(_)
         | SchemeValue::Nil
-        | SchemeValue::Port { .. } => expr,
+        | SchemeValue::Port { .. }
+        | SchemeValue::TailCallScheduled => expr,
     }
 }
 

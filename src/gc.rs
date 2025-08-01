@@ -62,6 +62,7 @@ pub enum SchemeValue {
     Char(char),
     Callable(Callable),
     Nil,
+    TailCallScheduled,
     Port { kind: crate::io::PortKind },
     // Extend with more types as needed.
 }
@@ -193,6 +194,7 @@ impl std::fmt::Debug for SchemeValue {
             },
             SchemeValue::Nil => write!(f, "Nil"),
             SchemeValue::Port { kind } => write!(f, "Port({:?})", kind),
+            SchemeValue::TailCallScheduled => write!(f, "TailCallScheduled"),
         }
     }
 }
@@ -275,7 +277,8 @@ pub struct GcHeap {
     // Singleton values for SchemeValueSimple
     nil_obj: Option<GcRef>,
     true_obj: Option<GcRef>,
-    false_obje: Option<GcRef>,
+    false_obj: Option<GcRef>,
+    tail_call_obj: Option<GcRef>,
     // Free list for GcRef objects
     free_list: Vec<GcObject>,
     // All allocated GcRef objects (for potential future GC)
@@ -290,7 +293,8 @@ impl GcHeap {
         let mut heap = Self {
             nil_obj: None,
             true_obj: None,
-            false_obje: None,
+            false_obj: None,
+            tail_call_obj: None,
             free_list: Vec::new(),
             objects: Vec::new(),
             symbol_table: HashMap::new(),
@@ -323,7 +327,14 @@ impl GcHeap {
             value: SchemeValue::Bool(false),
             marked: false,
         };
-        self.false_obje = Some(self.alloc(false_obj));
+        self.false_obj = Some(self.alloc(false_obj));
+
+        // Allocate tail_call
+        let tail_call_obj = GcObject {
+            value: SchemeValue::TailCallScheduled,
+            marked: false,
+        };
+        self.tail_call_obj = Some(self.alloc(tail_call_obj));
     }
 
     /// Allocate a new object on the heap.
@@ -348,7 +359,12 @@ impl GcHeap {
 
     /// Get the singleton false value.
     pub fn false_s(&self) -> GcRef {
-        self.false_obje.unwrap()
+        self.false_obj.unwrap()
+    }
+
+    /// Get the tail call object.
+    pub fn tail_call_s(&self) -> GcRef {
+        self.tail_call_obj.unwrap()
     }
 
     /// Get statistics about the simple heap.
@@ -529,6 +545,16 @@ pub fn new_macro(
 pub fn new_port(heap: &mut GcHeap, kind: crate::io::PortKind) -> GcRef {
     let obj = GcObject {
         value: SchemeValue::Port { kind },
+        marked: false,
+    };
+    heap.alloc(obj)
+}
+
+/// Create a new tail_call_scheduled
+pub fn new_tail_call_scheduled(heap: &mut GcHeap) -> GcRef {
+    let new_tail_call_scheduled = SchemeValue::TailCallScheduled;
+    let obj = GcObject {
+        value: new_tail_call_scheduled,
         marked: false,
     };
     heap.alloc(obj)

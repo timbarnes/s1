@@ -8,7 +8,7 @@
 
 ;; Test helper functions
 
-(define failed-tests '(22)) ; keep track of test failures
+(define failed-tests '()) ; keep track of test failures
 
 (define fails
   (lambda (message)
@@ -253,7 +253,7 @@
 (test-equal 720 (fact 6) "Factorial test")
 (define fac-acc (lambda (n)
     (define f (lambda (n acc)
-        (if (zero? n)
+        (if (= n 0)
             acc
             (f (- n 1) (* acc n)))))
     (f n 1)))

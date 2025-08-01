@@ -9,7 +9,7 @@ use crate::gc::{
     GcHeap, GcRef, SchemeValue, car, cdr, cons, get_nil, list_from_vec, new_float, new_macro,
     new_special_form,
 };
-use crate::printer::print_scheme_value;
+//use crate::printer::print_scheme_value;
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -154,29 +154,29 @@ fn create_callable(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Resul
     }
 }
 
-fn eval_eval_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
+fn eval_eval_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     let args = expect_n_args(expr, 2)?;
-    let result = eval_main(args[1], evaluator, tail)?;
-    eval_main(result, evaluator, tail)
+    let result = eval_main(args[1], evaluator, false)?;
+    eval_main(result, evaluator, false)
 }
 
-fn apply_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
+fn apply_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     let func = car(cdr(expr)?)?;
     let unevaluated_args = car(cdr(cdr(expr)?)?)?;
-    let args = eval_main(unevaluated_args, evaluator, tail)?;
+    let args = eval_main(unevaluated_args, evaluator, false)?;
     let apply_expr = cons(func, args, &mut evaluator.heap)?;
-    eval_callable(apply_expr, evaluator, tail)
+    eval_callable(apply_expr, evaluator, false)
 }
 
 /// Trace logic: turn the trace function on or off
 /// This function takes an integer value, and sets evaluator.trace to match the argument.
-fn trace_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
+fn trace_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
     use num_traits::ToPrimitive;
     evaluator.depth -= 1;
     let args = expect_n_args(expr, 2)?;
-    let trace_val = eval_main(args[1], evaluator, tail)?;
+    let trace_val = eval_main(args[1], evaluator, false)?;
     match &trace_val.value {
         SchemeValue::Int(v) => match v.to_i32() {
             Some(value) => {
@@ -219,14 +219,14 @@ pub fn define_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<
     // (define symbol expr)
     let args = expect_n_args(expr, 3)?; // including 'define
     let sym = expect_symbol(&args[1])?;
-    let value = eval_main(args[2], evaluator, true)?;
+    let value = eval_main(args[2], evaluator, false)?;
     evaluator.env_mut().set_symbol(sym, value);
     Ok(sym)
 }
 
 /// (if test consequent alternate)
 /// Requires three arguments.
-pub fn if_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
+pub fn if_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     // (if test consequent [alternate])
     let args = expect_at_least_n_args(expr, 2)?;
@@ -234,10 +234,10 @@ pub fn if_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRe
     match test.value {
         SchemeValue::Bool(val) => {
             if val {
-                return eval_main(args[2], evaluator, true);
+                return eval_main(args[2], evaluator, tail);
             } else {
                 if args.len() == 4 {
-                    return eval_main(args[3], evaluator, true);
+                    return eval_main(args[3], evaluator, tail);
                 } else {
                     return Ok(get_nil(&mut evaluator.heap));
                 }
@@ -248,7 +248,7 @@ pub fn if_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRe
 }
 
 /// (cond (test1 expr) [(test 2...)] [(else expr)])
-pub fn cond_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
+pub fn cond_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     let args = expect_at_least_n_args(expr, 2)?;
 
@@ -258,7 +258,7 @@ pub fn cond_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcR
                 let test_result = match &test.value {
                     SchemeValue::Symbol(s) if s == "else" => true,
                     _ => {
-                        let evaluated = eval_main(test, evaluator, tail)?;
+                        let evaluated = eval_main(test, evaluator, false)?;
                         !matches!(evaluated.value, SchemeValue::Bool(false))
                     }
                 };
@@ -341,11 +341,11 @@ pub fn or_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRe
 
 /// (set! sym expr)
 /// sym must have been previously defined.
-pub fn set_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
+pub fn set_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     let args = expect_n_args(expr, 3)?;
     let sym = expect_symbol(&args[1])?;
-    let value = eval_main(args[2], evaluator, tail)?;
+    let value = eval_main(args[2], evaluator, false)?;
 
     match evaluator.env_mut().get_symbol_and_frame(sym) {
         Some((_, sym_frame)) => {
@@ -378,7 +378,7 @@ pub fn push_port_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Resu
             match &cdr.value {
                 SchemeValue::Pair(arg, _) => {
                     // Evaluate the argument to get the port value
-                    let port = eval_main(*arg, evaluator, true)?;
+                    let port = eval_main(*arg, evaluator, false)?;
                     let port_stack_sym = evaluator.heap.intern_symbol("**port-stack**");
                     let current_stack = evaluator
                         .env()
@@ -429,7 +429,7 @@ pub fn pop_port_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Resul
 fn with_timer_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
     let args = expect_n_args(expr, 2)?;
     let timer = Instant::now();
-    eval_main(args[1], evaluator, tail)?;
+    eval_main(args[1], evaluator, false)?;
     let elapsed_time = timer.elapsed().as_secs_f64();
     let time = new_float(&mut evaluator.heap, elapsed_time);
     Ok(time)
