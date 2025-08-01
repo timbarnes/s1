@@ -49,13 +49,25 @@
         '()
         (cons (f (car l)) (map f (cdr l))))))
 
+(define for-each (lambda (f args)
+    (if (null? args)
+        #t
+        (begin
+            (f (car args))
+            (for-each f (cdr args))))))
+
 (define displayln (lambda s
-    (map display+ s)
+    (for-each display+ s)
     (newline)))
 
 (define display+ (lambda (s)
     (display s)
     (display " ")))
+
+(define writeln (lambda args
+    (if (null? args)
+        (newline)
+        (for-each display args))))
 
 (display "s1-core loaded")
 (newline)
@@ -76,9 +88,14 @@
 (define odd? (lambda (n) (not (even? n))))
 
 ;; Stack support
+(define empty? (lambda (s) (null? s)))
+(define top (lambda (s) (if (empty? s) #f (car s))))
 (define push! (macro (val var) `(set! ,var (cons ,val ,var))))
+(define pop! (macro (var) `(let ((result (car ,var))) (set! ,var (cdr ,var)) result)))
 
 ; (define map (lambda (f . lists)
+;     (display "Fn:") (displayln f)
+;     (display "Lists:") (displayln lists)
 ;   (define any-null? (lambda lsts
 ;     (cond ((null? lsts) #f)
 ;           ((null? (car lsts)) #t)

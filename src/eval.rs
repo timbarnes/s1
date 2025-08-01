@@ -264,9 +264,9 @@ fn eval_macro(
         .env_mut()
         .set_current_frame(new_env.current_frame());
     // Expand the macro
-    //println!("Unexpanded macro: {}", print_scheme_value(&body.value));
+    println!("Unexpanded macro: {}", print_scheme_value(&body.value));
     let expanded = expand_macro(&body, 0, evaluator)?;
-    //println!("After expansion: {}", print_scheme_value(&expanded.value));
+    println!("After expansion: {}", print_scheme_value(&expanded.value));
 
     evaluator.env_mut().set_current_frame(original_env);
     // Review for tail recursion

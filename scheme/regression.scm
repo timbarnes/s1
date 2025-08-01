@@ -364,6 +364,8 @@
 (test-equal 22 (m6 #t 22) "macro (m6 #t 11 22)")
 (test-equal nil (m6 #f 22) "macro (m6 #f 22)")
 
+(test-equal '(2 1) (let ((a 1) (b '(2))) (expand `(,@b ,a))) "expand macro expression")
+(test-equal '(1 2) (let ((a 1) (b '(2))) (expand `(,a ,@b))) "expand macro expression")
 ;; Test 20: let
 (display "=== Testing let ===")
 (newline)

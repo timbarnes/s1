@@ -9,6 +9,7 @@ use crate::gc::{
     GcHeap, GcObject, GcRef, SchemeValue, car, cdr, cons, get_nil, list_from_vec, list_to_vec,
     new_float, new_macro, new_special_form,
 };
+use crate::macros::expand_macro;
 use crate::printer::print_scheme_value;
 use std::collections::HashMap;
 use std::time::Instant;
@@ -54,6 +55,7 @@ pub fn register_special_forms(heap: &mut GcHeap, env: &mut crate::env::Environme
         "pop-port!" => pop_port_sf,
         "lambda" => create_callable,
         "macro" => create_callable,
+        "expand" => expand_sf,
         "with-timer" => with_timer_sf,
     );
 }
@@ -322,6 +324,12 @@ pub fn let_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRe
     let call = cons(&lambda_expr, exprs, evaluator.heap_mut())?;
 
     eval_main(call, evaluator, tail)
+}
+
+fn expand_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
+    let m = car(cdr(expr)?)?;
+    println!("expand_sf: {}", print_scheme_value(&m.value));
+    expand_macro(&m, 0, evaluator)
 }
 
 /// (and expr1 expr2 ... exprN)
