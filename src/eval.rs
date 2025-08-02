@@ -135,36 +135,55 @@ impl Evaluator {
     }
 }
 
-/// Top level evaluator with tail call management
-pub fn eval(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
-    let tail_stub = evaluator.heap.tail_call_s();
-    let mut result = eval_main(expr, evaluator, true)?;
-    //println!("eval: top level result: {:?}", result);
-    if evaluator.tail_call.is_none() && result != tail_stub {
-        return Ok(result);
-    }
+/// Run the trampoline until no more tail calls are scheduled
+/// Available for use anywhere we detect a tail call opportunity
+pub fn run_trampoline(evaluator: &mut Evaluator) -> Result<GcRef, String> {
+    let original_env = evaluator.env_mut().current_frame();
+    let mut result = Err("No tail call scheduled".to_string());
     while let Some(tail_call) = evaluator.tail_call.take() {
         if let SchemeValue::Callable(Callable::Closure { params, body, env }) =
             &tail_call.func.value
         {
             // Bind parameters
             let new_env = bind_params(params, &tail_call.args, env, evaluator.heap_mut())?;
-            let original_env = evaluator.env_mut().current_frame();
 
             evaluator
                 .env_mut()
                 .set_current_frame(new_env.current_frame());
 
             // Always evaluate body in tail position
-            result = eval_main(*body, evaluator, true)?;
+            //println!("run_trampoline: {}", print_scheme_value(&body.value));
+            result = eval_main(*body, evaluator, true);
             //println!("eval: tail call result: {:?}", result);
-            evaluator.env_mut().set_current_frame(original_env);
         } else {
             return Err("Invalid tail call: not a closure".to_string());
         }
     }
+    evaluator.env_mut().set_current_frame(original_env);
+    result
+}
 
-    Ok(result)
+/// Top level evaluator with tail call management
+pub fn eval(expr: GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+    let tail_stub = evaluator.heap.tail_call_s();
+    evaluator.tail_call = None; // Optional safety
+    let result = eval_main(expr, evaluator, true)?;
+
+    if evaluator.tail_call.is_some() || result == tail_stub {
+        run_trampoline(evaluator)
+    } else {
+        Ok(result)
+    }
+}
+
+/// Evaluates an expression in a non-tail position, allowing tail calls at lower levels
+pub fn eval_non_tail(expr: &GcRef, evaluator: &mut Evaluator) -> Result<GcRef, String> {
+    let result = eval_main(*expr, evaluator, false)?;
+    if evaluator.tail_call.is_some() || result == evaluator.heap.tail_call_s() {
+        run_trampoline(evaluator)
+    } else {
+        Ok(result)
+    }
 }
 
 /// Handles environment access for symbol lookup application
@@ -201,7 +220,7 @@ pub fn eval_main(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<G
         for _ in 1..evaluator.depth {
             print!(">");
         }
-        println!("{}", print_scheme_value(&expr.value));
+        //println!("{}", print_scheme_value(&expr.value));
     }
 
     match &expr.value {
@@ -214,8 +233,10 @@ pub fn eval_main(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<G
         | SchemeValue::Callable { .. } => Ok(expr),
         SchemeValue::Symbol(_) => eval_symbol(expr, &[], evaluator),
         SchemeValue::Pair(_, _) => {
+            //println!("eval_main: {}", print_scheme_value(&expr.value));
             let result = eval_callable(expr, evaluator, tail)?;
-            validate_tail_result(result, tail)
+            //validate_tail_result(result, tail)
+            Ok(result)
         }
         _ => Err("eval_main: unsupported expression type".to_string()),
     }
@@ -229,7 +250,7 @@ fn eval_closure(
     env: &Rc<RefCell<Frame>>,
     args: &[GcRef],
     evaluator: &mut Evaluator,
-    tail: bool,
+    _tail: bool,
 ) -> Result<GcRef, String> {
     evaluator.depth -= 2;
     // Create a new environment extending the captured environment
@@ -239,13 +260,10 @@ fn eval_closure(
     evaluator
         .env_mut()
         .set_current_frame(new_env.current_frame());
-
     // Evaluate the body in the new environment
-    let result = eval_main(body, evaluator, tail);
-
+    let result = eval_main(body, evaluator, true);
     // Restore the original environment
     evaluator.env_mut().set_current_frame(original_env);
-
     result
 }
 
@@ -264,10 +282,9 @@ fn eval_macro(
         .env_mut()
         .set_current_frame(new_env.current_frame());
     // Expand the macro
-    println!("Unexpanded macro: {}", print_scheme_value(&body.value));
+    // println!("Unexpanded macro: {}", print_scheme_value(&body.value));
     let expanded = expand_macro(&body, 0, evaluator)?;
-    println!("After expansion: {}", print_scheme_value(&expanded.value));
-
+    // println!("After expansion: {}", print_scheme_value(&expanded.value));
     evaluator.env_mut().set_current_frame(original_env);
     // Review for tail recursion
     eval_main(expanded, evaluator, false)
@@ -321,7 +338,7 @@ fn eval_args(args: &GcRef, evaluator: &mut Evaluator) -> Result<Vec<GcRef>, Stri
         match &current.value {
             SchemeValue::Nil => break,
             SchemeValue::Pair(arg, next) => {
-                processed_args.push(eval_main(*arg, evaluator, false)?);
+                processed_args.push(eval_non_tail(arg, evaluator)?);
                 current = *next;
             }
             _ => return Err("Improper list in function call".to_string()),
@@ -450,19 +467,6 @@ fn is_special_form(func: GcRef) -> Option<&'static str> {
             _ => None,
         },
         _ => None,
-    }
-}
-
-fn validate_tail_result(result: GcRef, tail: bool) -> Result<GcRef, String> {
-    match &result.value {
-        SchemeValue::TailCallScheduled => {
-            if tail {
-                Ok(result)
-            } else {
-                Err("Tail call scheduled in non-tail position".to_string())
-            }
-        }
-        _ => Ok(result),
     }
 }
 

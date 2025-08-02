@@ -2,7 +2,7 @@
 /// Definitions of special forms implemented internally
 ///
 use crate::eval::{
-    Evaluator, deduplicate_symbols_preserve_params, eval_callable, eval_main,
+    Evaluator, deduplicate_symbols_preserve_params, eval_callable, eval_main, eval_non_tail,
     expect_at_least_n_args, expect_n_args, expect_symbol,
 };
 use crate::gc::{
@@ -170,21 +170,22 @@ fn create_lambda_or_macro(
 fn eval_eval_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     let args = expect_n_args(expr, 2)?;
-    let result = eval_main(args[1], evaluator, false)?;
-    eval_main(result, evaluator, false)
+    let result = eval_non_tail(&args[1], evaluator)?;
+    eval_main(result, evaluator, true)
 }
 
 fn apply_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     let func = car(cdr(expr)?)?;
     let unevaluated_args = car(cdr(cdr(expr)?)?)?;
-    let args = eval_main(unevaluated_args, evaluator, false)?;
+    let args = eval_non_tail(&unevaluated_args, evaluator)?;
     let apply_expr = cons(func, args, &mut evaluator.heap)?;
     eval_callable(apply_expr, evaluator, false)
 }
 
 /// Trace logic: turn the trace function on or off
 /// This function takes an integer value, and sets evaluator.trace to match the argument.
+/// BUG: SHOULD EVALUATE ITS ARGUMENT!
 fn trace_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
     use num_traits::ToPrimitive;
     evaluator.depth -= 1;
@@ -216,14 +217,16 @@ fn quote_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef
 }
 
 /// (begin form1 ..)
-fn begin_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
+fn begin_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
     // (begin expr1 expr2 ... exprN) => evaluate each in sequence, return last
     evaluator.depth -= 1;
     let argvec = expect_at_least_n_args(expr, 2)?;
-    let mut result = get_nil(&mut evaluator.heap);
-    for (i, arg) in argvec.iter().enumerate() {
-        result = eval_main(*arg, evaluator, tail && i == argvec.len() - 1)?;
+    //let mut result = get_nil(&mut evaluator.heap);
+    for arg in argvec[..argvec.len() - 1].iter() {
+        //result = eval_main(*arg, evaluator, tail && i == argvec.len() - 1)?;
+        eval_non_tail(arg, evaluator)?;
     }
+    let result = eval_main(argvec.last().unwrap(), evaluator, true)?;
     Ok(result)
 }
 
@@ -232,25 +235,25 @@ pub fn define_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<
     // (define symbol expr)
     let args = expect_n_args(expr, 3)?; // including 'define
     let sym = expect_symbol(&args[1])?;
-    let value = eval_main(args[2], evaluator, false)?;
+    let value = eval_non_tail(&args[2], evaluator)?;
     evaluator.env_mut().set_symbol(sym, value);
     Ok(sym)
 }
 
 /// (if test consequent alternate)
 /// Requires three arguments.
-pub fn if_sf(expr: GcRef, evaluator: &mut Evaluator, tail: bool) -> Result<GcRef, String> {
+pub fn if_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
     evaluator.depth -= 1;
     // (if test consequent [alternate])
     let args = expect_at_least_n_args(expr, 2)?;
-    let test = eval_main(args[1], evaluator, false)?;
+    let test = eval_non_tail(&args[1], evaluator)?;
     match test.value {
         SchemeValue::Bool(val) => {
             if val {
-                return eval_main(args[2], evaluator, tail);
+                return eval_main(args[2], evaluator, true);
             } else {
                 if args.len() == 4 {
-                    return eval_main(args[3], evaluator, tail);
+                    return eval_main(args[3], evaluator, true);
                 } else {
                     return Ok(get_nil(&mut evaluator.heap));
                 }
@@ -271,26 +274,27 @@ pub fn cond_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<Gc
                 let test_result = match &test.value {
                     SchemeValue::Symbol(s) if s == "else" => true,
                     _ => {
-                        let evaluated = eval_main(test, evaluator, false)?;
+                        let evaluated = eval_non_tail(test, evaluator)?;
                         !matches!(evaluated.value, SchemeValue::Bool(false))
                     }
                 };
 
                 if test_result {
-                    // Evaluate all expressions in the body
-                    let mut result = get_nil(&mut evaluator.heap);
-                    let mut current = *body;
-                    while let SchemeValue::Pair(car, cdr) = &current.value {
-                        result = eval_main(car, evaluator, false)?;
-                        current = cdr;
+                    // Evaluate the body expressions
+                    let body_vec = list_to_vec(&body)?;
+                    let count = body_vec.len();
+                    if count > 2 {
+                        for expr in body_vec[..count - 1].iter() {
+                            eval_non_tail(expr, evaluator)?;
+                        }
                     }
-                    return Ok(result);
+                    let result = eval_main(body_vec[count - 1], evaluator, true);
+                    return result;
                 }
             }
             _ => return Err("cond: clause must be a pair".to_string()),
         }
     }
-
     Ok(get_nil(&mut evaluator.heap))
 }
 
@@ -396,7 +400,7 @@ pub fn set_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcR
     evaluator.depth -= 1;
     let args = expect_n_args(expr, 3)?;
     let sym = expect_symbol(&args[1])?;
-    let value = eval_main(args[2], evaluator, false)?;
+    let value = eval_non_tail(&args[2], evaluator)?;
 
     match evaluator.env_mut().get_symbol_and_frame(sym) {
         Some((_, sym_frame)) => {
@@ -429,7 +433,7 @@ pub fn push_port_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Resu
             match &cdr.value {
                 SchemeValue::Pair(arg, _) => {
                     // Evaluate the argument to get the port value
-                    let port = eval_main(*arg, evaluator, false)?;
+                    let port = eval_non_tail(arg, evaluator)?;
                     let port_stack_sym = evaluator.heap.intern_symbol("**port-stack**");
                     let current_stack = evaluator
                         .env()
@@ -480,7 +484,7 @@ pub fn pop_port_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Resul
 fn with_timer_sf(expr: GcRef, evaluator: &mut Evaluator, _tail: bool) -> Result<GcRef, String> {
     let args = expect_n_args(expr, 2)?;
     let timer = Instant::now();
-    eval_main(args[1], evaluator, false)?;
+    eval_non_tail(&args[1], evaluator)?;
     let elapsed_time = timer.elapsed().as_secs_f64();
     let time = new_float(&mut evaluator.heap, elapsed_time);
     Ok(time)
