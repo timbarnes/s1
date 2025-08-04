@@ -14,6 +14,18 @@
 (define env-frame? (lambda (x) (eq? (type-of x) 'env-frame)))
 (define null? (lambda (x) (eq? x '())))
 
+(define equal? (lambda (x y)
+    (cond ((eq? x y) #t)
+        ((and (pair? x) (pair? y)) (and (equal? (car x) (car y)) (equal? (cdr x) (cdr y))))
+        ((and (string? x) (string? y)) (string=? x y))
+        ((and (vector? x) (vector? y)) (vector=? x y))
+        ((and (closure? x) (closure? y)) (eq? x y))
+        ((and (macro? x) (macro? y)) (eq? x y))
+        ((and (boolean? x) (boolean? y)) (eq? x y))
+        ((and (char? x) (char? y)) (eq? x y))
+        ((and (primitive? x) (primitive? y)) (eq? x y))
+        ((and (env-frame? x) (env-frame? y)) (eq? x y))
+        (else #f))))
 ;; List accessor functions (compositions of car and cdr)
 ;; These provide convenient access to nested list elements
 
@@ -108,3 +120,15 @@
 ;               (loop (map cdr lists))))))
 
 ;   (loop lists)))
+
+;; Pass in a quoted form and number of times to run it
+;; e.g. (benchmark '(fac-acc 1000) 20)
+(define benchmark
+  (lambda (form count)
+    (define total-count count)
+    (define b
+      (lambda (form count sum)
+        (if (= 0 count)
+            (/ sum total-count)
+            (b form (- count 1) (+ sum (with-timer (eval form)))))))
+    (b form count 0.0)))

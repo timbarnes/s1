@@ -414,6 +414,15 @@ impl GcHeap {
 // CONSTRUCTOR FUNCTIONS FOR SCHEME VALUES
 // ============================================================================
 
+/// Create a new object with a given value.
+// pub fn new_object(heap: &mut GcHeap, value: GcRef) -> GcRef {
+//     let obj = GcObject {
+//         value,
+//         marked: false,
+//     };
+//     heap.alloc(obj)
+// }
+
 /// Create a new integer value.
 pub fn new_int(heap: &mut GcHeap, val: BigInt) -> GcRef {
     let obj = GcObject {

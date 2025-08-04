@@ -1,6 +1,5 @@
 11
 ;; Dummy
-(display "Test file loaded")
 
 (define fib
     (lambda (n)
@@ -20,6 +19,7 @@
             (f (- n 1) (* acc n)))))
     (f n 1)))
 
-(define f3000 (fac-acc 3000))
+(define f3000 (fac-acc 10000))
 
-;;(quit)
+(display "Test file processed")
+(quit)

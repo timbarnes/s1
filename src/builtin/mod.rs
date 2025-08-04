@@ -2,17 +2,9 @@ pub mod fileio;
 pub mod list;
 pub mod number;
 pub mod predicate;
+pub mod vector;
 
 use crate::gc::{GcHeap, GcRef, SchemeValue, get_nil, new_string};
-// use num_bigint::BigInt;
-//  use crate::gc::SchemeValue;
-use fileio::open_input_file_builtin;
-use list::{append_builtin, car_builtin, cdr_builtin, cons_builtin, list_builtin};
-use number::{
-    div_builtin, eq_builtin, gt_builtin, lt_builtin, minus_builtin, mod_builtin, plus_builtin,
-    times_builtin,
-};
-// use crate::printer::scheme_display;
 use crate::printer::print_scheme_value;
 
 /// Macro to register builtin functions in the environment
@@ -21,7 +13,7 @@ use crate::printer::print_scheme_value;
 ///     "name" => function,
 ///     "another" => another_function,
 /// );
-macro_rules! register_builtin {
+macro_rules! register_builtin_family {
     ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
         $(
             $env.set_symbol($heap.intern_symbol($name),
@@ -133,54 +125,18 @@ pub fn help_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> 
 //     Ok(new_string_simple(heap, &format!("Loaded file: {}", filename)))
 // }
 
-/// Builtin function: (load filename) - evaluator-aware version
-///
-/// Loads and evaluates a Scheme file using the evaluator's port stack.
-pub fn load_builtin_evaluator(
-    evaluator: &mut crate::eval::Evaluator,
-    args: &[GcRef],
-) -> Result<GcRef, String> {
-    if args.len() != 1 {
-        return Err("load: expected exactly 1 argument".to_string());
-    }
-
-    let filename = match &args[0].value {
-        crate::gc::SchemeValue::Str(filename) => filename.clone(),
-        _ => return Err("load: argument must be a string".to_string()),
-    };
-
-    // For now, just return a success message
-    // TODO: Implement actual file loading with proper port stack integration
-    Ok(crate::gc::new_string(
-        evaluator.heap_mut(),
-        &format!("Loaded file: {}", filename),
-    ))
-}
-
 /// Register all builtin functions in the environment
 pub fn register_builtins(heap: &mut GcHeap, env: &mut crate::env::Environment) {
     // Register builtins using the macro for cleaner syntax
-    register_builtin!(heap, env,
-        "number?" => predicate::number_q,
-        "eq?" => predicate::eq_q,
+    list::register_list_builtins(heap, env);
+    fileio::register_fileio_builtins(heap, env);
+    number::register_number_builtins(heap, env);
+    predicate::register_predicate_builtins(heap, env);
+    vector::register_vector_builtins(heap, env);
+    register_builtin_family!(heap, env,
         "help" => help_builtin,
-        "type-of" => predicate::type_of,
-        "+" => plus_builtin,
-        "-" => minus_builtin,
-        "*" => times_builtin,
-        "/" => div_builtin,
-        "mod" => mod_builtin,
-        "=" => eq_builtin,
-        "<" => lt_builtin,
-        ">" => gt_builtin,
-        "car" => car_builtin,
-        "cdr" => cdr_builtin,
-        "cons" => cons_builtin,
-        "list" => list_builtin,
-        "append" => append_builtin,
         "display" => display_builtin,
         "newline" => newline_builtin,
         "quit" => quit_builtin,
-        "open-input-file" => open_input_file_builtin,
     );
 }

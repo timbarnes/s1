@@ -45,6 +45,27 @@ pub fn type_of(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     Ok(get_symbol(heap, type_name))
 }
 
+macro_rules! register_builtin_family {
+    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
+        $(
+            $env.set_symbol($heap.intern_symbol($name),
+                crate::gc::new_primitive($heap, $func,
+                    concat!($name, ": builtin function").to_string()));
+        )*
+    };
+}
+
+pub fn register_predicate_builtins(
+    heap: &mut crate::gc::GcHeap,
+    env: &mut crate::env::Environment,
+) {
+    register_builtin_family!(heap, env,
+        "type-of" => type_of,
+        "eq?" => eq_q,
+        "number?" => number_q,
+    );
+}
+
 mod tests {
     use super::*;
 

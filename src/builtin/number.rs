@@ -1,4 +1,4 @@
-use crate::gc::{GcRef, SchemeValue, new_bool, new_float, new_int};
+use crate::gc::{GcHeap, GcRef, SchemeValue, new_bool, new_float, new_int};
 use num_bigint::BigInt;
 use num_traits::{One, ToPrimitive, Zero};
 
@@ -246,6 +246,29 @@ pub fn gt_builtin(heap: &mut crate::gc::GcHeap, args: &[GcRef]) -> Result<GcRef,
     }
 
     Ok(new_bool(heap, true))
+}
+
+macro_rules! register_builtin_family {
+    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
+        $(
+            $env.set_symbol($heap.intern_symbol($name),
+                crate::gc::new_primitive($heap, $func,
+                    concat!($name, ": builtin function").to_string()));
+        )*
+    };
+}
+
+pub fn register_number_builtins(heap: &mut GcHeap, env: &mut crate::env::Environment) {
+    register_builtin_family!(heap, env,
+        "+" => plus_builtin,
+        "-" => minus_builtin,
+        "*" => times_builtin,
+        "/" => div_builtin,
+        "mod" => mod_builtin,
+        "=" => eq_builtin,
+        "<" => lt_builtin,
+        ">" => gt_builtin,
+    );
 }
 
 mod tests {

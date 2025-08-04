@@ -32,6 +32,19 @@ pub fn print_scheme_value(val: &SchemeValue) -> String {
             s
         }
         SchemeValue::Symbol(s) => s.clone(),
+        SchemeValue::Vector(v) => {
+            let mut s = "#(".to_string();
+            let mut first = true;
+            for value in v.iter() {
+                if !first {
+                    s.push(' ');
+                }
+                s.push_str(print_scheme_value(&value.value).as_str());
+                first = false;
+            }
+            s.push(')');
+            s
+        }
         SchemeValue::Int(i) => i.to_string(),
         SchemeValue::Float(f) => f.to_string(),
         SchemeValue::Str(s) => s.clone(), // raw string, no quotes
