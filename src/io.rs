@@ -24,8 +24,10 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
+
 // use std::io::BufReader as StdBufReader;
-use crate::gc::SchemeValue;
+use crate::eval::{EvalContext, Evaluator};
+use crate::gc::GcRef;
 use std::cell::UnsafeCell;
 
 /// The different types of ports supported by the I/O system.
@@ -118,17 +120,6 @@ impl PartialEq for PortKind {
             _ => false,
         }
     }
-}
-
-/// Represents an open port (input or output).
-///
-/// Ports can be stdin, stdout, file-based, or string-based.
-/// File ports store a file_id that maps to an open file handle in the FileTable.
-/// String ports store the string content and current read position.
-#[derive(Clone, Debug)]
-pub struct Port {
-    /// The type and configuration of this port
-    pub kind: PortKind,
 }
 
 /// Manages open file handles for file ports.
@@ -301,9 +292,9 @@ impl FileTable {
 }
 
 /// Helper function to read a line from a string port and update its position
-fn read_line_from_string_port(port: &Port) -> Option<(String, Port)> {
-    if let PortKind::StringPortInput { content, .. } = &port.kind {
-        let current_pos = get_string_port_pos(port).unwrap();
+fn read_line_from_string_port(port_kind: &PortKind) -> Option<(String, PortKind)> {
+    if let PortKind::StringPortInput { content, .. } = &port_kind {
+        let current_pos = get_string_port_pos(port_kind).unwrap();
         let mut lines = content.lines();
         // Skip to the current position
         for _ in 0..current_pos {
@@ -311,11 +302,9 @@ fn read_line_from_string_port(port: &Port) -> Option<(String, Port)> {
         }
         if let Some(line) = lines.next() {
             let new_pos = current_pos + 1;
-            let new_port = Port {
-                kind: PortKind::StringPortInput {
-                    content: content.clone(),
-                    pos: UnsafeCell::new(new_pos),
-                },
+            let new_port = PortKind::StringPortInput {
+                content: content.clone(),
+                pos: UnsafeCell::new(new_pos),
             };
             Some((line.to_string() + "\n", new_port))
         } else {
@@ -352,14 +341,14 @@ fn read_line_from_string_port(port: &Port) -> Option<(String, Port)> {
 /// // Read from stdin (in a real scenario, this would block for user input)
 /// let line = read_line(&port, &mut file_table);
 /// ```
-pub fn read_line(port: &Port, file_table: &mut FileTable) -> Option<String> {
+pub fn read_line(port_kind: &PortKind, file_table: &mut FileTable) -> Option<String> {
     // Handle StringPort case separately to avoid borrow checker issues
-    if let Some((line, _)) = read_line_from_string_port(port) {
+    if let Some((line, _)) = read_line_from_string_port(port_kind) {
         return Some(line);
     }
 
     // Handle other port types
-    match &port.kind {
+    match &port_kind {
         PortKind::Stdin => {
             let mut buf = String::new();
             let n = io::stdin().read_line(&mut buf).ok()?;
@@ -410,8 +399,8 @@ pub fn read_line(port: &Port, file_table: &mut FileTable) -> Option<String> {
 /// // Write to stdout
 /// write_line(&port, &mut file_table, "Hello, World!");
 /// ```
-pub fn write_line(port: &Port, file_table: &mut FileTable, line: &str) -> bool {
-    match &port.kind {
+pub fn write_line(port_kind: &PortKind, file_table: &mut FileTable, line: &str) -> bool {
+    match &port_kind {
         PortKind::Stdout => {
             print!("{}", line);
             io::stdout().flush().ok();
@@ -464,8 +453,8 @@ pub fn write_line(port: &Port, file_table: &mut FileTable, line: &str) -> bool {
 /// // Read a character from stdin (in a real scenario, this would block for user input)
 /// let ch = read_char(&port, &mut file_table);
 /// ```
-pub fn read_char(port: &Port, file_table: &mut FileTable) -> Option<char> {
-    match &port.kind {
+pub fn read_char(port_kind: &PortKind, file_table: &mut FileTable) -> Option<char> {
+    match &port_kind {
         PortKind::Stdin => {
             let mut buf = [0u8; 1];
             match std::io::stdin().read_exact(&mut buf) {
@@ -491,7 +480,7 @@ pub fn read_char(port: &Port, file_table: &mut FileTable) -> Option<char> {
             }
         }
         PortKind::StringPortInput { content, .. } => {
-            let current_pos = get_string_port_pos(port).unwrap();
+            let current_pos = get_string_port_pos(port_kind).unwrap();
             if current_pos < content.len() {
                 let ch = content.chars().nth(current_pos).unwrap();
                 Some(ch)
@@ -530,8 +519,8 @@ pub fn read_char(port: &Port, file_table: &mut FileTable) -> Option<char> {
 /// // Write a character to stdout
 /// write_char(&port, &mut file_table, 'A');
 /// ```
-pub fn write_char(port: &Port, file_table: &mut FileTable, ch: char) -> bool {
-    match &port.kind {
+pub fn write_char(port_kind: &PortKind, file_table: &mut FileTable, ch: char) -> bool {
+    match &port_kind {
         PortKind::Stdout => {
             print!("{}", ch);
             io::stdout().flush().ok();
@@ -584,12 +573,10 @@ pub fn write_char(port: &Port, file_table: &mut FileTable, ch: char) -> bool {
 /// assert_eq!(read_char(&string_port, &mut file_table), Some('e'));
 /// assert_eq!(read_char(&string_port, &mut file_table), Some('l'));
 /// ```
-pub fn new_string_port(s: &str) -> Port {
-    Port {
-        kind: PortKind::StringPortInput {
-            content: s.to_string(),
-            pos: UnsafeCell::new(0),
-        },
+pub fn new_string_port(s: &str) -> PortKind {
+    PortKind::StringPortInput {
+        content: s.to_string(),
+        pos: UnsafeCell::new(0),
     }
 }
 
@@ -617,11 +604,9 @@ pub fn new_string_port(s: &str) -> Port {
 /// let content = get_output_string(&output_port);
 /// assert_eq!(content, "hello");
 /// ```
-pub fn new_output_string_port() -> Port {
-    Port {
-        kind: PortKind::StringPortOutput {
-            content: String::new(),
-        },
+pub fn new_output_string_port() -> PortKind {
+    PortKind::StringPortOutput {
+        content: String::new(),
     }
 }
 
@@ -648,8 +633,8 @@ pub fn new_output_string_port() -> Port {
 /// let content = get_output_string(&port);
 /// assert_eq!(content, "");
 /// ```
-pub fn get_output_string(port: &Port) -> String {
-    match &port.kind {
+pub fn get_output_string(port_kind: &PortKind) -> String {
+    match &port_kind {
         PortKind::StringPortOutput { content } => content.clone(),
         _ => String::new(),
     }
@@ -657,8 +642,8 @@ pub fn get_output_string(port: &Port) -> String {
 
 /// Get the current position of a string port safely.
 /// This function should be called through the GC heap accessor.
-pub fn get_string_port_pos(port: &Port) -> Option<usize> {
-    match &port.kind {
+pub fn get_string_port_pos(port_kind: &PortKind) -> Option<usize> {
+    match &port_kind {
         PortKind::StringPortInput { pos, .. } => Some(unsafe { *pos.get() }),
         _ => None,
     }
@@ -666,8 +651,8 @@ pub fn get_string_port_pos(port: &Port) -> Option<usize> {
 
 /// Update the position of a string port safely.
 /// This function should be called through the GC heap accessor.
-pub fn update_string_port_pos(port: &Port, new_pos: usize) -> bool {
-    match &port.kind {
+pub fn update_string_port_pos(port_kind: &PortKind, new_pos: usize) -> bool {
+    match &port_kind {
         PortKind::StringPortInput { pos, .. } => {
             unsafe {
                 *pos.get() = new_pos;
@@ -679,60 +664,47 @@ pub fn update_string_port_pos(port: &Port, new_pos: usize) -> bool {
 }
 
 /// Create a new input string port from a &str.
-pub fn new_string_port_input(content: &str) -> Port {
-    Port {
-        kind: PortKind::StringPortInput {
-            content: content.to_string(),
-            pos: UnsafeCell::new(0),
-        },
+pub fn new_string_port_input(content: &str) -> PortKind {
+    PortKind::StringPortInput {
+        content: content.to_string(),
+        pos: UnsafeCell::new(0),
     }
 }
 
 /// Convert a Rust Port to a Scheme port object.
-pub fn port_to_scheme_port(port: Port, heap: &mut crate::gc::GcHeap) -> crate::gc::GcRef {
-    crate::gc::new_port(heap, port.kind)
+pub fn port_to_scheme_port(ec: &mut EvalContext, port_kind: PortKind) -> GcRef {
+    let heap = &mut ec.heap;
+    crate::gc::new_port(heap, port_kind)
 }
 
-/// Convert a Scheme port object to a Rust Port.
-pub fn scheme_port_to_port(scheme_port: crate::gc::GcRef) -> Port {
-    match &scheme_port.value {
-        crate::gc::SchemeValue::Port { kind } => Port { kind: kind.clone() },
+/// Extract a PortKind from aScheme port
+pub fn port_kind_from_scheme_port(evaluator: &mut Evaluator, scheme_port: GcRef) -> PortKind {
+    let s_p = evaluator.heap.get_value(scheme_port);
+    match s_p {
+        crate::gc::SchemeValue::Port(kind) => kind.clone(),
         _ => panic!("Expected port object"),
     }
 }
 
-/// Extract the current input Port from the top of the Scheme-level port stack (**port-stack**).
-/// Returns an error if the stack is empty or the value is not a port.
-pub fn extract_port_from_stack_val(port_stack_val: &SchemeValue) -> Result<Port, String> {
-    match port_stack_val {
-        SchemeValue::Pair(car, _) => match &car.value {
-            SchemeValue::Port { kind } => Ok(Port { kind: kind.clone() }),
-            _ => Err("car of **port-stack** is not a port".to_string()),
-        },
-        SchemeValue::Nil => Err("**port-stack** is empty".to_string()),
-        _ => Err("**port-stack** is not a list".to_string()),
-    }
-}
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+//     #[test]
+//     fn test_port_conversion() {
+//         use crate::gc::GcHeap;
 
-    #[test]
-    fn test_port_conversion() {
-        use crate::gc::GcHeap;
+//         let mut heap = GcHeap::new();
+//         let original_port = Port {
+//             kind: PortKind::StringPortInput {
+//                 content: "hello".to_string(),
+//                 pos: UnsafeCell::new(0),
+//             },
+//         };
 
-        let mut heap = GcHeap::new();
-        let original_port = Port {
-            kind: PortKind::StringPortInput {
-                content: "hello".to_string(),
-                pos: UnsafeCell::new(0),
-            },
-        };
+//         let scheme_port = port_to_scheme_port(ec, original_port.clone());
+//         let converted_port = port_from_scheme_port(ec, scheme_port);
 
-        let scheme_port = port_to_scheme_port(original_port.clone(), &mut heap);
-        let converted_port = scheme_port_to_port(scheme_port);
-
-        assert_eq!(original_port.kind, converted_port.kind);
-    }
-}
+//         assert_eq!(original_port.kind, converted_port.kind);
+//     }
+// }

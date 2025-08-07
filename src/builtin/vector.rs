@@ -1,17 +1,18 @@
 use std::vec;
 
+use crate::eval::EvalContext;
 /// Vector functions
 ///
-use crate::gc::{GcObject, GcRef, SchemeValue, new_int, new_vector};
+use crate::gc::{GcRef, SchemeValue, new_int, new_vector};
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 
 /// Creates a new vector from a list of arguments.
 /// (vector arg1 arg2 ...)
-pub fn vector(heap: &mut crate::gc::GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+pub fn vector(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() > 0 {
         let values = args.to_vec();
-        Ok(new_vector(heap, values))
+        Ok(new_vector(ec.heap, values))
     } else {
         Err("vector: expects at least 1 argument".to_string())
     }
@@ -19,19 +20,19 @@ pub fn vector(heap: &mut crate::gc::GcHeap, args: &[GcRef]) -> Result<GcRef, Str
 
 /// Makes a vector of specified length and optionally initializes it with a default value.
 /// (make-vector length [default])
-pub fn make_vector(heap: &mut crate::gc::GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+pub fn make_vector(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     match args.len() {
         0 => Err("make-vector: length parameter required.".to_string()),
         1 | 2 => {
-            let mut init = crate::gc::get_nil(heap);
+            let mut init = crate::gc::get_nil(ec.heap);
             if args.len() == 2 {
                 init = args[1];
             }
-            let length = match &args[0].value {
+            let length = match &ec.heap.get_value(args[0]) {
                 SchemeValue::Int(n) => n.to_usize().unwrap(),
                 _ => return Err("make-vector: length parameter must be a number".to_string()),
             };
-            let vector = new_vector(heap, vec![init; length]);
+            let vector = new_vector(ec.heap, vec![init; length]);
             Ok(vector)
         }
         _ => Err("make-vector: requires length and optional initialization value".to_string()),
@@ -40,12 +41,12 @@ pub fn make_vector(heap: &mut crate::gc::GcHeap, args: &[GcRef]) -> Result<GcRef
 
 // Returns the length of the vector
 // (vector-length vector)
-pub fn vector_length(heap: &mut crate::gc::GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+pub fn vector_length(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() == 1 {
-        match &args[0].value {
+        match &ec.heap.get_value(args[0]) {
             SchemeValue::Vector(v) => {
                 let len = BigInt::from(v.len());
-                Ok(new_int(heap, len))
+                Ok(new_int(ec.heap, len))
             }
             _ => Err("vector-length: argument must be a vector".to_string()),
         }
@@ -56,13 +57,13 @@ pub fn vector_length(heap: &mut crate::gc::GcHeap, args: &[GcRef]) -> Result<GcR
 
 // Returns the element at the given index in the vector
 // (vector-ref vector index)
-pub fn vector_ref(_heap: &mut crate::gc::GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+pub fn vector_ref(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() == 2 {
-        let vector = match &args[0].value {
+        let vector = match &ec.heap.get_value(args[0]) {
             SchemeValue::Vector(v) => v,
             _ => return Err("vector-ref: first argument must be a vector".to_string()),
         };
-        let index = match &args[1].value {
+        let index = match &ec.heap.get_value(args[1]) {
             SchemeValue::Int(n) => n.to_usize().unwrap(),
             _ => return Err("vector-ref: second argument must be a number".to_string()),
         };
@@ -77,13 +78,13 @@ pub fn vector_ref(_heap: &mut crate::gc::GcHeap, args: &[GcRef]) -> Result<GcRef
 
 // Stores the element at the given index in the vector
 // (vector-set! vector index value)
-pub fn vector_set(heap: &mut crate::gc::GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+pub fn vector_set(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() == 3 {
-        let mut vector = match &args[0].value {
+        let vector = match &ec.heap.get_value(args[0]) {
             SchemeValue::Vector(v) => v,
             _ => return Err("vector-ref: first argument must be a vector".to_string()),
         };
-        let index = match &args[1].value {
+        let index = match &ec.heap.get_value(args[1]) {
             SchemeValue::Int(n) => n.to_usize().unwrap(),
             _ => return Err("vector-ref: second argument must be a number".to_string()),
         };

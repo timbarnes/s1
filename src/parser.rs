@@ -22,7 +22,7 @@ use crate::gc::{
     GcHeap, GcRef, get_nil, get_symbol, new_bool, new_char, new_float, new_int, new_pair,
     new_string, new_vector,
 };
-use crate::io::Port;
+use crate::io::PortKind;
 use crate::tokenizer::{Token, Tokenizer};
 use num_bigint::BigInt;
 
@@ -30,6 +30,7 @@ use num_bigint::BigInt;
 pub enum ParseError {
     Eof,
     Syntax(String),
+    Other(String),
 }
 
 /// Parser for Scheme s-expressions using the reference-based GC system.
@@ -52,8 +53,12 @@ impl Parser {
     /// # Arguments
     /// * `heap` - The GC heap for allocating Scheme values
     /// * `port` - The input port to read from
-    pub fn parse(&mut self, heap: &mut GcHeap, port: &mut Port) -> Result<GcRef, ParseError> {
-        let mut tokenizer = Tokenizer::new(port);
+    pub fn parse(
+        &mut self,
+        heap: &mut GcHeap,
+        port_ref: &mut PortKind,
+    ) -> Result<GcRef, ParseError> {
+        let mut tokenizer = Tokenizer::new(port_ref);
         let token = tokenizer.next_token();
         match token {
             Some(Token::Quote) => {
@@ -227,227 +232,281 @@ mod tests {
     #[test]
     fn parse_number() {
         use crate::gc::SchemeValue;
-        let mut heap = GcHeap::new();
+        let mut ev = crate::eval::Evaluator::new();
+        let ec = crate::eval::EvalContext::from_eval(&mut ev);
         let mut port = crate::io::new_string_port_input("42");
         let mut parser = Parser::new();
-        let expr = parser.parse(&mut heap, &mut port).unwrap();
-        match &expr.value {
+        let expr = parser.parse(ec.heap, &mut port).unwrap();
+        match &ec.heap.get_value(expr) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "42"),
-            _ => panic!("Expected integer, got {:?}", expr.value),
+            _ => panic!(
+                "Expected integer, got {}",
+                crate::printer::print_scheme_value(&ec, &expr)
+            ),
         }
     }
 
     #[test]
     fn parse_symbol() {
-        let mut heap = GcHeap::new();
+        use crate::printer::print_scheme_value;
+        let mut ev = crate::eval::Evaluator::new();
+        let ec = crate::eval::EvalContext::from_eval(&mut ev);
         let mut port = crate::io::new_string_port_input("hello");
         let mut parser = Parser::new();
-        let expr = parser.parse(&mut heap, &mut port).unwrap();
-        match &expr.value {
+        let expr = parser.parse(ec.heap, &mut port).unwrap();
+        match &ec.heap.get_value(expr) {
             crate::gc::SchemeValue::Symbol(s) => assert_eq!(s, "hello"),
-            _ => panic!("Expected symbol, got {:?}", expr.value),
+            _ => panic!("Expected symbol, got {}", print_scheme_value(&ec, &expr)),
         }
     }
 
     #[test]
     fn parse_string() {
-        let mut heap = GcHeap::new();
+        use crate::printer::print_scheme_value;
+        let mut ev = crate::eval::Evaluator::new();
+        let ec = crate::eval::EvalContext::from_eval(&mut ev);
+        let mut port = crate::io::new_string_port_input("hello");
         let mut port = crate::io::new_string_port_input("\"hello world\"");
         let mut parser = Parser::new();
-        let expr = parser.parse(&mut heap, &mut port).unwrap();
-        match &expr.value {
+        let expr = parser.parse(ec.heap, &mut port).unwrap();
+        match &ec.heap.get_value(expr) {
             crate::gc::SchemeValue::Str(s) => assert_eq!(s, "hello world"),
-            _ => panic!("Expected string, got {:?}", expr.value),
+            _ => panic!("Expected string, got {}", print_scheme_value(&ec, &expr)),
         }
     }
 
     #[test]
     fn parse_nil() {
-        let mut heap = GcHeap::new();
+        use crate::printer::print_scheme_value;
+        let mut ev = crate::eval::Evaluator::new();
+        let ec = crate::eval::EvalContext::from_eval(&mut ev);
+        let mut port = crate::io::new_string_port_input("hello");
         let mut port = crate::io::new_string_port_input("nil");
         let mut parser = Parser::new();
-        let expr = parser.parse(&mut heap, &mut port).unwrap();
-        match &expr.value {
+        let expr = parser.parse(ec.heap, &mut port).unwrap();
+        match &ec.heap.get_value(expr) {
             crate::gc::SchemeValue::Nil => assert!(true), // Success
-            _ => panic!("Expected nil, got {:?}", expr.value),
+            _ => panic!("Expected nil, got {}", print_scheme_value(&ec, &expr)),
         }
     }
 
     #[test]
     fn parse_list() {
         use crate::gc::SchemeValue;
-        let mut heap = GcHeap::new();
-        let mut port = crate::io::new_string_port_input("(1 2 3)");
+        use crate::printer::print_scheme_value;
+        let mut ev = crate::eval::Evaluator::new();
+        let ec = crate::eval::EvalContext::from_eval(&mut ev);
+        let mut str_port = crate::io::new_string_port_input("hello");
+        let mut str_port = crate::io::new_string_port_input("(1 2 3)");
         let mut parser = Parser::new();
-        let expr = parser.parse(&mut heap, &mut port).unwrap();
+        let expr = parser.parse(ec.heap, &mut str_port).unwrap();
 
-        match &expr.value {
+        match &ec.heap.get_value(expr) {
             SchemeValue::Pair(car, cdr) => {
-                match &car.value {
+                match &ec.heap.get_value(*car) {
                     SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
-                    _ => panic!("Expected integer 1, got {:?}", car.value),
+                    _ => panic!("Expected integer 1, got {}", print_scheme_value(&ec, car)),
                 }
-                match &cdr.value {
+                match &ec.heap.get_value(*cdr) {
                     SchemeValue::Pair(car2, cdr2) => {
-                        match &car2.value {
+                        match &ec.heap.get_value(*car2) {
                             crate::gc::SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
-                            _ => panic!("Expected integer 2, got {:?}", car2.value),
+                            _ => {
+                                panic!("Expected integer 2, got {}", print_scheme_value(&ec, car2))
+                            }
                         }
-                        match &cdr2.value {
+                        match &ec.heap.get_value(*cdr2) {
                             crate::gc::SchemeValue::Pair(car3, cdr3) => {
-                                match &car3.value {
+                                match &ec.heap.get_value(*car3) {
                                     crate::gc::SchemeValue::Int(i) => {
                                         assert_eq!(i.to_string(), "3")
                                     }
-                                    _ => panic!("Expected integer 3, got {:?}", car3.value),
+                                    _ => {
+                                        panic!(
+                                            "Expected integer 3, got {}",
+                                            print_scheme_value(&ec, car3)
+                                        )
+                                    }
                                 }
-                                match &cdr3.value {
+                                match &ec.heap.get_value(*cdr3) {
                                     SchemeValue::Nil => assert!(true), // Success
-                                    _ => panic!("Expected nil, got {:?}", cdr3.value),
+                                    _ => panic!(
+                                        "Expected nil, got {}",
+                                        print_scheme_value(&ec, cdr3)
+                                    ),
                                 }
                             }
-                            _ => panic!("Expected pair, got {:?}", cdr2.value),
+                            _ => panic!("Expected pair, got {}", print_scheme_value(&ec, cdr2)),
                         }
                     }
-                    _ => panic!("Expected pair, got {:?}", cdr.value),
+                    _ => panic!("Expected pair, got {}", print_scheme_value(&ec, cdr)),
                 }
             }
-            _ => panic!("Expected pair, got {:?}", expr.value),
+            _ => panic!("Expected pair, got {}", print_scheme_value(&ec, &expr)),
         }
     }
 
     #[test]
     fn parse_booleans() {
-        let mut heap = GcHeap::new();
+        use crate::printer::print_scheme_value;
+        let mut ev = crate::eval::Evaluator::new();
+        let ec = crate::eval::EvalContext::from_eval(&mut ev);
         let mut port = crate::io::new_string_port_input("#t #f");
         let mut parser = Parser::new();
 
-        let expr = parser.parse(&mut heap, &mut port).unwrap();
-        match &expr.value {
+        let expr = parser.parse(ec.heap, &mut port).unwrap();
+        match &ec.heap.get_value(expr) {
             crate::gc::SchemeValue::Bool(b) => assert_eq!(*b, true),
-            _ => panic!("Expected true, got {:?}", expr.value),
+            _ => panic!("Expected true, got {}", print_scheme_value(&ec, &expr)),
         }
 
-        let expr = parser.parse(&mut heap, &mut port).unwrap();
-        match &expr.value {
+        let expr = parser.parse(ec.heap, &mut port).unwrap();
+        match &ec.heap.get_value(expr) {
             crate::gc::SchemeValue::Bool(b) => assert_eq!(*b, false),
-            _ => panic!("Expected false, got {:?}", expr.value),
+            _ => panic!("Expected false, got {}", print_scheme_value(&ec, &expr)),
         }
     }
 
     #[test]
     fn parse_character() {
         use crate::gc::SchemeValue;
-        let mut heap = GcHeap::new();
+        use crate::printer::print_scheme_value;
+        let mut ev = crate::eval::Evaluator::new();
+        let ec = crate::eval::EvalContext::from_eval(&mut ev);
+        let heap = GcHeap::new();
         let mut port = crate::io::new_string_port_input("#\\a #\\space");
         let mut parser = Parser::new();
 
-        let expr = parser.parse(&mut heap, &mut port).unwrap();
-        match &expr.value {
+        let expr = parser.parse(ec.heap, &mut port).unwrap();
+        match &heap.get_value(expr) {
             SchemeValue::Char(c) => assert_eq!(*c, 'a'),
-            _ => panic!("Expected character 'a', got {:?}", expr.value),
+            _ => panic!(
+                "Expected character 'a', got {}",
+                print_scheme_value(&ec, &expr)
+            ),
         }
 
-        let expr = parser.parse(&mut heap, &mut port).unwrap();
-        match &expr.value {
+        let expr = parser.parse(ec.heap, &mut port).unwrap();
+        match &heap.get_value(expr) {
             SchemeValue::Char(c) => assert_eq!(*c, ' '),
-            _ => panic!("Expected character ' ', got {:?}", expr.value),
+            _ => panic!(
+                "Expected character ' ', got {}",
+                print_scheme_value(&ec, &expr)
+            ),
         }
     }
 
     #[test]
     fn parse_quoted() {
         use crate::gc::SchemeValue;
-        let mut heap = GcHeap::new();
+        use crate::printer::print_scheme_value;
+        let mut ev = crate::eval::Evaluator::new();
+        let ec = crate::eval::EvalContext::from_eval(&mut ev);
+        let heap = GcHeap::new();
         let mut port = crate::io::new_string_port_input("'hello");
         let mut parser = Parser::new();
-        let expr = parser.parse(&mut heap, &mut port).unwrap();
+        let expr = parser.parse(ec.heap, &mut port).unwrap();
 
-        match &expr.value {
+        match &heap.get_value(expr) {
             SchemeValue::Pair(quote_sym, quoted_expr) => {
-                match &quote_sym.value {
+                match &heap.get_value(*quote_sym) {
                     SchemeValue::Symbol(s) => assert_eq!(s, "quote"),
-                    _ => panic!("Expected symbol 'quote', got {:?}", quote_sym.value),
+                    _ => panic!(
+                        "Expected symbol 'quote', got {}",
+                        print_scheme_value(&ec, quote_sym)
+                    ),
                 }
-                match &quoted_expr.value {
+                match &heap.get_value(*quoted_expr) {
                     SchemeValue::Pair(hello_sym, nil) => {
-                        match &hello_sym.value {
+                        match &heap.get_value(*hello_sym) {
                             SchemeValue::Symbol(s) => assert_eq!(s, "hello"),
-                            _ => panic!("Expected symbol 'hello', got {:?}", hello_sym.value),
+                            _ => panic!(
+                                "Expected symbol 'hello', got {}",
+                                print_scheme_value(&ec, hello_sym)
+                            ),
                         }
-                        match &nil.value {
+                        match &heap.get_value(*nil) {
                             SchemeValue::Nil => assert!(true), // Success
-                            _ => panic!("Expected nil, got {:?}", nil.value),
+                            _ => panic!("Expected nil, got {}", print_scheme_value(&ec, nil)),
                         }
                     }
-                    _ => panic!("Expected pair, got {:?}", quoted_expr.value),
+                    _ => panic!(
+                        "Expected pair, got {}",
+                        print_scheme_value(&ec, quoted_expr)
+                    ),
                 }
             }
-            _ => panic!("Expected pair, got {:?}", expr.value),
+            _ => panic!("Expected pair, got {}", print_scheme_value(&ec, &expr)),
         }
     }
 
     #[test]
     fn parse_dotted_pair() {
         use crate::gc::SchemeValue;
-        let mut heap = GcHeap::new();
+        use crate::printer::print_scheme_value;
+        let mut ev = crate::eval::Evaluator::new();
+        let ec = crate::eval::EvalContext::from_eval(&mut ev);
         let mut port = crate::io::new_string_port_input("(1 . 2)");
         let mut parser = Parser::new();
-        let expr = parser.parse(&mut heap, &mut port).unwrap();
+        let expr = parser.parse(ec.heap, &mut port).unwrap();
 
-        match &expr.value {
+        match &ec.heap.get_value(expr) {
             SchemeValue::Pair(car, cdr) => {
-                match &car.value {
+                match &ec.heap.get_value(*car) {
                     SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
-                    _ => panic!("Expected integer 1, got {:?}", car.value),
+                    _ => panic!("Expected integer 1, got {}", print_scheme_value(&ec, car)),
                 }
-                match &cdr.value {
+                match &ec.heap.get_value(*cdr) {
                     SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
-                    _ => panic!("Expected integer 2, got {:?}", cdr.value),
+                    _ => panic!("Expected integer 2, got {}", print_scheme_value(&ec, cdr)),
                 }
             }
-            _ => panic!("Expected pair, got {:?}", expr.value),
+            _ => panic!("Expected pair, got {}", print_scheme_value(&ec, &expr)),
         }
     }
 
     #[test]
     fn parse_vector() {
         use crate::gc::SchemeValue;
-        let mut heap = GcHeap::new();
+        use crate::printer::print_scheme_value;
+        let mut ev = crate::eval::Evaluator::new();
+        let ec = crate::eval::EvalContext::from_eval(&mut ev);
         let mut port = crate::io::new_string_port_input("#(1 2 3)");
         let mut parser = Parser::new();
-        let expr = parser.parse(&mut heap, &mut port).unwrap();
+        let expr = parser.parse(ec.heap, &mut port).unwrap();
 
-        match &expr.value {
+        match &ec.heap.get_value(expr) {
             SchemeValue::Vector(v) => {
                 assert_eq!(v.len(), 3);
-                match &v[0].value {
+                match &ec.heap.get_value(v[0]) {
                     SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
-                    _ => panic!("Expected integer 1, got {:?}", v[0].value),
+                    _ => panic!("Expected integer 1, got {}", print_scheme_value(&ec, &v[0])),
                 }
-                match &v[1].value {
+                match &ec.heap.get_value(v[1]) {
                     SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
-                    _ => panic!("Expected integer 2, got {:?}", v[1].value),
+                    _ => panic!("Expected integer 2, got {}", print_scheme_value(&ec, &v[1])),
                 }
-                match &v[2].value {
+                match &ec.heap.get_value(v[2]) {
                     SchemeValue::Int(i) => assert_eq!(i.to_string(), "3"),
-                    _ => panic!("Expected integer 3, got {:?}", v[2].value),
+                    _ => panic!("Expected integer 3, got {}", print_scheme_value(&ec, &v[2])),
                 }
             }
-            _ => panic!("Expected vector, got {:?}", expr.value),
+            _ => panic!("Expected vector, got {}", print_scheme_value(&ec, &expr)),
         }
     }
 
     #[test]
     fn parse_float() {
         use crate::gc::SchemeValue;
-        let mut heap = GcHeap::new();
+        use crate::printer::print_scheme_value;
+        let mut ev = crate::eval::Evaluator::new();
+        let ec = crate::eval::EvalContext::from_eval(&mut ev);
         let mut port = crate::io::new_string_port_input("3.14");
         let mut parser = Parser::new();
-        let expr = parser.parse(&mut heap, &mut port).unwrap();
-        match &expr.value {
+        let expr = parser.parse(ec.heap, &mut port).unwrap();
+        match &ec.heap.get_value(expr) {
             SchemeValue::Float(f) => assert_eq!(*f, 3.14),
-            _ => panic!("Expected float, got {:?}", expr.value),
+            _ => panic!("Expected float, got {}", print_scheme_value(&ec, &expr)),
         }
     }
 }

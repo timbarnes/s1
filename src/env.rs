@@ -110,6 +110,21 @@ impl Environment {
         None
     }
 
+    /// Get a binding from a str representing the name.
+    // pub fn get_symbol_by_name(&mut self, name: &str) -> Option<GcRef> {
+    //     let mut current = Some(self.current_frame.clone());
+    //     match current {
+    //         Some(frame_rc) => {
+    //             let frame = frame_rc.borrow();
+    //             match intern_symbol(name) {
+    //                 Some(symbol) => self.get_symbol(symbol),
+    //                 None => None,
+    //             }
+    //         }
+    //         None => None,
+    //     }
+    // }
+
     /// Retrieve a binding by symbol, returning its value and the frame it was found in
     pub fn get_symbol_and_frame(&self, symbol: GcRef) -> Option<(GcRef, Rc<RefCell<Frame>>)> {
         let mut current = Some(self.current_frame.clone());
@@ -165,30 +180,31 @@ impl Environment {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gc::{GcHeap, new_int, new_string};
+    use crate::gc::{new_int, new_string};
     use num_bigint::BigInt;
 
     #[test]
     fn test_frame_based_environment() {
-        let mut heap = GcHeap::new();
+        let mut ev = crate::eval::Evaluator::new();
+        let ec = crate::eval::EvalContext::from_eval(&mut ev);
 
         // Create a new environment
         let mut env = Environment::new();
 
         // Create some interned symbols
-        let global_sym = heap.intern_symbol("global_var");
-        let local_sym = heap.intern_symbol("local_var");
-        let extended_sym = heap.intern_symbol("extended_var");
+        let global_sym = ec.heap.intern_symbol("global_var");
+        let local_sym = ec.heap.intern_symbol("local_var");
+        let extended_sym = ec.heap.intern_symbol("extended_var");
 
         // Set a global binding
-        let global_val = new_int(&mut heap, BigInt::from(42));
+        let global_val = new_int(ec.heap, BigInt::from(42));
         env.set_global_symbol(global_sym, global_val);
 
         // Verify we can get the global binding
         assert!(env.get_symbol(global_sym).is_some());
 
         // Set a local binding in current frame
-        let local_val = new_string(&mut heap, "local");
+        let local_val = new_string(ec.heap, "local");
         env.set_symbol(local_sym, local_val);
 
         // Verify we can get the local binding
@@ -198,7 +214,7 @@ mod tests {
         let mut extended_env = env.extend();
 
         // Set a binding in the new frame
-        let extended_val = new_int(&mut heap, BigInt::from(99));
+        let extended_val = new_int(ec.heap, BigInt::from(99));
         extended_env.set_symbol(extended_sym, extended_val);
 
         // Verify we can get the extended binding
@@ -214,32 +230,33 @@ mod tests {
         assert!(env.get_symbol(extended_sym).is_none());
 
         // Test that local bindings shadow global ones
-        let shadow_val = new_string(&mut heap, "shadowed");
+        let shadow_val = new_string(ec.heap, "shadowed");
         extended_env.set_symbol(global_sym, shadow_val);
         assert!(extended_env.get_symbol(global_sym).is_some());
     }
 
     #[test]
     fn test_symbol_based_environment() {
-        let mut heap = GcHeap::new();
+        let mut ev = crate::eval::Evaluator::new();
+        let ec = crate::eval::EvalContext::from_eval(&mut ev);
 
         // Create a new environment
         let mut env = Environment::new();
 
         // Create some interned symbols
-        let global_sym = heap.intern_symbol("global_var");
-        let local_sym = heap.intern_symbol("local_var");
-        let extended_sym = heap.intern_symbol("extended_var");
+        let global_sym = ec.heap.intern_symbol("global_var");
+        let local_sym = ec.heap.intern_symbol("local_var");
+        let extended_sym = ec.heap.intern_symbol("extended_var");
 
         // Set a global binding using symbol
-        let global_val = new_int(&mut heap, BigInt::from(42));
+        let global_val = new_int(ec.heap, BigInt::from(42));
         env.set_global_symbol(global_sym, global_val);
 
         // Verify we can get the global binding using symbol
         assert!(env.get_symbol(global_sym).is_some());
 
         // Set a local binding in current frame using symbol
-        let local_val = new_string(&mut heap, "local");
+        let local_val = new_string(ec.heap, "local");
         env.set_symbol(local_sym, local_val);
 
         // Verify we can get the local binding using symbol
@@ -249,7 +266,7 @@ mod tests {
         let mut extended_env = env.extend();
 
         // Set a binding in the new frame using symbol
-        let extended_val = new_int(&mut heap, BigInt::from(99));
+        let extended_val = new_int(ec.heap, BigInt::from(99));
         extended_env.set_symbol(extended_sym, extended_val);
 
         // Verify we can get the extended binding using symbol
@@ -266,7 +283,7 @@ mod tests {
         assert!(env.get_symbol(extended_sym).is_none());
 
         // Test that local bindings shadow global ones using symbols
-        let shadow_val = new_string(&mut heap, "shadowed");
+        let shadow_val = new_string(ec.heap, "shadowed");
         extended_env.set_symbol(global_sym, shadow_val);
         assert!(extended_env.get_symbol(global_sym).is_some());
 

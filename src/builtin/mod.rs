@@ -4,6 +4,7 @@ pub mod number;
 pub mod predicate;
 pub mod vector;
 
+use crate::eval::EvalContext;
 use crate::gc::{GcHeap, GcRef, SchemeValue, get_nil, new_string};
 use crate::printer::print_scheme_value;
 
@@ -27,49 +28,45 @@ macro_rules! register_builtin_family {
 // BUILTIN FUNCTIONS
 // ============================================================================
 
-pub fn display_builtin(_heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+pub fn display(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() < 1 || args.len() > 2 {
         return Err("display: expected 1 or 2 arguments".to_string());
     }
-    let val = &args[0];
-    use crate::gc::SchemeValue;
-    let s = match &val.value {
-        SchemeValue::Str(s) => s.clone(),    // Print raw string, no quotes
-        _ => print_scheme_value(&val.value), // Use pretty-printer for other types
-    };
-    // If a port is provided as the second argument, write to it
+
+    // Extract the SchemeValue reference in its own block to shorten the borrow
+    let s = print_scheme_value(&ec, &args[0]);
+
     if args.len() == 2 {
-        // For now, just write to stdout
         print!("{}", s);
         use std::io::Write;
         std::io::stdout().flush().unwrap();
     } else {
-        // Default behavior: write to stdout
         print!("{}", s);
         use std::io::Write;
         std::io::stdout().flush().unwrap();
     }
-    Ok(*val)
+
+    Ok(ec.heap.nil_s())
 }
 
-pub fn newline_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+pub fn newline(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() > 1 {
         return Err("newline: expected 0 or 1 arguments".to_string());
     }
 
     // For now, just print a newline to stdout
-    // In a full implementation, we'd write to the specified port
+    // TODO: In a full implementation, we'd write to the specified port
     println!();
 
     // Return undefined (we'll use nil for now)
-    Ok(get_nil(heap))
+    Ok(get_nil(ec.heap))
 }
 
 /// Builtin function: (quit)
 ///
 /// Exits the Scheme interpreter with exit code 0.
 /// This works in both programs and the REPL.
-pub fn quit_builtin(_heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+pub fn quit(_ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     if !args.is_empty() {
         return Err("quit: expected 0 arguments".to_string());
     }
@@ -79,12 +76,12 @@ pub fn quit_builtin(_heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String>
 }
 
 // (help 'symbol): returns the doc string for the given symbol as a Scheme string
-pub fn help_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+pub fn help(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     if let Some(arg) = args.get(0) {
-        if let SchemeValue::Symbol(sym) = &arg.value {
+        if let SchemeValue::Symbol(sym) = &ec.heap.get_value(*arg) {
             // In a real implementation, you would have access to the environment here.
             // For now, return a placeholder string.
-            Ok(new_string(heap, &format!("Help for {}: ...", sym)))
+            Ok(new_string(ec.heap, &format!("Help for {}: ...", sym)))
         } else {
             Err("help: argument must be a symbol".to_string())
         }
@@ -134,9 +131,9 @@ pub fn register_builtins(heap: &mut GcHeap, env: &mut crate::env::Environment) {
     predicate::register_predicate_builtins(heap, env);
     vector::register_vector_builtins(heap, env);
     register_builtin_family!(heap, env,
-        "help" => help_builtin,
-        "display" => display_builtin,
-        "newline" => newline_builtin,
-        "quit" => quit_builtin,
+        "help" => help,
+        "display" => display,
+        "newline" => newline,
+        "quit" => quit,
     );
 }

@@ -20,17 +20,17 @@
 //! ```
 
 #![allow(dead_code)]
-use crate::eval::Evaluator;
+use crate::eval::{EvalContext, Evaluator};
+use crate::io::PortKind;
 use num_bigint::BigInt;
 use std::cell::RefCell;
-use std::cmp::PartialEq;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 pub enum Callable {
     Builtin {
-        func: fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>,
+        func: fn(&mut EvalContext, &[GcRef]) -> Result<GcRef, String>,
         doc: String,
     },
     SpecialForm {
@@ -49,8 +49,7 @@ pub enum Callable {
     },
 }
 
-/// Simple Scheme values that use GcRefSimple references.
-/// This is the new system that eliminates Rc<RefCell<T>> overhead.
+/// Scheme values that use GcRef references.
 pub enum SchemeValue {
     Int(BigInt),
     Float(f64),
@@ -63,148 +62,161 @@ pub enum SchemeValue {
     Callable(Callable),
     Nil,
     TailCallScheduled,
-    Port { kind: crate::io::PortKind },
+    Port(PortKind),
     // Extend with more types as needed.
 }
 
-impl PartialEq for SchemeValue {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (SchemeValue::Int(a), SchemeValue::Int(b)) => a == b,
-            (SchemeValue::Float(a), SchemeValue::Float(b)) => a == b,
-            (SchemeValue::Symbol(a), SchemeValue::Symbol(b)) => a == b,
-            (SchemeValue::Pair(a1, d1), SchemeValue::Pair(a2, d2)) => {
-                a1.value == a2.value && d1.value == d2.value
+/// Returns an iterator over a Scheme list in the heap.
+/// Each item is a `GcRef` pointing to the car of a pair.
+pub fn heap_list_iter<'a>(
+    heap: &'a GcHeap,
+    mut current: GcRef,
+) -> impl Iterator<Item = Result<GcRef, String>> + 'a {
+    std::iter::from_fn(move || match heap.get_value(current) {
+        SchemeValue::Nil => None,
+        SchemeValue::Pair(car, cdr) => {
+            current = *cdr;
+            Some(Ok(*car))
+        }
+        _ => Some(Err("Improper list structure in cdr".to_string())),
+    })
+}
+
+pub fn eq(heap: &GcHeap, a: GcRef, b: GcRef) -> bool {
+    match (heap.get_value(a), heap.get_value(b)) {
+        (SchemeValue::Int(a), SchemeValue::Int(b)) => a == b,
+        (SchemeValue::Float(a), SchemeValue::Float(b)) => a == b,
+        (SchemeValue::Symbol(a), SchemeValue::Symbol(b)) => a == b,
+        (SchemeValue::Pair(a1, d1), SchemeValue::Pair(a2, d2)) => {
+            eq(heap, *a1, *a2) && eq(heap, *d1, *d2)
+        }
+        (SchemeValue::Str(a), SchemeValue::Str(b)) => a == b,
+        (SchemeValue::Vector(a), SchemeValue::Vector(b)) => {
+            if a.len() != b.len() {
+                return false;
             }
-            (SchemeValue::Str(a), SchemeValue::Str(b)) => a == b,
-            (SchemeValue::Vector(a), SchemeValue::Vector(b)) => {
-                if a.len() != b.len() {
+            for (x, y) in a.iter().zip(b.iter()) {
+                if !eq(heap, *x, *y) {
                     return false;
                 }
-                for (x, y) in a.iter().zip(b.iter()) {
-                    if x.value != y.value {
-                        return false;
-                    }
-                }
-                true
             }
-            (SchemeValue::Bool(a), SchemeValue::Bool(b)) => a == b,
-            (SchemeValue::Char(a), SchemeValue::Char(b)) => a == b,
-            (SchemeValue::Callable(a), SchemeValue::Callable(b)) => match (a, b) {
-                (Callable::Builtin { func: f1, .. }, Callable::Builtin { func: f2, .. }) => {
-                    std::ptr::fn_addr_eq(*f1, *f2)
-                }
-                (
-                    Callable::SpecialForm { func: f1, .. },
-                    Callable::SpecialForm { func: f2, .. },
-                ) => std::ptr::fn_addr_eq(*f1, *f2),
-                (
-                    Callable::Closure {
-                        params: p1,
-                        body: b1,
-                        ..
-                    },
-                    Callable::Closure {
-                        params: p2,
-                        body: b2,
-                        ..
-                    },
-                ) => {
-                    if p1.len() != p2.len() {
-                        return false;
-                    }
-                    for (param1, param2) in p1.iter().zip(p2.iter()) {
-                        if param1.value != param2.value {
-                            return false;
-                        }
-                    }
-                    b1.value == b2.value
-                }
-                (
-                    Callable::Macro {
-                        params: p1,
-                        body: b1,
-                        ..
-                    },
-                    Callable::Macro {
-                        params: p2,
-                        body: b2,
-                        ..
-                    },
-                ) => {
-                    if p1.len() != p2.len() {
-                        return false;
-                    }
-                    for (param1, param2) in p1.iter().zip(p2.iter()) {
-                        if param1.value != param2.value {
-                            return false;
-                        }
-                    }
-                    b1.value == b2.value
-                }
-                _ => false,
-            },
-            // For Primitive, just compare type (not function pointer)
-            (SchemeValue::Nil, SchemeValue::Nil) => true,
-            (SchemeValue::Port { kind: k1 }, SchemeValue::Port { kind: k2 }) => k1 == k2,
-            _ => false,
+            true
         }
+        (SchemeValue::Bool(a), SchemeValue::Bool(b)) => a == b,
+        (SchemeValue::Char(a), SchemeValue::Char(b)) => a == b,
+        (SchemeValue::Callable(a), SchemeValue::Callable(b)) => match (a, b) {
+            (Callable::Builtin { func: f1, .. }, Callable::Builtin { func: f2, .. }) => {
+                std::ptr::fn_addr_eq(*f1, *f2)
+            }
+            (Callable::SpecialForm { func: f1, .. }, Callable::SpecialForm { func: f2, .. }) => {
+                std::ptr::fn_addr_eq(*f1, *f2)
+            }
+            (
+                Callable::Closure {
+                    params: p1,
+                    body: b1,
+                    ..
+                },
+                Callable::Closure {
+                    params: p2,
+                    body: b2,
+                    ..
+                },
+            ) => {
+                if p1.len() != p2.len() {
+                    return false;
+                }
+                for (param1, param2) in p1.iter().zip(p2.iter()) {
+                    if !eq(heap, *param1, *param2) {
+                        return false;
+                    }
+                }
+                eq(heap, *b1, *b2)
+            }
+            (
+                Callable::Macro {
+                    params: p1,
+                    body: b1,
+                    ..
+                },
+                Callable::Macro {
+                    params: p2,
+                    body: b2,
+                    ..
+                },
+            ) => {
+                if p1.len() != p2.len() {
+                    return false;
+                }
+                for (param1, param2) in p1.iter().zip(p2.iter()) {
+                    if !eq(heap, *param1, *param2) {
+                        return false;
+                    }
+                }
+                eq(heap, *b1, *b2)
+            }
+            _ => false,
+        },
+        // For Primitive, just compare type (not function pointer)
+        (SchemeValue::Nil, SchemeValue::Nil) => true,
+        (SchemeValue::Port(k1), SchemeValue::Port(k2)) => k1 == k2,
+        _ => false,
     }
 }
 
 // Manual Debug implementation for SchemeValueSimple
-impl std::fmt::Debug for SchemeValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SchemeValue::Int(i) => write!(f, "Int({})", i),
-            SchemeValue::Float(fl) => write!(f, "Float({})", fl),
-            SchemeValue::Symbol(s) => write!(f, "Symbol({:?})", s),
-            SchemeValue::Pair(car, cdr) => f
-                .debug_tuple("Pair")
-                .field(&car.value)
-                .field(&cdr.value)
-                .finish(),
-            SchemeValue::Str(s) => write!(f, "Str({:?})", s),
-            SchemeValue::Vector(v) => f.debug_tuple("Vector").field(v).finish(),
-            SchemeValue::Bool(b) => write!(f, "Bool({})", b),
-            SchemeValue::Char(c) => write!(f, "Char({:?})", c),
-            SchemeValue::Callable(c) => match c {
-                Callable::Builtin { doc, .. } => write!(f, "Primitive({:?})", doc),
-                Callable::SpecialForm { doc, .. } => write!(f, "SpecialForm({:?})", doc),
-                Callable::Macro { params, body, .. } => {
-                    let param_names: Vec<String> = params
-                        .iter()
-                        .map(|p| match &p.value {
-                            SchemeValue::Symbol(name) => name.clone(),
-                            _ => "?".to_string(),
-                        })
-                        .collect();
-                    write!(f, "Macro({:?}, {:?})", param_names, &body.value)
-                }
-                Callable::Closure { params, body, .. } => {
-                    let param_names: Vec<String> = params
-                        .iter()
-                        .map(|p| match &p.value {
-                            SchemeValue::Symbol(name) => name.clone(),
-                            _ => "?".to_string(),
-                        })
-                        .collect();
-                    write!(f, "Closure({:?}, {:?})", param_names, &body.value)
-                }
-            },
-            SchemeValue::Nil => write!(f, "Nil"),
-            SchemeValue::Port { kind } => write!(f, "Port({:?})", kind),
-            SchemeValue::TailCallScheduled => write!(f, "TailCallScheduled"),
-        }
-    }
-}
+// impl std::fmt::Debug for SchemeValue {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         match self {
+//             SchemeValue::Int(i) => write!(f, "Int({})", i),
+//             SchemeValue::Float(fl) => write!(f, "Float({})", fl),
+//             SchemeValue::Symbol(s) => write!(f, "Symbol({:?})", s),
+//             SchemeValue::Pair(car, cdr) => f
+//                 .debug_tuple("Pair")
+//                 .field(&heap.get_value(car))
+//                 .field(&heap.get_value(cdr))
+//                 .finish(),
+//             SchemeValue::Str(s) => write!(f, "Str({:?})", s),
+//             SchemeValue::Vector(v) => f.debug_tuple("Vector").field(v).finish(),
+//             SchemeValue::Bool(b) => write!(f, "Bool({})", b),
+//             SchemeValue::Char(c) => write!(f, "Char({:?})", c),
+//             SchemeValue::Callable(c) => match c {
+//                 Callable::Builtin { doc, .. } => write!(f, "Primitive({:?})", doc),
+//                 Callable::SpecialForm { doc, .. } => write!(f, "SpecialForm({:?})", doc),
+//                 Callable::Macro { params, body, .. } => {
+//                     let param_names: Vec<String> = params
+//                         .iter()
+//                         .map(|p| match &heap.get_value(p) {
+//                             SchemeValue::Symbol(name) => name.clone(),
+//                             _ => "?".to_string(),
+//                         })
+//                         .collect();
+//                     write!(f, "Macro({:?}, {:?})", param_names, &heap.get_value(body))
+//                 }
+//                 Callable::Closure { params, body, .. } => {
+//                     let param_names: Vec<String> = params
+//                         .iter()
+//                         .map(|p| match &heap.get_value(p) {
+//                             SchemeValue::Symbol(name) => name.clone(),
+//                             _ => "?".to_string(),
+//                         })
+//                         .collect();
+//                     write!(f, "Closure({:?}, {:?})", param_names, &heap.get_value(body))
+//                 }
+//             },
+//             SchemeValue::Nil => write!(f, "Nil"),
+//             SchemeValue::Port { kind } => write!(f, "Port({:?})", kind),
+//             SchemeValue::TailCallScheduled => write!(f, "TailCallScheduled"),
+//         }
+//     }
+// }
 
 /// Reference to a garbage-collected Scheme object.
 /// This is the new system that uses static references for better performance.
-pub type GcRef = &'static GcObject;
+pub type GcRef = *mut GcObject;
 
 /// A Scheme object allocated on the garbage-collected heap.
-#[derive(Debug)]
+//#[derive(Debug)]
 pub struct GcObject {
     /// The actual Scheme value stored in this object
     pub value: SchemeValue,
@@ -212,17 +224,17 @@ pub struct GcObject {
     marked: bool,
 }
 
-impl Eq for GcObject {}
+// impl Eq for GcObject {}
 
-impl PartialEq for GcObject {
-    fn eq(&self, other: &Self) -> bool {
-        self.value == other.value
-    }
-}
+// impl PartialEq for GcObject {
+//     fn eq(&self, other: &Self) -> bool {
+//         heap.get_value(self) == heap.get_value(other)
+//     }
+// }
 
-impl Hash for GcObject {
+impl Hash for SchemeValue {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        match &self.value {
+        match self {
             SchemeValue::Symbol(s) => s.hash(state),
             SchemeValue::Int(i) => i.hash(state),
             SchemeValue::Float(f) => f.to_bits().hash(state),
@@ -234,27 +246,29 @@ impl Hash for GcObject {
     }
 }
 
-pub struct ListIter {
+pub struct ListIter<'a> {
     current: Option<GcRef>,
+    heap: &'a GcHeap,
 }
 
-impl ListIter {
-    pub fn new(start: GcRef) -> Self {
+impl<'a> ListIter<'a> {
+    pub fn new(start: GcRef, heap: &'a GcHeap) -> Self {
         Self {
             current: Some(start),
+            heap,
         }
     }
 }
 
-impl Iterator for ListIter {
+impl<'a> Iterator for ListIter<'a> {
     type Item = GcRef;
 
     fn next(&mut self) -> Option<Self::Item> {
         let cur = self.current.take()?;
-        match &cur.value {
+        match &self.heap.get_value(cur) {
             SchemeValue::Pair(car, cdr) => {
-                self.current = Some(cdr);
-                Some(car)
+                self.current = Some(*cdr);
+                Some(*car)
             }
             SchemeValue::Nil => None,
             _ => None, // not a proper list
@@ -262,10 +276,10 @@ impl Iterator for ListIter {
     }
 }
 
-pub fn is_proper_list(mut val: &GcRef) -> bool {
+pub fn is_proper_list(heap: &GcHeap, mut val: GcRef) -> bool {
     loop {
-        match &val.value {
-            SchemeValue::Pair(_, cdr) => val = cdr,
+        match &heap.get_value(val) {
+            SchemeValue::Pair(_, cdr) => val = *cdr,
             SchemeValue::Nil => return true,
             _ => return false,
         }
@@ -342,9 +356,25 @@ impl GcHeap {
         // For now, we'll use a simple approach: allocate on the heap and leak it
         // In a real implementation, you'd want proper memory management
         let boxed = Box::new(obj);
-        let ptr = Box::leak(boxed);
-        self.objects.push(ptr);
-        ptr
+        let raw = Box::into_raw(boxed);
+        self.objects.push(raw);
+        raw
+    }
+
+    pub fn get(&self, gcref: GcRef) -> &GcObject {
+        unsafe { &*gcref }
+    }
+
+    pub fn get_mut(&mut self, gcref: GcRef) -> &mut GcObject {
+        unsafe { &mut *gcref }
+    }
+
+    pub fn get_value(&self, r: GcRef) -> &SchemeValue {
+        unsafe { &(*r).value }
+    }
+
+    pub fn get_value_mut(&self, r: GcRef) -> &mut SchemeValue {
+        unsafe { &mut (*r).value }
     }
 
     /// Get the singleton nil value.
@@ -370,6 +400,15 @@ impl GcHeap {
     /// Get statistics about the simple heap.
     pub fn simple_stats(&self) -> (usize, usize) {
         (self.objects.len(), self.symbol_table.len())
+    }
+
+    /// Check if a symbol exists in the symbol table.
+    pub fn symbol_exists(&self, name: &str) -> Option<GcRef> {
+        if let Some(existing) = self.symbol_table.get(name) {
+            Some(*existing)
+        } else {
+            None
+        }
     }
 
     /// Intern a symbol (ensure only one copy exists for each name).
@@ -399,13 +438,45 @@ impl GcHeap {
     }
 
     /// Update the position of a StringPortInput in a SchemeValue::Port
-    pub fn update_string_port_pos(&mut self, port_ref: GcRef, new_pos: usize) {
-        // Convert the Scheme port to a Rust port, update it, then convert back
-        let rust_port = crate::io::scheme_port_to_port(port_ref);
-        if crate::io::update_string_port_pos(&rust_port, new_pos) {
-            // The port was updated successfully
-            // Note: In a real implementation, you might want to update the Scheme port object
-            // but for now, we'll rely on the Rust port being updated
+    pub fn update_string_port_pos(&mut self, port_ref: PortKind, new_pos: usize) -> bool {
+        crate::io::update_string_port_pos(&port_ref, new_pos)
+    }
+
+    pub fn list_iter<'a>(&'a self, list: GcRef) -> ListIter<'a> {
+        ListIter {
+            heap: self,
+            current: Some(list),
+        }
+    }
+}
+
+pub struct ResultListIter {
+    current: Option<GcRef>,
+}
+
+impl ResultListIter {
+    pub fn new(start: GcRef) -> Self {
+        Self {
+            current: Some(start),
+        }
+    }
+
+    pub fn next(&mut self, heap: &GcHeap) -> Result<Option<GcRef>, String> {
+        let current = match self.current {
+            Some(gcref) => gcref,
+            None => return Ok(None),
+        };
+
+        match heap.get_value(current) {
+            SchemeValue::Pair(car, cdr) => {
+                self.current = Some(*cdr);
+                Ok(Some(*car))
+            }
+            SchemeValue::Nil => {
+                self.current = None;
+                Ok(None)
+            }
+            _ => Err("Improper list in function call".to_string()),
         }
     }
 }
@@ -496,7 +567,7 @@ pub fn new_vector(heap: &mut GcHeap, elements: Vec<GcRef>) -> GcRef {
 /// Create a new primitive function.
 pub fn new_primitive(
     heap: &mut GcHeap,
-    f: fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>,
+    f: fn(&mut EvalContext, &[GcRef]) -> Result<GcRef, String>,
     doc: String,
 ) -> GcRef {
     let primitive = SchemeValue::Callable(Callable::Builtin { func: f, doc });
@@ -553,7 +624,7 @@ pub fn new_macro(
 /// Create a new port value.
 pub fn new_port(heap: &mut GcHeap, kind: crate::io::PortKind) -> GcRef {
     let obj = GcObject {
-        value: SchemeValue::Port { kind },
+        value: SchemeValue::Port(kind),
         marked: false,
     };
     heap.alloc(obj)
@@ -569,23 +640,23 @@ pub fn new_tail_call_scheduled(heap: &mut GcHeap) -> GcRef {
     heap.alloc(obj)
 }
 
-pub fn is_nil(expr: GcRef) -> bool {
-    match &expr.value {
+pub fn is_nil(heap: &GcHeap, expr: GcRef) -> bool {
+    match &heap.get_value(expr) {
         SchemeValue::Nil => true,
         _ => false,
     }
 }
 
-pub fn car(list: GcRef) -> Result<GcRef, String> {
-    match &list.value {
-        SchemeValue::Pair(car, _) => Ok(car),
+pub fn car(heap: &GcHeap, list: GcRef) -> Result<GcRef, String> {
+    match &heap.get_value(list) {
+        SchemeValue::Pair(car, _) => Ok(*car),
         _ => Err("car: not a pair".to_string()),
     }
 }
 
-pub fn cdr(list: GcRef) -> Result<GcRef, String> {
-    match &list.value {
-        SchemeValue::Pair(_, cdr) => Ok(cdr),
+pub fn cdr(heap: &GcHeap, list: GcRef) -> Result<GcRef, String> {
+    match &heap.get_value(list) {
+        SchemeValue::Pair(_, cdr) => Ok(*cdr),
         _ => Err("cdr: not a pair".to_string()),
     }
 }
@@ -598,17 +669,17 @@ pub fn cons(car: GcRef, cdr: GcRef, heap: &mut GcHeap) -> Result<GcRef, String> 
     Ok(heap.alloc(obj))
 }
 
-pub fn list_ref(mut list: &GcRef, index: usize) -> Result<GcRef, String> {
+pub fn list_ref(heap: &mut GcHeap, mut list: GcRef, index: usize) -> Result<GcRef, String> {
     for _ in 0..index {
-        match &list.value {
+        match &heap.get_value(list) {
             SchemeValue::Pair(_, cdr) => {
-                list = cdr;
+                list = *cdr;
             }
             _ => return Err("list_ref: index out of bounds".to_string()),
         }
     }
-    match &list.value {
-        SchemeValue::Pair(car, _) => Ok(car),
+    match &heap.get_value(list) {
+        SchemeValue::Pair(car, _) => Ok(*car),
         _ => Err("list_ref: not a proper list".to_string()),
     }
 }
@@ -622,14 +693,15 @@ pub fn list_from_vec(exprs: Vec<GcRef>, heap: &mut GcHeap) -> GcRef {
 }
 
 // General utility to convert a Scheme list into a Vec of GcRefs
-pub fn list_to_vec(mut list: GcRef) -> Result<Vec<GcRef>, String> {
+pub fn list_to_vec(heap: &GcHeap, list: GcRef) -> Result<Vec<GcRef>, String> {
+    let mut l = list;
     let mut result = Vec::new();
     loop {
-        match &list.value {
+        match &heap.get_value(l) {
             SchemeValue::Nil => break Ok(result), // normal case
             SchemeValue::Pair(car, cdr) => {
                 result.push(*car);
-                list = *cdr;
+                l = *cdr;
             }
             _ => break Err("expected proper list".to_string()),
         }
@@ -688,32 +760,32 @@ mod tests {
 
         // Test integer allocation
         let int_val = new_int(&mut heap, BigInt::from(42));
-        match &int_val.value {
+        match &heap.get_value(int_val) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "42"),
             _ => panic!("Expected integer"),
         }
 
         // Test string allocation
         let str_val = new_string(&mut heap, "hello");
-        match &str_val.value {
+        match &heap.get_value(str_val) {
             SchemeValue::Str(s) => assert_eq!(s, "hello"),
             _ => panic!("Expected string"),
         }
 
         // Test pair allocation
         let pair = new_pair(&mut heap, int_val, str_val);
-        match &pair.value {
+        match &heap.get_value(pair) {
             SchemeValue::Pair(car, cdr) => {
-                assert!(std::ptr::eq(*car, int_val));
-                assert!(std::ptr::eq(*cdr, str_val));
+                assert!(std::ptr::eq(car, &int_val));
+                assert!(std::ptr::eq(cdr, &str_val));
             }
             _ => panic!("Expected pair"),
         }
 
         // Test port allocation
         let port = new_port(&mut heap, crate::io::PortKind::Stdin);
-        match &port.value {
-            SchemeValue::Port { kind } => {
+        match &heap.get_value(port) {
+            SchemeValue::Port(kind) => {
                 assert!(matches!(kind, crate::io::PortKind::Stdin));
             }
             _ => panic!("Expected port"),

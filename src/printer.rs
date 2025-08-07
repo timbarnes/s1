@@ -1,20 +1,23 @@
 // Only keep this function for pretty-printing SchemeValueSimple:
-use crate::gc::{Callable, GcObject, SchemeValue};
+use crate::eval::EvalContext;
+use crate::gc::{Callable, GcRef, SchemeValue};
 
-pub fn print_scheme_value(val: &SchemeValue) -> String {
+pub fn print_scheme_value(ec: &EvalContext, obj: &GcRef) -> String {
+    let val = ec.heap.get_value(*obj);
     match val {
         SchemeValue::Pair(_, _) => {
             let mut s = String::from("(");
             let mut first = true;
-            let mut current = val;
+            let mut current = *obj;
             loop {
-                match current {
+                let value = ec.heap.get_value(current);
+                match value {
                     SchemeValue::Pair(car, cdr) => {
                         if !first {
                             s.push(' ');
                         }
-                        s.push_str(&print_scheme_value(&car.value));
-                        current = &cdr.value;
+                        s.push_str(&print_scheme_value(ec, car));
+                        current = *cdr;
                         first = false;
                     }
                     SchemeValue::Nil => {
@@ -23,7 +26,7 @@ pub fn print_scheme_value(val: &SchemeValue) -> String {
                     }
                     _ => {
                         s.push_str(" . ");
-                        s.push_str(&print_scheme_value(current));
+                        s.push_str(&print_scheme_value(ec, &current));
                         s.push(')');
                         break;
                     }
@@ -39,7 +42,7 @@ pub fn print_scheme_value(val: &SchemeValue) -> String {
                 if !first {
                     s.push(' ');
                 }
-                s.push_str(print_scheme_value(&value.value).as_str());
+                s.push_str(print_scheme_value(ec, &value).as_str());
                 first = false;
             }
             s.push(')');
@@ -55,30 +58,35 @@ pub fn print_scheme_value(val: &SchemeValue) -> String {
         SchemeValue::Callable(variant) => match variant {
             Callable::Builtin { doc, .. } => format!("Primitive: {}", doc),
             Callable::SpecialForm { doc, .. } => format!("SpecialForm: {}", doc),
-            Callable::Closure { params, body, .. } => print_callable("Closure", params, body),
-            Callable::Macro { params, body, .. } => print_callable("Macro", params, body),
+            Callable::Closure { params, body, .. } => print_callable(ec, "Closure", params, *body),
+            Callable::Macro { params, body, .. } => print_callable(ec, "Macro", params, *body),
         },
-        _ => format!("{:?}", val),
+        _ => format!("print_scheme_value: unprintable."),
     }
 }
 
-fn print_callable(callable_type: &str, params: &Vec<&GcObject>, body: &GcObject) -> String {
+fn print_callable(
+    ec: &EvalContext,
+    callable_type: &str,
+    params: &Vec<GcRef>,
+    body: GcRef,
+) -> String {
     let mut s = callable_type.to_string();
     match params.len() {
         0 => s.push_str(" () "),
         1 => {
             s.push(' ');
-            s.push_str(print_scheme_value(&params[0].value).as_str());
+            s.push_str(print_scheme_value(&ec, &params[0]).as_str());
             s.push(' ');
         }
         _ => {
             // two cases: list and dotted, depending on the value of params[0]
             s.push_str(" (");
             for arg in params[1..].iter() {
-                s.push_str(print_scheme_value(&arg.value).as_str());
+                s.push_str(print_scheme_value(&ec, arg).as_str());
                 s.push(' ');
             }
-            match &params[0].value {
+            match &ec.heap.get_value(params[0]) {
                 SchemeValue::Symbol(name) => {
                     println!("Symbol: {}", name);
                     s.push_str(". ");
@@ -91,6 +99,6 @@ fn print_callable(callable_type: &str, params: &Vec<&GcObject>, body: &GcObject)
             s.push_str(") ");
         }
     }
-    s.push_str(print_scheme_value(&body.value).as_str());
+    s.push_str(print_scheme_value(&ec, &body).as_str());
     s
 }
