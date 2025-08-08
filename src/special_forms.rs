@@ -375,20 +375,21 @@ fn expand_sf(expr: GcRef, evaluator: &mut EvalContext, _tail: bool) -> Result<Gc
 pub fn and_sf(expr: GcRef, evaluator: &mut EvalContext, _tail: bool) -> Result<GcRef, String> {
     *evaluator.depth -= 1;
     // (and expr1 expr2 ... exprN)
-    match evaluator.heap.get_value(expr) {
-        SchemeValue::Pair(_, _) => {
-            let exprs = list_to_vec(&evaluator.heap, expr)?;
-            for e in exprs.into_iter().skip(1) {
-                let val = eval_main(e, evaluator, false)?;
-                match &evaluator.heap.get_value(val) {
-                    SchemeValue::Bool(true) => continue,
-                    _ => return Ok(val),
-                }
-            }
-            Ok(evaluator.heap.false_s())
-        }
-        _ => Err("or: not a proper list".to_string()),
+    let exprs = expect_at_least_n_args(evaluator.heap, expr, 1)?;
+
+    // Returns true if no args
+    if exprs.len() == 1 {
+        return Ok(evaluator.heap.true_s());
     }
+    let mut val = evaluator.heap.false_s();
+    for e in exprs.into_iter().skip(1) {
+        val = eval_main(e, evaluator, false)?;
+        match &evaluator.heap.get_value(val) {
+            SchemeValue::Bool(false) => return Ok(evaluator.heap.false_s()),
+            _ => continue,
+        }
+    }
+    Ok(val)
 }
 
 /// (or expr1 expr2 ... exprN)
