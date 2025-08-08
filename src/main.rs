@@ -12,9 +12,12 @@ mod tokenizer;
 
 //use crate::parser::Parser;
 //use crate::io::{Port, PortKind};
-use crate::eval::{Evaluator, eval, parse_and_deduplicate};
+use crate::eval::{
+    Evaluator, eval, eval_string, initialize_scheme_io_globals, parse_and_deduplicate,
+};
 use crate::printer::print_scheme_value;
 use argh::FromArgs;
+use eval::EvalContext;
 use std::io as stdio;
 
 #[derive(FromArgs)]
@@ -37,8 +40,8 @@ struct Args {
 fn main() {
     let args: Args = argh::from_env();
     let mut evaluator = Evaluator::new();
-
-    match evaluator.initialize_scheme_io_globals() {
+    let mut ec = EvalContext::from_eval(&mut evaluator);
+    match initialize_scheme_io_globals(&mut ec) {
         Ok(_val) => {}
         Err(msg) => {
             println!("IO initialization failed: {}", msg);
@@ -63,23 +66,23 @@ fn main() {
 
     // Execute startup commands
     for command in startup_commands {
-        if let Err(e) = evaluator.eval_string(&command) {
+        if let Err(e) = eval_string(&mut ec, &command) {
             eprintln!("Error executing startup command '{}': {}", command, e);
             std::process::exit(1);
         }
     }
 
-    evaluator.trace = args.trace;
+    *ec.trace = args.trace;
 
     if args.quit {
         return;
     }
 
     // Drop into the REPL
-    repl(&mut evaluator);
+    repl(&mut ec);
 }
 
-fn repl(ev: &mut Evaluator) {
+fn repl(ev: &mut EvalContext) {
     use crate::io::PortKind;
     use crate::parser::Parser;
     use std::io as stdio;
@@ -91,7 +94,7 @@ fn repl(ev: &mut Evaluator) {
     println!("Welcome to the s1 Scheme REPL");
 
     loop {
-        ev.depth = 0;
+        *ev.depth = 0;
         // Check the port. Each parse-eval needs to be sure the port hasn't changed.
         let current_port_val: &mut PortKind;
         let current_port = ev.port_stack.last_mut();
@@ -109,8 +112,8 @@ fn repl(ev: &mut Evaluator) {
             Ok(expr) => match eval(expr, ev) {
                 Ok(result) => {
                     if interactive {
-                        let ec = eval::EvalContext::from_eval(ev);
-                        println!("=> {}", print_scheme_value(&ec, &result));
+                        //let ec = eval::EvalContext::from_eval(ev);
+                        println!("=> {}", print_scheme_value(&ev, &result));
                     }
                 }
                 Err(e) => println!("Evaluation error: {}", e),

@@ -1,4 +1,4 @@
-use crate::eval::Evaluator;
+use crate::eval::EvalContext;
 use crate::eval::eval_main;
 /// Modular macro expansion engine for Scheme
 use crate::gc::{
@@ -14,7 +14,7 @@ enum Expanded {
 pub fn expand_macro(
     expr: &GcRef,
     depth: usize,
-    evaluator: &mut Evaluator,
+    evaluator: &mut EvalContext,
 ) -> Result<GcRef, String> {
     match expand_macro_internal(expr, depth, evaluator)? {
         Expanded::Single(val) => Ok(val),
@@ -38,7 +38,7 @@ pub fn expand_macro(
 fn expand_macro_internal(
     expr: &GcRef,
     depth: usize,
-    evaluator: &mut Evaluator,
+    evaluator: &mut EvalContext,
 ) -> Result<Expanded, String> {
     let expanded = match &evaluator.heap.get_value(*expr) {
         SchemeValue::Pair(_, _) => expand_list_pair(expr, depth, evaluator),
@@ -67,7 +67,7 @@ fn expand_atom(expr: &GcRef) -> Result<Expanded, String> {
 fn expand_list_pair(
     expr: &GcRef,
     depth: usize,
-    evaluator: &mut Evaluator,
+    evaluator: &mut EvalContext,
 ) -> Result<Expanded, String> {
     let tag = list_ref(evaluator, expr, 0)?;
     if let SchemeValue::Symbol(sym) = &evaluator.heap.get_value(tag) {
@@ -163,7 +163,7 @@ fn expand_list_pair(
     }
 }
 
-fn wrap(tag: &str, body: Expanded, evaluator: &mut Evaluator) -> Result<Expanded, String> {
+fn wrap(tag: &str, body: Expanded, evaluator: &mut EvalContext) -> Result<Expanded, String> {
     let tag_sym = evaluator.heap.intern_symbol(tag);
     match body {
         Expanded::Single(val) => Ok(Expanded::Single(list_from_vec(
@@ -178,7 +178,7 @@ fn wrap(tag: &str, body: Expanded, evaluator: &mut Evaluator) -> Result<Expanded
     }
 }
 
-fn list_ref(ev: &mut Evaluator, list: &GcRef, index: usize) -> Result<GcRef, String> {
+fn list_ref(ev: &mut EvalContext, list: &GcRef, index: usize) -> Result<GcRef, String> {
     let mut current = *list;
     for _ in 0..index {
         current = match &ev.heap.get_value(current) {

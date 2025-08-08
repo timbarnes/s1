@@ -20,7 +20,7 @@
 //! ```
 
 #![allow(dead_code)]
-use crate::eval::{EvalContext, Evaluator};
+use crate::eval::EvalContext;
 use crate::io::PortKind;
 use num_bigint::BigInt;
 use std::cell::RefCell;
@@ -34,7 +34,7 @@ pub enum Callable {
         doc: String,
     },
     SpecialForm {
-        func: fn(GcRef, &mut Evaluator, bool) -> Result<GcRef, String>,
+        func: fn(GcRef, &mut EvalContext, bool) -> Result<GcRef, String>,
         doc: String,
     },
     Closure {
@@ -212,7 +212,6 @@ pub fn eq(heap: &GcHeap, a: GcRef, b: GcRef) -> bool {
 // }
 
 /// Reference to a garbage-collected Scheme object.
-/// This is the new system that uses static references for better performance.
 pub type GcRef = *mut GcObject;
 
 /// A Scheme object allocated on the garbage-collected heap.
@@ -580,7 +579,7 @@ pub fn new_primitive(
 /// Create a new special form.
 pub fn new_special_form(
     heap: &mut GcHeap,
-    f: fn(GcRef, &mut Evaluator, bool) -> Result<GcRef, String>,
+    f: fn(GcRef, &mut EvalContext, bool) -> Result<GcRef, String>,
     doc: String,
 ) -> GcRef {
     let primitive = SchemeValue::Callable(Callable::SpecialForm { func: f, doc });

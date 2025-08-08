@@ -26,7 +26,7 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 
 // use std::io::BufReader as StdBufReader;
-use crate::eval::{EvalContext, Evaluator};
+use crate::eval::EvalContext;
 use crate::gc::GcRef;
 use std::cell::UnsafeCell;
 
@@ -678,7 +678,7 @@ pub fn port_to_scheme_port(ec: &mut EvalContext, port_kind: PortKind) -> GcRef {
 }
 
 /// Extract a PortKind from aScheme port
-pub fn port_kind_from_scheme_port(evaluator: &mut Evaluator, scheme_port: GcRef) -> PortKind {
+pub fn port_kind_from_scheme_port(evaluator: &mut EvalContext, scheme_port: GcRef) -> PortKind {
     let s_p = evaluator.heap.get_value(scheme_port);
     match s_p {
         crate::gc::SchemeValue::Port(kind) => kind.clone(),

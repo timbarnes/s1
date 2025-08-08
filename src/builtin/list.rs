@@ -74,14 +74,15 @@ pub fn append_builtin(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, Str
 
     // Helper function to copy a list
     fn copy_list(ec: &mut EvalContext, lst: GcRef) -> Result<GcRef, String> {
-        match ec.heap.get_value(lst) {
+        let val = unsafe { &(*lst).value };
+        match &val {
             SchemeValue::Nil => Ok(get_nil(ec.heap)),
             SchemeValue::Pair(car, cdr) => {
-                let car = *car; // GcRef, just a pointer
-                let cdr = *cdr; // GcRef, just a pointer
+                let car = car; // GcRef, just a pointer
+                let cdr = cdr; // GcRef, just a pointer
 
-                let new_cdr = copy_list(ec, cdr)?;
-                Ok(new_pair(ec.heap, car, new_cdr))
+                let new_cdr = copy_list(ec, *cdr)?;
+                Ok(new_pair(ec.heap, *car, new_cdr))
             }
             _ => Err("append: arguments must be lists".to_string()),
         }

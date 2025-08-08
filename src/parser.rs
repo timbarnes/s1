@@ -265,7 +265,7 @@ mod tests {
         use crate::printer::print_scheme_value;
         let mut ev = crate::eval::Evaluator::new();
         let ec = crate::eval::EvalContext::from_eval(&mut ev);
-        let mut port = crate::io::new_string_port_input("hello");
+        let _port = crate::io::new_string_port_input("hello");
         let mut port = crate::io::new_string_port_input("\"hello world\"");
         let mut parser = Parser::new();
         let expr = parser.parse(ec.heap, &mut port).unwrap();
@@ -280,7 +280,7 @@ mod tests {
         use crate::printer::print_scheme_value;
         let mut ev = crate::eval::Evaluator::new();
         let ec = crate::eval::EvalContext::from_eval(&mut ev);
-        let mut port = crate::io::new_string_port_input("hello");
+        let _port = crate::io::new_string_port_input("hello");
         let mut port = crate::io::new_string_port_input("nil");
         let mut parser = Parser::new();
         let expr = parser.parse(ec.heap, &mut port).unwrap();
@@ -296,7 +296,7 @@ mod tests {
         use crate::printer::print_scheme_value;
         let mut ev = crate::eval::Evaluator::new();
         let ec = crate::eval::EvalContext::from_eval(&mut ev);
-        let mut str_port = crate::io::new_string_port_input("hello");
+        //let mut str_port = crate::io::new_string_port_input("hello");
         let mut str_port = crate::io::new_string_port_input("(1 2 3)");
         let mut parser = Parser::new();
         let expr = parser.parse(ec.heap, &mut str_port).unwrap();

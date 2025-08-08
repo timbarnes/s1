@@ -20,7 +20,6 @@
 //! assert_eq!(tokenizer.next_token(), None);
 //! ```
 
-use crate::gc::{GcHeap, GcRef, SchemeValue};
 use crate::io::PortKind;
 use std::io::Read;
 
