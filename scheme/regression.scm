@@ -9,13 +9,15 @@
 ;; Test helper functions
 
 (define failed-tests '()) ; keep track of test failures
+(define **counter** 0)
 
 (define fails
   (lambda (message)
-      (set! failed-tests (cons message failed-tests))))
+      (set! failed-tests (cons (cons **counter** message) failed-tests))))
 
 (define test-equal
   (lambda (expected actual message)
+    (set! **counter** (+ **counter** 1))
     (if (eq? expected actual)
         (begin
           (display "PASS: ")
@@ -25,6 +27,7 @@
         (begin
           (fails message)
           (newline)
+          (display **counter**)
           (display "    ***    FAIL: ")
           (display message)
           (display " - expected ")
@@ -45,6 +48,7 @@
 
 (define test-number
   (lambda (value message)
+    (set! **counter** (+ **counter** 1))
     (if (number? value)
         (begin
           (display "PASS: ")
@@ -54,6 +58,7 @@
         (begin
           (fails message)
           (newline)
+          (display **counter**)
           (display "    ***    FAIL: ")
           (display message)
           (display " - expected number, recieved ")
@@ -64,6 +69,7 @@
 
 (define test-symbol
   (lambda (value message)
+    (set! **counter** (+ **counter** 1))
     (if (symbol? value)
         (begin
           (display "PASS: ")
@@ -73,6 +79,7 @@
         (begin
           (fails message)
           (newline)
+          (display **counter**)
           (display "    ***    FAIL: ")
           (display message)
           (display " - expected symbol, received ")
@@ -84,6 +91,7 @@
 ;; Simple nil test using eq? directly
 (define test-nil
   (lambda (value message)
+    (set! **counter** (+ **counter** 1))
     (if (eq? value '())
         (begin
           (display "PASS: ")
@@ -93,6 +101,7 @@
         (begin
           (fails message)
           (newline)
+          (display **counter**)
           (display "    ***    FAIL: ")
           (display message)
           (display " - expected nil, recieved ")
@@ -127,7 +136,14 @@
 (test-equal 15 (+ 1 2 3 4 5) "Addition with multiple args")
 (test-equal 120 (* 2 3 4 5) "Multiplication with multiple args")
 (test-equal 83 (- 100 10 5 2) "Subtraction with multiple args")
-
+(test-true (inexact? 3.14) "inexact? with float")
+(test-false (inexact? 42) "inexact? with integer")
+(test-true (inexact? 3.14) "inexact? with float")
+(test-false (inexact? 42) "inexact? with integer")
+(test-true (exact? 42) "exact? with integer")
+(test-false (exact? 3.14) "exact? with float")
+(test-true (exact? 42) "exact? with integer")
+(test-false (exact? 3.14) "exact? with float")
 ;; Test 3: Type Predicates
 (display "          === Testing Type Predicates ===")
 (newline)
@@ -377,7 +393,9 @@
 (display "          === All tests completed ===")
 (newline)
 (if (null? failed-tests)
-    (begin (display "===  All tests passed!  ===")
+    (begin (display "===  All ")
+        (display **counter**)
+        (display " tests passed!  ===")
         (newline))
     (begin
         (displayln "Failing tests: ")

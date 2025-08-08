@@ -1,7 +1,9 @@
 ;; s1-core.scm: Scheme-level core predicates and utilities
 
 ;; Type predicates using type-of function
-;; (define number? (lambda (x) (or (eq? (type-of x) 'integer) (eq? (type-of x) 'float))))
+(define number? (lambda (x) (or (eq? (type-of x) 'integer) (eq? (type-of x) 'float))))
+(define integer? (lambda (x) (eq? (type-of x) 'integer)))
+(define float? (lambda (x) (eq? (type-of x) 'float)))
 (define symbol? (lambda (x) (eq? (type-of x) 'symbol)))
 (define pair? (lambda (x) (eq? (type-of x) 'pair)))
 (define string? (lambda (x) (eq? (type-of x) 'string)))
@@ -15,10 +17,15 @@
 (define null? (lambda (x) (eq? x '())))
 
 (define equal? (lambda (x y)
-    (cond ((eq? x y) #t)
+    (cond
+        ((eqv? x y) #t)
         ((and (pair? x) (pair? y)) (and (equal? (car x) (car y)) (equal? (cdr x) (cdr y))))
         ((and (string? x) (string? y)) (string=? x y))
         ((and (vector? x) (vector? y)) (vector=? x y))
+        (else #f))))
+
+(define eqv? (lambda (x y)
+    (cond ((eq? x y) #t)
         ((and (closure? x) (closure? y)) (eq? x y))
         ((and (macro? x) (macro? y)) (eq? x y))
         ((and (boolean? x) (boolean? y)) (eq? x y))
@@ -26,6 +33,13 @@
         ((and (primitive? x) (primitive? y)) (eq? x y))
         ((and (env-frame? x) (env-frame? y)) (eq? x y))
         (else #f))))
+
+(define exact? (lambda (n)
+    (integer? n)))
+
+(define inexact? (lambda (n)
+    (not (integer? n))))
+
 ;; List accessor functions (compositions of car and cdr)
 ;; These provide convenient access to nested list elements
 
