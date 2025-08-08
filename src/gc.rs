@@ -775,8 +775,8 @@ mod tests {
         let pair = new_pair(&mut heap, int_val, str_val);
         match &heap.get_value(pair) {
             SchemeValue::Pair(car, cdr) => {
-                assert!(std::ptr::eq(car, &int_val));
-                assert!(std::ptr::eq(cdr, &str_val));
+                assert!(eq(&heap, *car, int_val));
+                assert!(eq(&heap, *cdr, str_val));
             }
             _ => panic!("Expected pair"),
         }
