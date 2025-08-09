@@ -1,5 +1,6 @@
 ;; s1-core.scm: Scheme-level core predicates and utilities
 
+(define error (lambda (msg) (displayln "Error:"msg)))
 ;; Type predicates using type-of function
 (define number? (lambda (x) (or (eq? (type-of x) 'integer) (eq? (type-of x) 'float))))
 (define integer? (lambda (x) (eq? (type-of x) 'integer)))
@@ -15,6 +16,13 @@
 (define primitive? (lambda (x) (eq? (type-of x) 'primitive)))
 (define env-frame? (lambda (x) (eq? (type-of x) 'env-frame)))
 (define null? (lambda (x) (eq? x '())))
+
+(define procedure? (lambda (x)
+    (let ((type (type-of x)))
+        (or (eq? type 'builtin)
+            (eq? type 'closure)
+            (eq? type 'special-form)
+            (eq? type 'macro)))))
 
 (define equal? (lambda (x y)
     (cond
@@ -112,6 +120,27 @@
 (define negative? (lambda (n) (< n 0)))
 (define even? (lambda (n) (zero? (mod n 2))))
 (define odd? (lambda (n) (not (even? n))))
+
+(define max (lambda x
+    (define _max (lambda (acc l)
+        (if (null? l) acc
+            (if (> (car l) acc)
+                (_max (car l) (cdr l))
+                (_max acc (cdr l))))))
+    (_max (car x) (cdr x))))
+
+(define min (lambda x
+    (define _min (lambda (acc l)
+        (if (null? l) acc
+            (if (< (car l) acc)
+                (_min (car l) (cdr l))
+                (_min acc (cdr l))))))
+    (_min (car x) (cdr x))))
+
+(define number>string (lambda (n)
+    (if (number? n)
+        (>string n)
+        (error "number>string: not a string"))))
 
 ;; Stack support
 (define empty? (lambda (s) (null? s)))

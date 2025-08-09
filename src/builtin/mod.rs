@@ -2,6 +2,7 @@ pub mod fileio;
 pub mod list;
 pub mod number;
 pub mod predicate;
+pub mod string;
 pub mod vector;
 
 use crate::eval::EvalContext;
@@ -62,13 +63,13 @@ pub fn newline(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     Ok(get_nil(ec.heap))
 }
 
-/// Builtin function: (quit)
+/// Builtin function: (exit)
 ///
 /// Exits the Scheme interpreter with exit code 0.
 /// This works in both programs and the REPL.
-pub fn quit(_ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
+pub fn exit(_ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     if !args.is_empty() {
-        return Err("quit: expected 0 arguments".to_string());
+        return Err("exit: expected 0 arguments".to_string());
     }
 
     // Exit the system cleanly
@@ -129,11 +130,12 @@ pub fn register_builtins(heap: &mut GcHeap, env: &mut crate::env::Environment) {
     fileio::register_fileio_builtins(heap, env);
     number::register_number_builtins(heap, env);
     predicate::register_predicate_builtins(heap, env);
+    string::register_string_builtins(heap, env);
     vector::register_vector_builtins(heap, env);
     register_builtin_family!(heap, env,
         "help" => help,
         "display" => display,
         "newline" => newline,
-        "quit" => quit,
+        "exit" => exit,
     );
 }

@@ -147,6 +147,10 @@
 ;; Test 3: Type Predicates
 (display "          === Testing Type Predicates ===")
 (newline)
+(test-true) (integer? 22) "integer? with integer")
+(test-false (integer? nil) "integer with nil")
+(test-true (float? 3.14) "float? with float")
+(test-false (float? 3) "float? with integer")
 (test-true (number? 42) "number? with integer")
 (test-true (number? 3.14) "number? with float")
 (test-false (number? "not a number") "number? with string")
@@ -307,6 +311,8 @@
 (test-false (< 1 2 2) "Not strictly increasing")
 (test-true (> 3 2 1) "Strictly decreasing")
 (test-false (> 3 2 2) "Not strictly decreasing")
+(test-equal 4 (min 5 4 6) "min with integers")
+(test-equal 3.14 (min 5 6 7.8 3.14) "min with int and float")
 
 ;; Test 16: Equality
 (display "          === Testing Equality ===")
@@ -393,10 +399,7 @@
 (display "          === All tests completed ===")
 (newline)
 (if (null? failed-tests)
-    (begin (display "===  All ")
-        (display **counter**)
-        (display " tests passed!  ===")
-        (newline))
+    (displayln "===  All" **counter** "tests passed!  ===")
     (begin
         (displayln "Failing tests: ")
         (displayln "==============")
