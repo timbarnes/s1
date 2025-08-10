@@ -383,7 +383,7 @@ pub fn and_sf(expr: GcRef, evaluator: &mut EvalContext, _tail: bool) -> Result<G
     }
     let mut val = evaluator.heap.false_s();
     for e in exprs.into_iter().skip(1) {
-        val = eval_main(e, evaluator, false)?;
+        val = eval_non_tail(&e, evaluator)?;
         match &evaluator.heap.get_value(val) {
             SchemeValue::Bool(false) => return Ok(evaluator.heap.false_s()),
             _ => continue,
@@ -401,7 +401,7 @@ pub fn or_sf(expr: GcRef, evaluator: &mut EvalContext, _tail: bool) -> Result<Gc
         SchemeValue::Pair(_, _) => {
             let exprs = list_to_vec(&evaluator.heap, expr)?;
             for e in exprs.into_iter().skip(1) {
-                let val = eval_main(e, evaluator, false)?;
+                let val = eval_non_tail(&e, evaluator)?;
                 match &evaluator.heap.get_value(val) {
                     SchemeValue::Bool(false) => continue,
                     _ => return Ok(val),
