@@ -10,33 +10,42 @@
 
 (define failed-tests '()) ; keep track of test failures
 (define **counter** 0)
+(define **print-successes** #f)
 
 (define fails
   (lambda (message)
       (set! failed-tests (cons (cons **counter** message) failed-tests))))
 
+(define success
+  (lambda (message)
+    (if **print-successes**
+        (begin
+            (display "PASS: ")
+            (display message)
+            (newline)
+            #t))))
+
+(define failure
+    (lambda (message actual)
+        (fails message)
+        (newline)
+        (display **counter**)
+        (display "    ***    FAIL: ")
+        (display message)
+        (display " - expected ")
+        (display expected)
+        (display ", received ")
+        (display actual)
+        (newline)
+        (newline)
+        #f))
+
 (define test-equal
   (lambda (expected actual message)
     (set! **counter** (+ **counter** 1))
     (if (eq? expected actual)
-        (begin
-          (display "PASS: ")
-          (display message)
-          (newline)
-          #t)
-        (begin
-          (fails message)
-          (newline)
-          (display **counter**)
-          (display "    ***    FAIL: ")
-          (display message)
-          (display " - expected ")
-          (display expected)
-          (display ", received ")
-          (display actual)
-          (newline)
-          (newline)
-          #f))))
+        (success message)
+        (failure message expected actual))))
 
 (define test-true
   (lambda (value message)
@@ -50,65 +59,23 @@
   (lambda (value message)
     (set! **counter** (+ **counter** 1))
     (if (number? value)
-        (begin
-          (display "PASS: ")
-          (display message)
-          (newline)
-          #t)
-        (begin
-          (fails message)
-          (newline)
-          (display **counter**)
-          (display "    ***    FAIL: ")
-          (display message)
-          (display " - expected number, recieved ")
-          (display value)
-          (newline)
-          (newline)
-          #f))))
+        (success message)
+        (failure message "a number" value))))
 
 (define test-symbol
   (lambda (value message)
     (set! **counter** (+ **counter** 1))
     (if (symbol? value)
-        (begin
-          (display "PASS: ")
-          (display message)
-          (newline)
-          #t)
-        (begin
-          (fails message)
-          (newline)
-          (display **counter**)
-          (display "    ***    FAIL: ")
-          (display message)
-          (display " - expected symbol, received ")
-          (display value)
-          (newline)
-          (newline)
-          #f))))
+        (success message)
+        (failure message "a symbol" value))))
 
 ;; Simple nil test using eq? directly
 (define test-nil
   (lambda (value message)
     (set! **counter** (+ **counter** 1))
     (if (eq? value '())
-        (begin
-          (display "PASS: ")
-          (display message)
-          (newline)
-          #t)
-        (begin
-          (fails message)
-          (newline)
-          (display **counter**)
-          (display "    ***    FAIL: ")
-          (display message)
-          (display " - expected nil, recieved ")
-          (display value)
-          (newline)
-          (newline)
-          #f))))
+        (success message)
+        (failure message "nil" value))))
 
 ;; Run all tests individually
 (display "          Starting regression tests...")
@@ -145,7 +112,7 @@
 
 (display "          === Testing Type Predicates ===")
 (newline)
-(test-true) (integer? 22) "integer? with integer")
+(test-true (integer? 22) "integer? with integer")
 (test-false (integer? nil) "integer with nil")
 (test-true (float? 3.14) "float? with float")
 (test-false (float? 3) "float? with integer")
@@ -278,7 +245,6 @@
 (test-equal '(2) (cdar '((1 2) (3 4))) "cdar of nested list")
 (test-equal '(3 4) (cadr '((1 2) (3 4))) "cadr of nested list")
 
-;; Test 14: List Construction
 (display "          === Testing List Construction ===")
 (newline)
 (test-equal '(1 . 2) (cons 1 2) "cons with atom")
@@ -292,8 +258,11 @@
 (test-equal '(1 b) (begin (set-car! foo 1) foo)  "set-car! on list")
 (test-equal '(1 . 2) (begin (set-cdr! foo 2) foo)  "set-cdr! on list")
 (test-equal '(1 2 3) (begin (set-cdr! foo (list 2 3)) foo)  "set-cdr! on list")
+(define bar '(x y))
+(define ref bar)
+(set-car! bar 'z)
+(test-true (eq? ref bar) "mutated pair is the same object")
 
-;; Test 15: Comparisons
 (display "          === Testing Comparisons ===")
 (newline)
 (test-true (= 5 5) "Equal numbers")
