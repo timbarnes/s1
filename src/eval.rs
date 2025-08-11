@@ -72,10 +72,6 @@ impl Evaluator {
 
     /// Create an evaluator with a specific heap
     pub fn with_heap(heap: GcHeap) -> Self {
-        // let stdin_port = crate::gc::new_port(&mut heap, crate::io::PortKind::Stdin);
-        // Remove port_stack: crate::io::SchemePortStack, from Evaluator
-        // Remove all initialization and methods related to SchemePortStack
-
         let mut evaluator = Self {
             heap,
             env: Environment::new(),
@@ -487,18 +483,18 @@ mod tests {
 
     #[test]
     fn test_eval_logic_self_evaluating() {
-        use crate::gc::eq;
+        use crate::gc::equal;
         let mut evaluator = Evaluator::new();
         let mut ec = crate::eval::EvalContext::from_eval(&mut evaluator);
         let int_val;
         int_val = new_int(ec.heap, num_bigint::BigInt::from(42));
         let result = eval_main(int_val, &mut ec, false).unwrap();
-        assert!(eq(&evaluator.heap, result, int_val));
+        assert!(equal(&evaluator.heap, result, int_val));
     }
 
     #[test]
     fn test_eval_logic_variable_lookup() {
-        use crate::gc::eq;
+        use crate::gc::equal;
         let mut evaluator = Evaluator::new();
         let mut ec = crate::eval::EvalContext::from_eval(&mut evaluator);
         let value;
@@ -507,7 +503,7 @@ mod tests {
         symbol = get_symbol(ec.heap, "x");
         ec.env.set_symbol(symbol, value);
         let result = eval_main(symbol, &mut ec, false).unwrap();
-        assert!(eq(&evaluator.heap, result, value));
+        assert!(equal(&evaluator.heap, result, value));
     }
 
     #[test]
