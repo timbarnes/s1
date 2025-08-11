@@ -1,5 +1,5 @@
 use crate::eval::EvalContext;
-use crate::gc::{GcHeap, GcRef, SchemeValue, get_nil, new_pair};
+use crate::gc::{GcHeap, GcRef, SchemeValue, get_nil, new_pair, set_car, set_cdr};
 
 /// Builtin function: (car pair)
 ///
@@ -164,38 +164,24 @@ pub fn append_builtin(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, Str
     Ok(result)
 }
 
-pub fn set_car(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
+pub fn set_car_builtin(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 2 {
         return Err("set-car!: wrong number of arguments".to_string());
     }
     let pair_ref = args[0];
     let new_car = args[1];
-    unsafe {
-        match &mut (*pair_ref).value {
-            SchemeValue::Pair(car, _) => {
-                *car = new_car;
-                Ok(ec.heap.nil_s())
-            }
-            _ => Err("set-car!: not a pair".to_string()),
-        }
-    }
+    set_car(pair_ref, new_car).unwrap();
+    Ok(ec.heap.nil_s())
 }
 
-pub fn set_cdr(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
+pub fn set_cdr_builtin(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 2 {
         return Err("set-car!: wrong number of arguments".to_string());
     }
     let pair_ref = args[0];
     let new_cdr = args[1];
-    unsafe {
-        match &mut (*pair_ref).value {
-            SchemeValue::Pair(_, cdr) => {
-                *cdr = new_cdr;
-                Ok(ec.heap.nil_s())
-            }
-            _ => Err("set-cdr!: not a pair".to_string()),
-        }
-    }
+    set_cdr(pair_ref, new_cdr).unwrap();
+    Ok(ec.heap.nil_s())
 }
 
 macro_rules! register_builtin_family {
@@ -212,8 +198,8 @@ pub fn register_list_builtins(heap: &mut GcHeap, env: &mut crate::env::Environme
     register_builtin_family!(heap, env,
         "car" => car_builtin,
         "cdr" => cdr_builtin,
-        "set-car!" => set_car,
-        "set-cdr!" => set_cdr,
+        "set-car!" => set_car_builtin,
+        "set-cdr!" => set_cdr_builtin,
         "cons" => cons_builtin,
         "list" => list_builtin,
         "append" => append_builtin,

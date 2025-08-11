@@ -687,6 +687,30 @@ pub fn cons(car: GcRef, cdr: GcRef, heap: &mut GcHeap) -> Result<GcRef, String> 
     Ok(heap.alloc(obj))
 }
 
+pub fn set_car(pair_ref: GcRef, new_car: GcRef) -> Result<(), String> {
+    unsafe {
+        match &mut (*pair_ref).value {
+            SchemeValue::Pair(car, _) => {
+                *car = new_car;
+                Ok(())
+            }
+            _ => Err("set-car!: not a pair".to_string()),
+        }
+    }
+}
+
+pub fn set_cdr(pair_ref: GcRef, new_cdr: GcRef) -> Result<(), String> {
+    unsafe {
+        match &mut (*pair_ref).value {
+            SchemeValue::Pair(_, cdr) => {
+                *cdr = new_cdr;
+                Ok(())
+            }
+            _ => Err("set-cdr!: not a pair".to_string()),
+        }
+    }
+}
+
 pub fn list_ref(heap: &mut GcHeap, mut list: GcRef, index: usize) -> Result<GcRef, String> {
     for _ in 0..index {
         match &heap.get_value(list) {
