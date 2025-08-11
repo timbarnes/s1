@@ -288,6 +288,10 @@
 (test-equal '(1 2 3) (list 1 2 3) "multiple element list")
 (test-equal '(1 2 3 4) (append '(1 2) '(3 4)) "append two lists")
 (test-equal '(1 2) (append '(1 2) '()) "append with empty list")
+(define foo '(a b))
+(test-equal '(1 b) (begin (set-car! foo 1) foo)  "set-car! on list")
+(test-equal '(1 . 2) (begin (set-cdr! foo 2) foo)  "set-cdr! on list")
+(test-equal '(1 2 3) (begin (set-cdr! foo (list 2 3)) foo)  "set-cdr! on list")
 
 ;; Test 15: Comparisons
 (display "          === Testing Comparisons ===")
