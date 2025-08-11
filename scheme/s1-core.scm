@@ -24,14 +24,6 @@
             (eq? type 'special-form)
             (eq? type 'macro)))))
 
-(define equal? (lambda (x y)
-    (cond
-        ((eqv? x y) #t)
-        ((and (pair? x) (pair? y)) (and (equal? (car x) (car y)) (equal? (cdr x) (cdr y))))
-        ((and (string? x) (string? y)) (string=? x y))
-        ((and (vector? x) (vector? y)) (vector=? x y))
-        (else #f))))
-
 (define eqv? (lambda (x y)
     (cond ((eq? x y) #t)
         ((and (closure? x) (closure? y)) (eq? x y))
@@ -175,3 +167,8 @@
             (/ sum total-count)
             (b form (- count 1) (+ sum (with-timer (eval form)))))))
     (b form count 0.0)))
+
+(define symbol>string (lambda (sym)
+    (if (symbol? sym)
+        (>string sym)
+        (error "symbol>string: not a symbol"))))

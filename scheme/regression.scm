@@ -26,7 +26,7 @@
             #t))))
 
 (define failure
-    (lambda (message actual)
+    (lambda (message actual expected)
         (fails message)
         (newline)
         (display **counter**)
@@ -43,7 +43,7 @@
 (define test-equal
   (lambda (expected actual message)
     (set! **counter** (+ **counter** 1))
-    (if (eq? expected actual)
+    (if (equal? expected actual)
         (success message)
         (failure message expected actual))))
 
@@ -304,8 +304,8 @@
 (test-false (eq? 'foo 'bar) "Unequal symbols")
 (test-true (eq? 42 42) "Equal numbers")
 (test-false (eq? 42 43) "Unequal numbers")
-(test-true (eq? '(1 2) '(1 2)) "Equal lists")
-(test-false (eq? '(1 2) '(1 3)) "Unequal lists")
+(test-true (equal? '(1 2) '(1 2)) "Equal lists")
+(test-false (equal? '(1 2) '(1 3)) "Unequal lists")
 
 (display "          === Testing eval and apply ===")
 (newline)

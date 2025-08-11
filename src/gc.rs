@@ -84,12 +84,26 @@ pub fn heap_list_iter<'a>(
 }
 
 pub fn eq(heap: &GcHeap, a: GcRef, b: GcRef) -> bool {
+    if std::ptr::eq(a, b) {
+        true
+    } else {
+        match (heap.get_value(a), heap.get_value(b)) {
+            (SchemeValue::Int(a), SchemeValue::Int(b)) => a == b,
+            (SchemeValue::Float(a), SchemeValue::Float(b)) => a == b,
+            (SchemeValue::Symbol(a), SchemeValue::Symbol(b)) => a == b,
+            (SchemeValue::Bool(a), SchemeValue::Bool(b)) => a == b,
+            (SchemeValue::Char(a), SchemeValue::Char(b)) => a == b,
+            (SchemeValue::Port(a), SchemeValue::Port(b)) => a == b,
+            (SchemeValue::Nil, SchemeValue::Nil) => true,
+            _ => false,
+        }
+    }
+}
+
+pub fn equal(heap: &GcHeap, a: GcRef, b: GcRef) -> bool {
     match (heap.get_value(a), heap.get_value(b)) {
-        (SchemeValue::Int(a), SchemeValue::Int(b)) => a == b,
-        (SchemeValue::Float(a), SchemeValue::Float(b)) => a == b,
-        (SchemeValue::Symbol(a), SchemeValue::Symbol(b)) => a == b,
         (SchemeValue::Pair(a1, d1), SchemeValue::Pair(a2, d2)) => {
-            eq(heap, *a1, *a2) && eq(heap, *d1, *d2)
+            equal(heap, *a1, *a2) && equal(heap, *d1, *d2)
         }
         (SchemeValue::Str(a), SchemeValue::Str(b)) => a == b,
         (SchemeValue::Vector(a), SchemeValue::Vector(b)) => {
@@ -97,14 +111,12 @@ pub fn eq(heap: &GcHeap, a: GcRef, b: GcRef) -> bool {
                 return false;
             }
             for (x, y) in a.iter().zip(b.iter()) {
-                if !eq(heap, *x, *y) {
+                if !equal(heap, *x, *y) {
                     return false;
                 }
             }
             true
         }
-        (SchemeValue::Bool(a), SchemeValue::Bool(b)) => a == b,
-        (SchemeValue::Char(a), SchemeValue::Char(b)) => a == b,
         (SchemeValue::Callable(a), SchemeValue::Callable(b)) => match (a, b) {
             (Callable::Builtin { func: f1, .. }, Callable::Builtin { func: f2, .. }) => {
                 std::ptr::fn_addr_eq(*f1, *f2)
@@ -128,11 +140,11 @@ pub fn eq(heap: &GcHeap, a: GcRef, b: GcRef) -> bool {
                     return false;
                 }
                 for (param1, param2) in p1.iter().zip(p2.iter()) {
-                    if !eq(heap, *param1, *param2) {
+                    if !equal(heap, *param1, *param2) {
                         return false;
                     }
                 }
-                eq(heap, *b1, *b2)
+                equal(heap, *b1, *b2)
             }
             (
                 Callable::Macro {
@@ -150,18 +162,16 @@ pub fn eq(heap: &GcHeap, a: GcRef, b: GcRef) -> bool {
                     return false;
                 }
                 for (param1, param2) in p1.iter().zip(p2.iter()) {
-                    if !eq(heap, *param1, *param2) {
+                    if !equal(heap, *param1, *param2) {
                         return false;
                     }
                 }
-                eq(heap, *b1, *b2)
+                equal(heap, *b1, *b2)
             }
             _ => false,
         },
         // For Primitive, just compare type (not function pointer)
-        (SchemeValue::Nil, SchemeValue::Nil) => true,
-        (SchemeValue::Port(k1), SchemeValue::Port(k2)) => k1 == k2,
-        _ => false,
+        _ => eq(heap, a, b),
     }
 }
 
@@ -818,8 +828,8 @@ mod tests {
         let pair = new_pair(&mut heap, int_val, str_val);
         match &heap.get_value(pair) {
             SchemeValue::Pair(car, cdr) => {
-                assert!(eq(&heap, *car, int_val));
-                assert!(eq(&heap, *cdr, str_val));
+                assert!(equal(&heap, *car, int_val));
+                assert!(equal(&heap, *cdr, str_val));
             }
             _ => panic!("Expected pair"),
         }
@@ -846,8 +856,8 @@ mod tests {
         // Initially car = 1, cdr = 2
         match heap.get_value(pair) {
             SchemeValue::Pair(car, cdr) => {
-                assert!(eq(&heap, *car, one));
-                assert!(eq(&heap, *cdr, two));
+                assert!(equal(&heap, *car, one));
+                assert!(equal(&heap, *cdr, two));
             }
             _ => panic!("Expected a pair"),
         }
@@ -857,8 +867,8 @@ mod tests {
 
         match heap.get_value(pair) {
             SchemeValue::Pair(car, cdr) => {
-                assert!(eq(&heap, *car, three));
-                assert!(eq(&heap, *cdr, two));
+                assert!(equal(&heap, *car, three));
+                assert!(equal(&heap, *cdr, two));
             }
             _ => panic!("Expected a pair"),
         }
@@ -876,8 +886,8 @@ mod tests {
         // Initially car = 1, cdr = 2
         match heap.get_value(pair) {
             SchemeValue::Pair(car, cdr) => {
-                assert!(eq(&heap, *car, one));
-                assert!(eq(&heap, *cdr, two));
+                assert!(equal(&heap, *car, one));
+                assert!(equal(&heap, *cdr, two));
             }
             _ => panic!("Expected a pair"),
         }
@@ -887,8 +897,8 @@ mod tests {
 
         match heap.get_value(pair) {
             SchemeValue::Pair(car, cdr) => {
-                assert!(eq(&heap, *car, one));
-                assert!(eq(&heap, *cdr, three));
+                assert!(equal(&heap, *car, one));
+                assert!(equal(&heap, *cdr, three));
             }
             _ => panic!("Expected a pair"),
         }

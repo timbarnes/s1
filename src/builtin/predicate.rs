@@ -10,6 +10,15 @@ pub fn number_q(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     Ok(new_bool(ec.heap, is_number))
 }
 
+pub fn equal_q(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 2 {
+        return Err("equal?: expected exactly 2 arguments".to_string());
+    }
+
+    let is_equal = crate::gc::equal(ec.heap, args[0], args[1]);
+    Ok(new_bool(ec.heap, is_equal))
+}
+
 pub fn eq_q(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 2 {
         return Err("eq?: expected exactly 2 arguments".to_string());
@@ -58,8 +67,9 @@ pub fn register_predicate_builtins(
 ) {
     register_builtin_family!(heap, env,
         "type-of" => type_of,
-        "eq?" => eq_q,
+        "equal?" => equal_q,
         "number?" => number_q,
+        "eq?" => eq_q,
     );
 }
 
