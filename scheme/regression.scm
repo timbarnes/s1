@@ -114,7 +114,6 @@
 (display "          Starting regression tests...")
 (newline)
 
-;; Test 1: Literals
 (display "          === Testing Literals ===")
 (newline)
 (test-equal 42 42 "Integer literal")
@@ -126,7 +125,6 @@
 (test-nil '() "Nil literal")
 (test-symbol 'foo "Symbol literal")
 
-;; Test 2: Arithmetic
 (display "          === Testing Arithmetic ===")
 (newline)
 (test-equal 3 (+ 1 2) "Simple addition")
@@ -144,7 +142,7 @@
 (test-false (exact? 3.14) "exact? with float")
 (test-true (exact? 42) "exact? with integer")
 (test-false (exact? 3.14) "exact? with float")
-;; Test 3: Type Predicates
+
 (display "          === Testing Type Predicates ===")
 (newline)
 (test-true) (integer? 22) "integer? with integer")
@@ -168,7 +166,6 @@
 (test-true (eq? '() '()) "nil? with nil")
 (test-false (eq? '(1 2) '()) "nil? with list")
 
-;; Test 4: Type-of
 (display "          === Testing Type-of ===")
 (newline)
 (test-equal 'integer (type-of 42) "type-of with integer")
@@ -181,7 +178,6 @@
 (test-equal 'symbol (type-of 'symbol) "type-of with symbol")
 (test-equal 'pair (type-of '(1 2 3)) "type-of with pair")
 
-;; Test 5: List Literals
 (display "          === Testing List Literals ===")
 (newline)
 (test-equal '(1 2 3) '(1 2 3) "List literal")
@@ -189,14 +185,12 @@
 (test-equal '(1 (+ 2 3) 4) '(1 (+ 2 3) 4) "List with quoted expression")
 (test-equal '(1 2 3 4 5) '(1 2 3 4 5) "Longer list literal")
 
-;; Test 6: Begin
 (display "          === Testing Begin ===")
 (newline)
 (test-equal 3 (begin 1 2 3) "Simple begin")
 (test-equal 12 (begin (+ 1 2) (* 3 4)) "Begin with expressions")
 (test-equal 5 (begin 1 2 3 4 5) "Begin with multiple expressions")
 
-;; Test 7: Variables
 (display "          === Testing Variables ===")
 (newline)
 (define x 22)
@@ -211,7 +205,6 @@
 (test-equal 10 w "Define with expression")
 (test-equal 'hello v "Define with symbol")
 
-;; Test 8: Set!
 (display "          === Testing Set! ===")
 (newline)
 (define x 10)
@@ -225,7 +218,6 @@
 (test-equal 200 200 "set! with number")
 (test-equal 250 250 "set! with expression")
 
-;; Test 9: If and Cond
 (display "          === Testing If ===")
 (newline)
 (test-equal 1 (if #t 1 2) "if with true condition")
@@ -237,7 +229,6 @@
 (test-equal 22 (cond (else 22)) "minimal cond with else")
 (test-equal 66 (cond (#f 22 33) (#f 44 55) (else (display "ok") 66)) "cond with implicit begin")
 
-;; Test 10: And/Or
 (display "          === Testing And/Or ===")
 (newline)
 (test-equal #t (and) "Empty and")
@@ -252,7 +243,6 @@
 (test-equal #f (or #f #f #f) "'or' with all false")
 (test-equal #t (or #f #t #f) "'or' with middle true")
 
-;; Test 11: Quote
 (display "          === Testing Quote ===")
 (newline)
 (test-equal 42 '42 "Quote number")
@@ -260,7 +250,6 @@
 (test-equal "hello" '"hello" "Quote string")
 (test-equal #\a '#\a "Quote character")
 
-;; Test 12: Lambda
 (display "          === Testing Lambda ===")
 (newline)
 (define add1 (lambda (x) (+ x 1)))
@@ -279,7 +268,6 @@
     (f n 1)))
 (test-equal 720 (fac-acc 6) "Factorial test with nested define and accumulator")
 
-;; Test 13: List Accessors
 (display "          === Testing List Accessors ===")
 (newline)
 (test-equal 1 (car '(1 2 3)) "car of list")
@@ -314,7 +302,29 @@
 (test-equal 4 (min 5 4 6) "min with integers")
 (test-equal 3.14 (min 5 6 7.8 3.14) "min with int and float")
 
-;; Test 16: Equality
+(display "          === Testing Strings ===")
+(newline)
+(test-equal "22" (>string 22) "Integer to string")
+(test-equal "22.5" (>string 22.5) "Float to string")
+(test-equal "hello" (>string "hello") "String to string")
+(test-equal "(1 2 3)" (>string '(1 2 3)) "List to string")
+(test-equal 5 (string-length "hello") "string-length")
+(test-equal 0 (string-length "") "string-length of empty string")
+(test-equal "now is the time" (string-downcase "Now Is The Time") "string-downcase")
+(test-equal "NOW IS THE TIME" (string-upcase "Now Is The Time") "string-upcase")
+(test-equal "Now is the time" (string-append "Now " "is " "the time") "string-append")
+(test-equal "A copied string" (string-copy "A copied string") "string-copy")
+(test-equal #\3 (string-ref "012345" 3) "string-ref")
+(test-equal #\A (string-ref "A copied string" 0) "string-ref")
+(test-equal "A cop" (substring "A copied string" 0 4) "substring")
+(test-true (string=? "hello" "hello") "string=?")
+(test-false (string=? "hello" "world") "string=?")
+(test-true (string<? "apple" "banana") "string<?")
+(test-false (string<? "apple" "apple") "string<?")
+(test-true (string<? "apple" "chinook") "string<?")
+(test-false (string>? "apple" "banana") "string>?")
+(test-false (string>? "apple" "apple") "string>?")
+
 (display "          === Testing Equality ===")
 (newline)
 (test-true (eq? 'foo 'foo) "Equal symbols")
@@ -324,14 +334,12 @@
 (test-true (eq? '(1 2) '(1 2)) "Equal lists")
 (test-false (eq? '(1 2) '(1 3)) "Unequal lists")
 
-;; Test 17: eval and apply
 (display "          === Testing eval and apply ===")
 (newline)
 (test-true (eq? (eval '(+ 1 2)) 3) "eval")
 (test-true (eq? (apply + '(1 2)) 3) "apply")
 (test-true (eq? (eval '(+ 1 2)) (apply + '(1 2))) "eval and apply")
 
-;; Test 18: Recursion
 (display "          === Testing Recursion ===")
 (define fact
     (lambda (n)
@@ -348,7 +356,6 @@
 (define test-tail (lambda (n) (if (= n 0) #t (test-tail (- n 1)))))
 (test-true (test-tail 10000) "(test-tail 10000) - fails without tail recursion")
 
-;; Test 19: Macros
 (display "          === Testing Macros ===")
 (newline)
 
