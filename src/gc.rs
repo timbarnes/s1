@@ -23,6 +23,7 @@
 use crate::eval::EvalContext;
 use crate::io::PortKind;
 use num_bigint::BigInt;
+use num_traits::ToPrimitive;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -480,18 +481,36 @@ impl ResultListIter {
     }
 }
 
+pub fn get_integer(heap: &mut GcHeap, val: GcRef) -> Result<i64, String> {
+    match heap.get_value(val) {
+        SchemeValue::Int(val) => {
+            if let Some(result) = val.to_i64() {
+                return Ok(result);
+            } else {
+                return Err("Expected integer value".to_string());
+            }
+        }
+        _ => Err("Expected integer value".to_string()),
+    }
+}
+
+pub fn get_float(heap: &mut GcHeap, val: GcRef) -> Result<f64, String> {
+    match heap.get_value(val) {
+        SchemeValue::Float(val) => Ok(*val),
+        _ => Err("Expected float value".to_string()),
+    }
+}
+
+pub fn get_string(heap: &mut GcHeap, val: GcRef) -> Result<String, String> {
+    match heap.get_value(val) {
+        SchemeValue::Str(val) => Ok(val.to_string()),
+        _ => Err("Expected string value".to_string()),
+    }
+}
+
 // ============================================================================
 // CONSTRUCTOR FUNCTIONS FOR SCHEME VALUES
 // ============================================================================
-
-/// Create a new object with a given value.
-// pub fn new_object(heap: &mut GcHeap, value: GcRef) -> GcRef {
-//     let obj = GcObject {
-//         value,
-//         marked: false,
-//     };
-//     heap.alloc(obj)
-// }
 
 /// Create a new integer value.
 pub fn new_int(heap: &mut GcHeap, val: BigInt) -> GcRef {
