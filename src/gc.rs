@@ -833,4 +833,80 @@ mod tests {
             _ => panic!("Expected port"),
         }
     }
+
+    #[test]
+    fn test_set_car() {
+        let mut heap = GcHeap::new();
+        let one = new_int(&mut heap, BigInt::from(1));
+        let two = new_int(&mut heap, BigInt::from(2));
+        let three = new_int(&mut heap, BigInt::from(3));
+
+        let pair = new_pair(&mut heap, one, two);
+
+        // Initially car = 1, cdr = 2
+        match heap.get_value(pair) {
+            SchemeValue::Pair(car, cdr) => {
+                assert!(eq(&heap, *car, one));
+                assert!(eq(&heap, *cdr, two));
+            }
+            _ => panic!("Expected a pair"),
+        }
+
+        // Change car to 3
+        set_car(pair, three).unwrap();
+
+        match heap.get_value(pair) {
+            SchemeValue::Pair(car, cdr) => {
+                assert!(eq(&heap, *car, three));
+                assert!(eq(&heap, *cdr, two));
+            }
+            _ => panic!("Expected a pair"),
+        }
+    }
+
+    #[test]
+    fn test_set_cdr() {
+        let mut heap = GcHeap::new();
+        let one = new_int(&mut heap, BigInt::from(1));
+        let two = new_int(&mut heap, BigInt::from(2));
+        let three = new_int(&mut heap, BigInt::from(3));
+
+        let pair = new_pair(&mut heap, one, two);
+
+        // Initially car = 1, cdr = 2
+        match heap.get_value(pair) {
+            SchemeValue::Pair(car, cdr) => {
+                assert!(eq(&heap, *car, one));
+                assert!(eq(&heap, *cdr, two));
+            }
+            _ => panic!("Expected a pair"),
+        }
+
+        // Change cdr to 3
+        set_cdr(pair, three).unwrap();
+
+        match heap.get_value(pair) {
+            SchemeValue::Pair(car, cdr) => {
+                assert!(eq(&heap, *car, one));
+                assert!(eq(&heap, *cdr, three));
+            }
+            _ => panic!("Expected a pair"),
+        }
+    }
+
+    #[test]
+    fn test_set_car_error_on_non_pair() {
+        let mut heap = GcHeap::new();
+        let num = new_int(&mut heap, BigInt::from(42));
+        let result = set_car(num, num);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_set_cdr_error_on_non_pair() {
+        let mut heap = GcHeap::new();
+        let num = new_int(&mut heap, BigInt::from(42));
+        let result = set_cdr(num, num);
+        assert!(result.is_err());
+    }
 }
