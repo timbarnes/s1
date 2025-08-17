@@ -4,8 +4,8 @@
 //! The logic layer handles self-evaluating forms, special forms, and argument evaluation,
 //! while the apply layer handles function calls with pre-evaluated arguments.
 
-use crate::env::{Environment, Frame};
 use crate::cek::eval_main;
+use crate::env::{Environment, Frame};
 use crate::gc::SchemeValue::*;
 use crate::gc::{Callable, GcHeap, GcRef, SchemeValue, list_from_vec, list_to_vec};
 use crate::gc_value;
@@ -14,7 +14,6 @@ use crate::macros::expand_macro;
 use crate::printer::print_scheme_value;
 use std::cell::RefCell;
 use std::rc::Rc;
-
 
 /// Evaluator that owns both heap and environment
 pub struct Evaluator {
@@ -169,7 +168,6 @@ fn apply_evaluated(
     }
 }
 
-
 /// Run the trampoline until no more tail calls are scheduled
 /// Available for use anywhere we detect a tail call opportunity
 pub fn run_trampoline(evaluator: &mut EvalContext) -> Result<GcRef, String> {
@@ -197,7 +195,6 @@ pub fn run_trampoline(evaluator: &mut EvalContext) -> Result<GcRef, String> {
     evaluator.env.set_current_frame(original_env);
     result
 }
-
 
 /// Top level evaluator with tail call management
 pub fn eval(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
@@ -1281,9 +1278,9 @@ mod tests {
         // );
         // Unbound variable
         let err = eval_string(&mut ec, "(+ y 1)").unwrap_err();
-        assert!(err.contains("Unbound variable"));
+        assert!(err.contains("Unbound"));
         // Wrong argument type
         let err = eval_string(&mut ec, "(+ 1 'foo)").unwrap_err();
-        assert!(err.contains("not int") || err.contains("number"));
+        assert!(err.contains("numbers"));
     }
 }

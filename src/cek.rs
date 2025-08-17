@@ -157,11 +157,12 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                 next,
             } => {
                 if proc.is_none() {
-                    // First value in EvalArg is the proc
-                    // If it's a SpecialForm or Macro, short-circuit to ApplySpecial.
+                    // We just evaluated the operator slot (the car). Decide what to do
+                    // based on its kind.
                     match ec.heap.get_value(*val) {
                         SchemeValue::Callable(Callable::SpecialForm { .. })
                         | SchemeValue::Callable(Callable::Macro { .. }) => {
+                            // Special forms/macros: short-circuit to ApplySpecial immediately.
                             let frame = Kont::ApplySpecial {
                                 proc: *val,
                                 original_call: *original_call,
@@ -171,21 +172,33 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                             return Ok(());
                         }
                         _ => {
-                            // Normal path: treat as a procedure and start evaluating args
+                            // Normal procedure. If there are no remaining args, apply now with zero args.
                             *proc = Some(*val);
-                            if let Some(next_expr) = remaining.pop() {
-                                state.control = Control::Expr(next_expr);
+                            if remaining.is_empty() {
+                                // zero-arg call -> directly transition to ApplyProc with empty args
+                                let frame = Kont::ApplyProc {
+                                    proc: proc.unwrap(),
+                                    evaluated_args: evaluated.clone(), // should be empty
+                                    next: next.clone(),
+                                };
+                                apply_proc(state, ec, frame)?;
+                                return Ok(());
+                            } else {
+                                // still have args to evaluate: evaluate next one
+                                if let Some(next_expr) = remaining.pop() {
+                                    state.control = Control::Expr(next_expr);
+                                }
+                                return Ok(());
                             }
-                            return Ok(());
                         }
                     }
                 } else {
-                    // Already have a proc, push evaluated argument, continue or apply
+                    // Already have a proc; the current value is an evaluated argument.
                     evaluated.push(*val);
                     if let Some(next_expr) = remaining.pop() {
                         state.control = Control::Expr(next_expr);
                     } else {
-                        // All arguments evaluated; apply procedure
+                        // All args evaluated: go to apply with evaluated args
                         let frame = Kont::ApplyProc {
                             proc: proc.unwrap(),
                             evaluated_args: evaluated.clone(),
@@ -193,10 +206,9 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                         };
                         apply_proc(state, ec, frame)?;
                     }
-                    Ok(())
+                    return Ok(());
                 }
             }
-
             Kont::RestoreEnv { old_env, next, .. } => {
                 // Restore environment and continue
                 // restore EvalContext's active frame so subsequent lookups see parent's environment
@@ -277,14 +289,6 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
     dump("eval_cek exit", &state, ctx);
 }
 
-// fn resolve_symbol(state: &mut CEKState, ec: &mut EvalContext) {
-//     if let SchemeValue::Symbol(_) = gc_value!(state.control) {
-//         if let Some(val) = ec.env.get_symbol(state.control) {
-//             state.control = val;
-//         }
-//     }
-// }
-
 /// Helper: returns true if `control` is already a value
 fn is_value(control: GcRef, _ec: &EvalContext) -> bool {
     match gc_value!(control) {
@@ -293,97 +297,6 @@ fn is_value(control: GcRef, _ec: &EvalContext) -> bool {
         _ => true,
     }
 }
-
-// --- Helper: dispatch based on continuation frame ---
-// fn handle_continuation(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
-//     // eprintln!(
-//     //     "handle_continuation: control={}, kont={:?}",
-//     //     print_scheme_value(ec, &state.control),
-//     //     state.kont
-//     // );
-//     dump("handle_continuation", &state, ec);
-//     let frame = std::mem::replace(&mut state.kont, Kont::Halt);
-//     match frame {
-//         Kont::Halt => Ok(()),
-//         Kont::RestoreEnv { old_env, next } => {
-//             ec.env.set_current_frame(old_env.clone());
-//             state.env = old_env;
-//             state.kont = *next;
-//             Ok(())
-//         }
-//         Kont::EvalArg { .. } => eval_arg(state, ec, frame),
-//         Kont::ApplySpecial { .. } => apply_special(state, ec, frame),
-//         Kont::ApplyProc { .. } => apply_proc(state, ec, frame),
-//     }
-// }
-
-/// Evaluate arguments for a Closure or Builtin function.
-///
-/// Also used for the evaluation of the car of an expression to determine the operator.
-///
-// pub fn eval_arg(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Result<(), String> {
-//     dump("eval_arg", &state, ec);
-//     match frame {
-//         Kont::EvalArg {
-//             proc,
-//             mut remaining,
-//             mut evaluated,
-//             original_call,
-//             env: _,
-//             next,
-//         } => {
-//             if proc.is_none() {
-//                 // First step: evaluate the procedure itself
-//                 state.control = Control::Expr(original_call);
-//                 state.kont = Kont::EvalArg {
-//                     proc: None,
-//                     remaining,
-//                     evaluated,
-//                     original_call,
-//                     env: state.env.clone(),
-//                     next,
-//                 };
-//             } else if let Some(arg_expr) = remaining.pop() {
-//                 // Still have arguments to evaluate
-//                 state.control = Control::Expr(arg_expr);
-//                 evaluated.push(original_call); // push the last evaluated arg
-//                 state.kont = Kont::EvalArg {
-//                     proc,
-//                     remaining,
-//                     evaluated,
-//                     original_call,
-//                     env: state.env.clone(),
-//                     next,
-//                 };
-//             } else {
-//                 // All arguments evaluated, now apply
-//                 evaluated.push(original_call); // push the final arg
-
-//                 let apply_frame = match proc {
-//                     Some(p) => match ec.heap.get_value(p) {
-//                         SchemeValue::Callable(Callable::SpecialForm { .. })
-//                         | SchemeValue::Callable(Callable::Macro { .. }) => Kont::ApplySpecial {
-//                             proc: p,
-//                             original_call,
-//                             next,
-//                         },
-//                         _ => Kont::ApplyProc {
-//                             proc: p,
-//                             evaluated_args: evaluated,
-//                             next,
-//                         },
-//                     },
-//                     None => return Err("EvalArg: missing procedure".to_string()),
-//                 };
-
-//                 state.kont = apply_frame;
-//             }
-
-//             Ok(())
-//         }
-//         _ => Err("eval_arg called with non-EvalArg kont".to_string()),
-//     }
-// }
 
 /// Process SpecialForm and Macro applications. Argument evaluation is deferred to the callee.
 ///
