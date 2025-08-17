@@ -96,7 +96,7 @@ pub struct CEKState {
 /// CEK evaluator entry point
 ///
 
-pub fn eval_main(expr: GcRef, ec: &mut EvalContext, _tail: bool) -> Result<GcRef, String> {
+pub fn eval_main(expr: GcRef, ec: &mut EvalContext) -> Result<GcRef, String> {
     let state = CEKState {
         control: Control::Expr(expr),
         kont: Kont::Halt,

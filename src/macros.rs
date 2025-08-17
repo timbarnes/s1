@@ -1,5 +1,5 @@
-use crate::eval::EvalContext;
 use crate::cek::eval_main;
+use crate::eval::EvalContext;
 /// Modular macro expansion engine for Scheme
 use crate::gc::{
     GcRef, SchemeValue, car, cdr, get_nil, heap_list_iter, list_from_vec, list_to_vec, new_pair,
@@ -84,7 +84,7 @@ fn expand_list_pair(
             "unquote" => {
                 let body = list_ref(evaluator, expr, 1)?;
                 if depth == 1 {
-                    let val = eval_main(body, evaluator, false)?;
+                    let val = eval_main(body, evaluator)?;
                     return Ok(Expanded::Single(val));
                 } else {
                     let inner = expand_macro_internal(&body, depth - 1, evaluator)?;
@@ -94,7 +94,7 @@ fn expand_list_pair(
             "unquote-splicing" => {
                 let body = list_ref(evaluator, expr, 1)?;
                 if depth == 1 {
-                    let val = eval_main(body, evaluator, false)?;
+                    let val = eval_main(body, evaluator)?;
                     if let SchemeValue::Pair(_, _) = &evaluator.heap.get_value(val) {
                         // Proper list: flatten it
                         let vec = list_to_vec(&evaluator.heap, val)?;

@@ -122,182 +122,172 @@ pub fn eval_string(ec: &mut EvalContext, code: &str) -> Result<GcRef, String> {
             Err(ParseError::Eof) => return Ok(last_result),
             Ok(expr) => {
                 //let expr = crate::eval::deduplicate_symbols(expr, &mut self.heap);
-                last_result = eval_main(expr, ec, false)?;
+                last_result = eval_main(expr, ec)?;
             }
             _ => {}
         }
     }
 }
 
-fn apply_evaluated(
-    proc: GcRef,
-    evaluated_args: Vec<GcRef>,
-    ec: &mut EvalContext,
-    _tail: bool,
-) -> Result<GcRef, String> {
-    let pv = gc_value!(proc);
-    match pv {
-        Callable(callable) => match callable {
-            Callable::Builtin { func, .. } => {
-                eprintln!("Calling builtin");
-                // Builtins expect (&mut EvalContext, &[GcRef])
-                // Convert Vec -> slice
-                func(ec, &evaluated_args)
-            }
+// fn apply_evaluated(
+//     proc: GcRef,
+//     evaluated_args: Vec<GcRef>,
+//     ec: &mut EvalContext,
+//     _tail: bool,
+// ) -> Result<GcRef, String> {
+//     let pv = gc_value!(proc);
+//     match pv {
+//         Callable(callable) => match callable {
+//             Callable::Builtin { func, .. } => {
+//                 eprintln!("Calling builtin");
+//                 // Builtins expect (&mut EvalContext, &[GcRef])
+//                 // Convert Vec -> slice
+//                 func(ec, &evaluated_args)
+//             }
 
-            Callable::SpecialForm { .. } => {
-                // Special forms expect the original expression to parse args themselves;
-                // they are not normally called with pre-evaluated args. For now, call old path:
-                // Rebuild a call expression (not ideal) or just call eval_callable on original expr:
-                // We'll fall back to eval_callable (may re-evaluate args) to keep semantics identical
-                // NOTE: in the minimal CEK we avoid treating special-forms here; return error.
-                Err("internal: cannot apply special-form with pre-evaluated args".to_string())
-            }
+//             Callable::SpecialForm { .. } => {
+//                 // Special forms expect the original expression to parse args themselves;
+//                 // they are not normally called with pre-evaluated args. For now, call old path:
+//                 // Rebuild a call expression (not ideal) or just call eval_callable on original expr:
+//                 // We'll fall back to eval_callable (may re-evaluate args) to keep semantics identical
+//                 // NOTE: in the minimal CEK we avoid treating special-forms here; return error.
+//                 Err("internal: cannot apply special-form with pre-evaluated args".to_string())
+//             }
 
-            Callable::Closure { params, body, env } => {
-                // env is the closure's captured env (likely an Rc<RefCell<Frame>>)
-                // call your existing eval_closure helper which takes evaluated args and evaluator:
-                eval_closure(params, *body, env, &evaluated_args, ec, false)
-            }
+//             Callable::Closure { params, body, env } => {
+//                 // env is the closure's captured env (likely an Rc<RefCell<Frame>>)
+//                 // call your existing eval_closure helper which takes evaluated args and evaluator:
+//                 eval_closure(params, *body, env, &evaluated_args, ec, false)
+//             }
 
-            Callable::Macro { .. } => {
-                Err("internal: macro invoked in runtime apply_evaluated".to_string())
-            }
-        },
-        _ => Err("apply_evaluated: not a callable".to_string()),
-    }
-}
+//             Callable::Macro { .. } => {
+//                 Err("internal: macro invoked in runtime apply_evaluated".to_string())
+//             }
+//         },
+//         _ => Err("apply_evaluated: not a callable".to_string()),
+//     }
+// }
 
-/// Run the trampoline until no more tail calls are scheduled
-/// Available for use anywhere we detect a tail call opportunity
-pub fn run_trampoline(evaluator: &mut EvalContext) -> Result<GcRef, String> {
-    if evaluator.tail_call.is_none() {
-        return Err("No tail call scheduled".to_string());
-    }
-    let original_env = evaluator.env.current_frame();
-    let mut result = Err("No tail call scheduled".to_string());
+// /// Run the trampoline until no more tail calls are scheduled
+// /// Available for use anywhere we detect a tail call opportunity
+// pub fn run_trampoline(evaluator: &mut EvalContext) -> Result<GcRef, String> {
+//     if evaluator.tail_call.is_none() {
+//         return Err("No tail call scheduled".to_string());
+//     }
+//     let original_env = evaluator.env.current_frame();
+//     let mut result = Err("No tail call scheduled".to_string());
 
-    while let Some(tail_call) = evaluator.tail_call.take() {
-        let (params_ref, body, env) = match evaluator.heap.get_value(tail_call.func) {
-            SchemeValue::Callable(Callable::Closure { params, body, env }) => {
-                (params.clone(), *body, env.clone())
-            }
-            _ => return Err("Invalid tail call: not a closure".to_string()),
-        };
+//     while let Some(tail_call) = evaluator.tail_call.take() {
+//         let (params_ref, body, env) = match evaluator.heap.get_value(tail_call.func) {
+//             SchemeValue::Callable(Callable::Closure { params, body, env }) => {
+//                 (params.clone(), *body, env.clone())
+//             }
+//             _ => return Err("Invalid tail call: not a closure".to_string()),
+//         };
 
-        let new_env = bind_params(&params_ref, &tail_call.args, &env, evaluator.heap)?;
+//         let new_env = bind_params(&params_ref, &tail_call.args, &env, evaluator.heap)?;
 
-        evaluator.env.set_current_frame(new_env.current_frame());
+//         evaluator.env.set_current_frame(new_env.current_frame());
 
-        result = eval_main(body, evaluator, true);
-    }
+//         result = eval_main(body, evaluator);
+//     }
 
-    evaluator.env.set_current_frame(original_env);
-    result
-}
+//     evaluator.env.set_current_frame(original_env);
+//     result
+// }
 
-/// Top level evaluator with tail call management
-pub fn eval(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
-    let tail_stub = evaluator.heap.tail_call_s();
-    evaluator.tail_call = None; // Optional safety
-    let result = eval_main(expr, evaluator, true)?;
+// /// Top level evaluator with tail call management
+// pub fn eval(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
+//     let tail_stub = evaluator.heap.tail_call_s();
+//     evaluator.tail_call = None; // Optional safety
+//     let result = eval_main(expr, evaluator)?;
 
-    if evaluator.tail_call.is_some() || result == tail_stub {
-        run_trampoline(evaluator)
-    } else {
-        Ok(result)
-    }
-}
+//     if evaluator.tail_call.is_some() || result == tail_stub {
+//         run_trampoline(evaluator)
+//     } else {
+//         Ok(result)
+//     }
+// }
 
-/// Evaluates an expression in a non-tail position, allowing tail calls at lower levels
-pub fn eval_non_tail(expr: &GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
-    let result = eval_main(*expr, evaluator, false)?;
-    if evaluator.tail_call.is_some() || result == evaluator.heap.tail_call_s() {
-        run_trampoline(evaluator)
-    } else {
-        Ok(result)
-    }
-}
+// /// Handles environment access for symbol lookup application
+// #[inline(always)]
+// pub fn eval_symbol(
+//     func: GcRef,
+//     args: &[GcRef],
+//     evaluator: &mut EvalContext,
+// ) -> Result<GcRef, String> {
+//     if evaluator.trace > evaluator.depth {
+//         //let ec = EvalContext::from_eval(evaluator);
+//         for v in args {
+//             print_scheme_value(&evaluator, &v);
+//         }
+//     }
+//     *evaluator.depth -= 1;
+//     match &evaluator.heap.get_value(func) {
+//         SchemeValue::Symbol(name) => {
+//             // Symbol lookup - check environment using symbol-based lookup
+//             // Since we're working with deduplicated symbols, we can use the symbol directly
+//             evaluator
+//                 .env
+//                 .get_symbol(func)
+//                 .ok_or_else(|| format!("Unbound variable: {}", name))
+//         }
+//         _ => Err("eval_apply: function is not a symbol, primitive, macro or closure".to_string()),
+//     }
+// }
 
-/// Handles environment access for symbol lookup application
-#[inline(always)]
-pub fn eval_symbol(
-    func: GcRef,
-    args: &[GcRef],
-    evaluator: &mut EvalContext,
-) -> Result<GcRef, String> {
-    if evaluator.trace > evaluator.depth {
-        //let ec = EvalContext::from_eval(evaluator);
-        for v in args {
-            print_scheme_value(&evaluator, &v);
-        }
-    }
-    *evaluator.depth -= 1;
-    match &evaluator.heap.get_value(func) {
-        SchemeValue::Symbol(name) => {
-            // Symbol lookup - check environment using symbol-based lookup
-            // Since we're working with deduplicated symbols, we can use the symbol directly
-            evaluator
-                .env
-                .get_symbol(func)
-                .ok_or_else(|| format!("Unbound variable: {}", name))
-        }
-        _ => Err("eval_apply: function is not a symbol, primitive, macro or closure".to_string()),
-    }
-}
+// /// Main evaluation walker - handles self-evaluating forms, symbol resolution, and nested calls
+// pub fn eval_main_old(
+//     expr: GcRef,
+//     evaluator: &mut EvalContext,
+//     tail: bool,
+// ) -> Result<GcRef, String> {
+//     *evaluator.depth += 1;
+//     eprintln!("eval_main_old");
+//     if evaluator.trace > evaluator.depth {
+//         for _ in 1..*evaluator.depth {
+//             print!(">");
+//         }
+//         //println!("{}", print_scheme_value(&expr.value));
+//     }
 
-/// Main evaluation walker - handles self-evaluating forms, symbol resolution, and nested calls
-pub fn eval_main_old(
-    expr: GcRef,
-    evaluator: &mut EvalContext,
-    tail: bool,
-) -> Result<GcRef, String> {
-    *evaluator.depth += 1;
-    eprintln!("eval_main_old");
-    if evaluator.trace > evaluator.depth {
-        for _ in 1..*evaluator.depth {
-            print!(">");
-        }
-        //println!("{}", print_scheme_value(&expr.value));
-    }
+//     match &evaluator.heap.get_value(expr) {
+//         SchemeValue::Int(_)
+//         | SchemeValue::Float(_)
+//         | SchemeValue::Str(_)
+//         | SchemeValue::Bool(_)
+//         | SchemeValue::Char(_)
+//         | SchemeValue::Nil
+//         | SchemeValue::Callable { .. } => Ok(expr),
+//         SchemeValue::Symbol(_) => eval_symbol(expr, &[], evaluator),
+//         SchemeValue::Pair(_, _) => {
+//             //println!("eval_main: {}", print_scheme_value(&expr.value));
+//             let result = eval_callable(expr, evaluator, tail)?;
+//             //validate_tail_result(result, tail)
+//             Ok(result)
+//         }
+//         _ => Err("eval_main: unsupported expression type".to_string()),
+//     }
+// }
 
-    match &evaluator.heap.get_value(expr) {
-        SchemeValue::Int(_)
-        | SchemeValue::Float(_)
-        | SchemeValue::Str(_)
-        | SchemeValue::Bool(_)
-        | SchemeValue::Char(_)
-        | SchemeValue::Nil
-        | SchemeValue::Callable { .. } => Ok(expr),
-        SchemeValue::Symbol(_) => eval_symbol(expr, &[], evaluator),
-        SchemeValue::Pair(_, _) => {
-            //println!("eval_main: {}", print_scheme_value(&expr.value));
-            let result = eval_callable(expr, evaluator, tail)?;
-            //validate_tail_result(result, tail)
-            Ok(result)
-        }
-        _ => Err("eval_main: unsupported expression type".to_string()),
-    }
-}
-
-/// Evaluate a closure by creating a new environment frame and evaluating the body in it
-#[inline(always)]
-fn eval_closure(
-    params: &[GcRef],
-    body: GcRef,
-    env: &Rc<RefCell<Frame>>,
-    args: &[GcRef],
-    evaluator: &mut EvalContext,
-    _tail: bool,
-) -> Result<GcRef, String> {
-    *evaluator.depth -= 2;
-    let new_env = bind_params(params, args, env, evaluator.heap)?;
-    let original_env = evaluator.env.current_frame();
-    evaluator.env.set_current_frame(new_env.current_frame());
-    let result = eval_main(body, evaluator, true);
-    evaluator.env.set_current_frame(original_env);
-    result
-}
+// /// Evaluate a closure by creating a new environment frame and evaluating the body in it
+// #[inline(always)]
+// fn eval_closure(
+//     params: &[GcRef],
+//     body: GcRef,
+//     env: &Rc<RefCell<Frame>>,
+//     args: &[GcRef],
+//     evaluator: &mut EvalContext,
+//     _tail: bool,
+// ) -> Result<GcRef, String> {
+//     *evaluator.depth -= 2;
+//     let new_env = bind_params(params, args, env, evaluator.heap)?;
+//     let original_env = evaluator.env.current_frame();
+//     evaluator.env.set_current_frame(new_env.current_frame());
+//     let result = eval_main(body, evaluator);
+//     evaluator.env.set_current_frame(original_env);
+//     result
+// }
 
 /// Macro handler
 pub fn eval_macro(
@@ -315,7 +305,6 @@ pub fn eval_macro(
     // println!("After expansion: {}", print_scheme_value(&expanded.value));
     evaluator.env.set_current_frame(original_env);
     // Review for tail recursion
-    //eval_main(expanded, evaluator, false)
     Ok(expanded)
 }
 
@@ -323,70 +312,70 @@ pub fn eval_macro(
 // HELPER FUNCTIONS
 // ============================================================================
 
-pub fn eval_callable(
-    expr: GcRef,
-    evaluator: &mut EvalContext,
-    tail: bool,
-) -> Result<GcRef, String> {
-    // Early heap fetches (immutable)
-    let expression = gc_value!(expr);
-    let (car, cdr) = match expression {
-        Pair(car, cdr) => (car, cdr),
-        _ => return Err("Not a callable".to_string()),
-    };
+// pub fn eval_callable(
+//     expr: GcRef,
+//     evaluator: &mut EvalContext,
+//     tail: bool,
+// ) -> Result<GcRef, String> {
+//     // Early heap fetches (immutable)
+//     let expression = gc_value!(expr);
+//     let (car, cdr) = match expression {
+//         Pair(car, cdr) => (car, cdr),
+//         _ => return Err("Not a callable".to_string()),
+//     };
 
-    // Evaluate function position
-    let func = eval_main(*car, evaluator, false)?;
+//     // Evaluate function position
+//     let func = eval_main(*car, evaluator)?;
 
-    // Now we must access the Callable, but avoid borrowing heap while calling other functions
-    let func_value = gc_value!(func);
-    let callable = match func_value {
-        Callable(callable) => callable,
-        _ => return Err("Not a callable".to_string()),
-    };
+//     // Now we must access the Callable, but avoid borrowing heap while calling other functions
+//     let func_value = gc_value!(func);
+//     let callable = match func_value {
+//         Callable(callable) => callable,
+//         _ => return Err("Not a callable".to_string()),
+//     };
 
-    match callable {
-        Callable::Builtin {
-            func: builtin_func, ..
-        } => {
-            let processed_args = eval_args(&cdr, evaluator)?;
-            //let mut ec = EvalContext::from_eval(evaluator);
-            builtin_func(evaluator, &processed_args)
-        }
-        Callable::SpecialForm {
-            func: special_func, ..
-        } => special_func(expr, evaluator, tail),
-        Callable::Closure { params, body, env } => {
-            let processed_args = eval_args(&cdr, evaluator)?;
-            if tail {
-                // Closure tail call — store func and args for trampoline
-                evaluator.tail_call = Some(TailCall {
-                    func,
-                    args: processed_args,
-                });
-                return Ok(evaluator.heap.tail_call_s());
-            } else {
-                eval_closure(params, *body, env, &processed_args, evaluator, false)
-            }
-        }
-        Callable::Macro { params, body, env } => {
-            let processed_args = list_to_vec(&evaluator.heap, *cdr)?;
-            eval_macro(params, *body, env, &processed_args, evaluator)
-        }
-    }
-}
+//     match callable {
+//         Callable::Builtin {
+//             func: builtin_func, ..
+//         } => {
+//             let processed_args = eval_args(&cdr, evaluator)?;
+//             //let mut ec = EvalContext::from_eval(evaluator);
+//             builtin_func(evaluator, &processed_args)
+//         }
+//         Callable::SpecialForm {
+//             func: special_func, ..
+//         } => special_func(expr, evaluator, tail),
+//         Callable::Closure { params, body, env } => {
+//             let processed_args = eval_args(&cdr, evaluator)?;
+//             if tail {
+//                 // Closure tail call — store func and args for trampoline
+//                 evaluator.tail_call = Some(TailCall {
+//                     func,
+//                     args: processed_args,
+//                 });
+//                 return Ok(evaluator.heap.tail_call_s());
+//             } else {
+//                 eval_closure(params, *body, env, &processed_args, evaluator, false)
+//             }
+//         }
+//         Callable::Macro { params, body, env } => {
+//             let processed_args = list_to_vec(&evaluator.heap, *cdr)?;
+//             eval_macro(params, *body, env, &processed_args, evaluator)
+//         }
+//     }
+// }
 
-// Evaluate function arguments prior to calling
-fn eval_args(args: &GcRef, evaluator: &mut EvalContext) -> Result<Vec<GcRef>, String> {
-    let mut processed_args = Vec::new();
-    let mut iter = crate::gc::ResultListIter::new(*args);
+// // Evaluate function arguments prior to calling
+// fn eval_args(args: &GcRef, evaluator: &mut EvalContext) -> Result<Vec<GcRef>, String> {
+//     let mut processed_args = Vec::new();
+//     let mut iter = crate::gc::ResultListIter::new(*args);
 
-    while let Some(arg) = iter.next(&evaluator.heap)? {
-        processed_args.push(eval_non_tail(&arg, evaluator)?);
-    }
+//     while let Some(arg) = iter.next(&evaluator.heap)? {
+//         processed_args.push(eval_main(arg, evaluator)?);
+//     }
 
-    Ok(processed_args)
-}
+//     Ok(processed_args)
+// }
 
 pub fn bind_params(
     params: &[GcRef],
@@ -503,7 +492,7 @@ mod tests {
         let mut ec = crate::eval::EvalContext::from_eval(&mut evaluator);
         let int_val;
         int_val = new_int(ec.heap, num_bigint::BigInt::from(42));
-        let result = eval_main(int_val, &mut ec, false).unwrap();
+        let result = eval_main(int_val, &mut ec).unwrap();
         assert!(equal(&evaluator.heap, result, int_val));
     }
 
@@ -517,7 +506,7 @@ mod tests {
         value = new_int(ec.heap, num_bigint::BigInt::from(99));
         symbol = get_symbol(ec.heap, "x");
         ec.env.set_symbol(symbol, value);
-        let result = eval_main(symbol, &mut ec, false).unwrap();
+        let result = eval_main(symbol, &mut ec).unwrap();
         assert!(equal(&evaluator.heap, result, value));
     }
 
@@ -555,7 +544,7 @@ mod tests {
         args = new_pair(ec.heap, a, b_pair);
         expr = new_pair(ec.heap, plus_sym, args);
         ec.env.set_symbol(plus_sym, plus);
-        let result = eval_main(expr, &mut ec, false).unwrap();
+        let result = eval_main(expr, &mut ec).unwrap();
         match &ec.heap.get_value(result) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "5"),
             _ => panic!("Expected integer result"),
@@ -598,7 +587,7 @@ mod tests {
         expr = new_pair(ec.heap, star_sym, star_args);
         ec.env.set_symbol(plus_sym, plus);
         ec.env.set_symbol(star_sym, times);
-        let result = eval_main(expr, &mut ec, false).unwrap();
+        let result = eval_main(expr, &mut ec).unwrap();
         match &evaluator.heap.get_value(result) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "54"),
             _ => panic!("Expected integer result"),
@@ -672,7 +661,7 @@ mod tests {
         expr = new_pair(ec.heap, star_sym, star_args);
         ec.env.set_symbol(star_sym, times);
         ec.env.set_symbol(plus_sym, plus);
-        let result = eval_main(expr, &mut ec, false).unwrap();
+        let result = eval_main(expr, &mut ec).unwrap();
         match &ec.heap.get_value(result) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "10"),
             _ => panic!("Expected integer result"),
@@ -726,7 +715,7 @@ mod tests {
         ec.env.set_symbol(times_sym, times);
         ec.env.set_symbol(minus_sym, minus);
         println!("_________________EXPR: {}", print_scheme_value(&ec, &expr));
-        let result = eval_main(expr, &mut ec, false).unwrap();
+        let result = eval_main(expr, &mut ec).unwrap();
         match &ec.heap.get_value(result) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "-1"),
             _ => panic!("Expected integer result"),
@@ -745,7 +734,7 @@ mod tests {
         let quote_sym = get_symbol(ec.heap, "quote");
         expr = new_pair(ec.heap, quote_sym, sym_list);
         // quoted = sym;
-        let result = eval_main(expr, &mut ec, false).unwrap();
+        let result = eval_main(expr, &mut ec).unwrap();
         match &ec.heap.get_value(result) {
             SchemeValue::Symbol(s) => assert_eq!(s, "foo"),
             _ => panic!("Expected quoted symbol"),
@@ -762,7 +751,7 @@ mod tests {
         let foo_bar_list_pair = new_pair(ec.heap, foo_bar_list, nil);
         expr2 = new_pair(ec.heap, quote_sym, foo_bar_list_pair);
         // let quoted_list = foo_bar_list;
-        let result2 = eval_main(expr2, &mut ec, false).unwrap();
+        let result2 = eval_main(expr2, &mut ec).unwrap();
         match &ec.heap.get_value(result2) {
             SchemeValue::Pair(_, _) => (),
             _ => panic!("Expected quoted list"),
@@ -799,7 +788,7 @@ mod tests {
         begin_args = plus_expr_pair;
         expr = new_pair(ec.heap, begin_sym, begin_args);
         ec.env.set_symbol(plus_sym, plus);
-        let result = eval_main(expr, &mut ec, false).unwrap();
+        let result = eval_main(expr, &mut ec).unwrap();
         match &ec.heap.get_value(result) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "3"),
             _ => panic!("Expected integer result from begin"),
@@ -819,7 +808,7 @@ mod tests {
         let args = new_pair(ec.heap, symbol, val_pair);
         let define_sym = get_symbol(ec.heap, "define");
         expr = new_pair(ec.heap, define_sym, args);
-        let result = eval_main(expr, &mut ec, false).unwrap();
+        let result = eval_main(expr, &mut ec).unwrap();
         match &ec.heap.get_value(result) {
             SchemeValue::Symbol(s) => assert_eq!(s.to_string(), "y"),
             _ => panic!("Expected symbol result"),
@@ -854,12 +843,12 @@ mod tests {
         let one_pair2 = new_pair(ec.heap, one, two_pair2);
         let f_pair = new_pair(ec.heap, f, one_pair2);
         expr_false = new_pair(ec.heap, if_sym, f_pair);
-        let result_true = eval_main(expr_true, &mut ec, false).unwrap();
+        let result_true = eval_main(expr_true, &mut ec).unwrap();
         match &ec.heap.get_value(result_true) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
             _ => panic!("Expected integer result for true branch"),
         }
-        let result_false = eval_main(expr_false, &mut ec, false).unwrap();
+        let result_false = eval_main(expr_false, &mut ec).unwrap();
         match &ec.heap.get_value(result_false) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
             _ => panic!("Expected integer result for false branch"),
@@ -875,7 +864,7 @@ mod tests {
             let and_sym = get_symbol(ec.heap, "and");
             let nil = ec.heap.nil_s();
             let and_empty = new_pair(ec.heap, and_sym, nil);
-            let result = eval_main(and_empty, &mut ec, false).unwrap();
+            let result = eval_main(and_empty, &mut ec).unwrap();
             assert!(matches!(
                 &ec.heap.get_value(result),
                 SchemeValue::Bool(true)
@@ -894,7 +883,7 @@ mod tests {
             let one_pair = new_pair(ec.heap, one, two_pair);
             let t_pair = new_pair(ec.heap, t, one_pair);
             let and_expr = new_pair(ec.heap, and_sym, t_pair);
-            let result = eval_main(and_expr, &mut ec, false).unwrap();
+            let result = eval_main(and_expr, &mut ec).unwrap();
             match &ec.heap.get_value(result) {
                 SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
                 _ => panic!("Expected integer result for and"),
@@ -913,7 +902,7 @@ mod tests {
             let f_pair = new_pair(ec.heap, f, two_pair);
             let t_pair2 = new_pair(ec.heap, t, f_pair);
             let and_expr2 = new_pair(ec.heap, and_sym, t_pair2);
-            let result = eval_main(and_expr2, &mut ec, false).unwrap();
+            let result = eval_main(and_expr2, &mut ec).unwrap();
             assert!(matches!(
                 &ec.heap.get_value(result),
                 SchemeValue::Bool(false)
@@ -926,7 +915,7 @@ mod tests {
             let or_sym = get_symbol(ec.heap, "or");
             let nil = ec.heap.nil_s();
             let or_empty = new_pair(ec.heap, or_sym, nil);
-            let result = eval_main(or_empty, &mut ec, false).unwrap();
+            let result = eval_main(or_empty, &mut ec).unwrap();
             assert!(matches!(
                 &evaluator.heap.get_value(result),
                 SchemeValue::Bool(false)
@@ -945,7 +934,7 @@ mod tests {
             let one_pair = new_pair(ec.heap, one, two_pair);
             let f_pair = new_pair(ec.heap, f, one_pair);
             let or_expr = new_pair(ec.heap, or_sym, f_pair);
-            let result = eval_main(or_expr, &mut ec, false).unwrap();
+            let result = eval_main(or_expr, &mut ec).unwrap();
             match &ec.heap.get_value(result) {
                 SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
                 _ => panic!("Expected integer result for or"),
@@ -963,7 +952,7 @@ mod tests {
             let f_pair2 = new_pair(ec.heap, f, two_pair);
             let f_pair3 = new_pair(ec.heap, f, f_pair2);
             let or_expr2 = new_pair(ec.heap, or_sym, f_pair3);
-            let result = eval_main(or_expr2, &mut ec, false).unwrap();
+            let result = eval_main(or_expr2, &mut ec).unwrap();
             match &ec.heap.get_value(result) {
                 SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
                 _ => panic!("Expected integer result for or"),
@@ -980,7 +969,7 @@ mod tests {
             let f_pair2 = new_pair(ec.heap, f, f_pair);
             let f_pair3 = new_pair(ec.heap, f, f_pair2);
             let or_expr3 = new_pair(ec.heap, or_sym, f_pair3);
-            let result = eval_main(or_expr3, &mut ec, false).unwrap();
+            let result = eval_main(or_expr3, &mut ec).unwrap();
             assert!(matches!(
                 &evaluator.heap.get_value(result),
                 SchemeValue::Bool(false)
@@ -1022,7 +1011,7 @@ mod tests {
         let lambda_args = new_pair(ec.heap, params_list, body_nil);
         lambda_expr = new_pair(ec.heap, lambda_sym, lambda_args);
         // Evaluate the lambda to create a closure
-        add1 = eval_main(lambda_expr, &mut ec, false).unwrap();
+        add1 = eval_main(lambda_expr, &mut ec).unwrap();
 
         // Verify it's a closure
         match &ec.heap.get_value(add1) {
@@ -1060,7 +1049,7 @@ mod tests {
         let five_pair = new_pair(ec.heap, five, nil);
         apply_expr = new_pair(ec.heap, add1, five_pair);
         // Evaluate the application
-        result = eval_main(apply_expr, &mut ec, false).unwrap();
+        result = eval_main(apply_expr, &mut ec).unwrap();
 
         // Should return 6
         match &evaluator.heap.get_value(result) {
@@ -1119,7 +1108,7 @@ mod tests {
         apply_expr = new_pair(ec.heap, closure, three_four_pair);
 
         // Evaluate the application
-        result = eval_main(apply_expr, &mut ec, false).unwrap();
+        result = eval_main(apply_expr, &mut ec).unwrap();
 
         // Should return 7
         match &evaluator.heap.get_value(result) {
@@ -1211,7 +1200,7 @@ mod tests {
         apply_expr = new_pair(ec.heap, closure, five_pair);
 
         // This should work because we're using the same interned symbol
-        let result = eval_main(apply_expr, &mut ec, false).unwrap();
+        let result = eval_main(apply_expr, &mut ec).unwrap();
         match &evaluator.heap.get_value(result) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "6"),
             _ => panic!("Expected integer result"),
