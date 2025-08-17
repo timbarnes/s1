@@ -10,7 +10,7 @@
 
 (define failed-tests '()) ; keep track of test failures
 (define **counter** 0)
-(define **print-successes** #f)
+(define **print-successes** #t)
 
 (define fails
   (lambda (message)
@@ -26,7 +26,7 @@
             #t))))
 
 (define failure
-    (lambda (message actual expected)
+    (lambda (message expected actual)
         (fails message)
         (newline)
         (display **counter**)

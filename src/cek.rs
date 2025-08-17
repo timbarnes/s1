@@ -147,79 +147,84 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
             Ok(())
         }
 
-Control::Value(val) => match &mut state.kont {
-    Kont::EvalArg {
-        proc,
-        remaining,
-        evaluated,
-        original_call,
-        env: _,
-        next,
-    } => {
-
-        if proc.is_none() {
-            // First value in EvalArg is the proc
-            // If it's a SpecialForm or Macro, short-circuit to ApplySpecial.
-            match ec.heap.get_value(*val) {
-                SchemeValue::Callable(Callable::SpecialForm { .. })
-                | SchemeValue::Callable(Callable::Macro { .. }) => {
-                    let frame = Kont::ApplySpecial {
-                        proc: *val,
-                        original_call: *original_call,
-                        next: next.clone(),
-                    };
-                    apply_special(state, ec, frame)?;
-                    return Ok(());
-                }
-                _ => {
-                    // Normal path: treat as a procedure and start evaluating args
-                    *proc = Some(*val);
+        Control::Value(val) => match &mut state.kont {
+            Kont::EvalArg {
+                proc,
+                remaining,
+                evaluated,
+                original_call,
+                env: _,
+                next,
+            } => {
+                if proc.is_none() {
+                    // First value in EvalArg is the proc
+                    // If it's a SpecialForm or Macro, short-circuit to ApplySpecial.
+                    match ec.heap.get_value(*val) {
+                        SchemeValue::Callable(Callable::SpecialForm { .. })
+                        | SchemeValue::Callable(Callable::Macro { .. }) => {
+                            let frame = Kont::ApplySpecial {
+                                proc: *val,
+                                original_call: *original_call,
+                                next: next.clone(),
+                            };
+                            apply_special(state, ec, frame)?;
+                            return Ok(());
+                        }
+                        _ => {
+                            // Normal path: treat as a procedure and start evaluating args
+                            *proc = Some(*val);
+                            if let Some(next_expr) = remaining.pop() {
+                                state.control = Control::Expr(next_expr);
+                            }
+                            return Ok(());
+                        }
+                    }
+                } else {
+                    // Already have a proc, push evaluated argument, continue or apply
+                    evaluated.push(*val);
                     if let Some(next_expr) = remaining.pop() {
                         state.control = Control::Expr(next_expr);
+                    } else {
+                        // All arguments evaluated; apply procedure
+                        let frame = Kont::ApplyProc {
+                            proc: proc.unwrap(),
+                            evaluated_args: evaluated.clone(),
+                            next: next.clone(),
+                        };
+                        apply_proc(state, ec, frame)?;
                     }
-                    return Ok(());
+                    Ok(())
                 }
             }
-        } else {
-            // Already have a proc, push evaluated argument, continue or apply
-            evaluated.push(*val);
-            if let Some(next_expr) = remaining.pop() {
-                state.control = Control::Expr(next_expr);
-            } else {
-                // All arguments evaluated; apply procedure
-                let frame = Kont::ApplyProc {
-                    proc: proc.unwrap(),
-                    evaluated_args: evaluated.clone(),
-                    next: next.clone(),
-                };
-                apply_proc(state, ec, frame)?;
+
+            Kont::RestoreEnv { old_env, next, .. } => {
+                // Restore environment and continue
+                // restore EvalContext's active frame so subsequent lookups see parent's environment
+                ec.env.set_current_frame(old_env.clone());
+                state.env = old_env.clone();
+                state.kont = *next.clone();
+                state.control = Control::Value(*val);
+                return Ok(());
             }
-            Ok(())
-        }
+
+            Kont::ApplySpecial {
+                proc,
+                original_call,
+                next,
+            } => {
+                let frame = Kont::ApplySpecial {
+                    proc: *proc,
+                    original_call: *original_call,
+                    next: Box::new(*next.clone()),
+                };
+                apply_special(state, ec, frame)?;
+                Ok(())
+            }
+
+            // Other continuations do nothing here
+            _ => Ok(()),
+        },
     }
-
-    Kont::RestoreEnv { old_env, next, .. } => {
-        // Restore environment and continue
-        state.env = old_env.clone();
-        state.kont = *next.clone();
-        state.control = Control::Value(*val);
-        return Ok(());
-    }
-
-
-    Kont::ApplySpecial { proc, original_call, next } => {
-        let frame = Kont::ApplySpecial {
-            proc: *proc,
-            original_call: *original_call,
-            next: Box::new(*next.clone()),
-        };
-        apply_special(state, ec, frame)?;
-        Ok(())
-    }
-
-    // Other continuations do nothing here
-    _ => Ok(()),
-}    }
 }
 
 /// Capture the current environment and control state, then pass the CEKState to the CEK loop.
@@ -270,9 +275,7 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
         ),
     }
     dump("eval_cek exit", &state, ctx);
- 
 }
-
 
 // fn resolve_symbol(state: &mut CEKState, ec: &mut EvalContext) {
 //     if let SchemeValue::Symbol(_) = gc_value!(state.control) {
@@ -421,18 +424,13 @@ fn apply_special(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Res
 ///
 fn apply_proc(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Result<(), String> {
     dump("apply_proc", &state, ec);
-     if let Kont::ApplyProc {
+
+    if let Kont::ApplyProc {
         proc,
         evaluated_args,
         next,
     } = frame
     {
-       //eprintln!("    proc={}, args={:?}, next={:?}",
-        //     print_scheme_value(ec, &proc),
-        //     evaluated_args.iter().map(|v| print_scheme_value(ec, v)).collect::<Vec<_>>(),
-        //     frame_debug_short(&next)
-        // );
-
         match gc_value!(proc) {
             Callable(callable) => match callable {
                 Callable::Builtin { func, .. } => {
@@ -446,14 +444,22 @@ fn apply_proc(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Result
                     body,
                     env: closure_env,
                 } => {
+                    // Bind the arguments into a new environment frame based on the closure's captured env
                     let new_env = bind_params(params, &evaluated_args, closure_env, ec.heap)?;
-                    let old_env = ec.env.current_frame();
-                    state.kont = Kont::RestoreEnv {
-                        old_env: old_env.clone(),
-                        next,
-                    };
-                    ec.env.set_current_frame(new_env.current_frame());
+
+                    // Save the current CEK environment so we can restore it later
+                    let old_env = state.env.clone();
+
+                    // Update CEKState to use the new closure frame
                     state.env = new_env.current_frame();
+
+                    // Update EvalContext to point to the new closure frame
+                    ec.env.set_current_frame(state.env.clone());
+
+                    // Push a continuation to restore the old environment after the closure finishes
+                    state.kont = Kont::RestoreEnv { old_env, next };
+
+                    // Start evaluating the closure body
                     state.control = Control::Expr(*body);
                     Ok(())
                 }
