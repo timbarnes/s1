@@ -91,6 +91,18 @@ pub fn help(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     }
 }
 
+fn eval_string(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 1 {
+        return Err("eval-string: expected exactly 1 argument".to_string());
+    }
+    let string = match &ec.heap.get_value(args[0]) {
+        SchemeValue::Str(string) => string.clone(),
+        _ => return Err("eval-string: argument must be a string".to_string()),
+    };
+    // Evaluate the string
+    crate::eval::eval_string(ec, &string)
+}
+
 /// Builtin function: (load filename)
 ///
 /// Loads and evaluates a Scheme file.
@@ -137,5 +149,6 @@ pub fn register_builtins(heap: &mut GcHeap, env: &mut crate::env::Environment) {
         "display" => display,
         "newline" => newline,
         "exit" => exit,
+        "eval-string" => eval_string,
     );
 }
