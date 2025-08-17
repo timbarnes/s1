@@ -307,11 +307,9 @@ pub fn eval_macro(
     args: &[GcRef],
     evaluator: &mut EvalContext,
 ) -> Result<GcRef, String> {
-    // Bind unevaluated arguments to macro parameters
     let new_env = bind_params(params, args, env, evaluator.heap)?;
     let original_env = evaluator.env.current_frame();
     evaluator.env.set_current_frame(new_env.current_frame());
-    // Expand the macro
     // println!("Unexpanded macro: {}", print_scheme_value(&body.value));
     let expanded = expand_macro(&body, 0, evaluator)?;
     // println!("After expansion: {}", print_scheme_value(&expanded.value));
