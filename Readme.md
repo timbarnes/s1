@@ -10,6 +10,7 @@ A comprehensive Scheme interpreter written in Rust that aims to closely follow t
 - **Garbage Collection**: Mark-and-sweep garbage collector with cycle detection
 - **Macro System**: Scheme-style macros with proper expansion
 - **Interactive REPL**: Full read-eval-print loop with command history
+- **CEK Evaluator**: Basis for call/cc, exceptions, and continuations
 
 ### Data Types
 - **Numbers**: Arbitrary precision integers (BigInt) and IEEE 754 floating-point
@@ -53,8 +54,24 @@ A comprehensive Scheme interpreter written in Rust that aims to closely follow t
 - `boolean?`, `char?`, `closure?`, `macro?`, `primitive?`
 - `nil?`, `eq?` - Value testing
 
+#### String Operations
+- `string-append` - Concatenate strings
+- `string-length` - Length of a string
+- `substring` - Extract substring
+- `string-ref` - Character at index
+- `string->list` - Convert string to list of characters
+- `list->string` - Convert list of characters to string
+- `string-copy` - Create a copy of a string
+- `string=?` - Compare strings for equality
+- `string<?` - Compare strings lexicographically
+- `string>?` - Compare strings lexicographically
+- `string-upcase` - Convert string to uppercase
+- `string-downcase` - Convert string to lowercase
+
 #### I/O Operations
-- `display` - Output values to ports
+- `display` - Output values in human-readable format
+- `write` - Output values in Scheme-readable format
+- `displayln` - Output a sequence of values followed by a newline character
 - `newline` - Output newline character
 - `open-input-file` - Open files for reading
 
@@ -83,7 +100,7 @@ Full macro system allowing definition of new syntactic forms. Macros receive une
 
 #### Debug Support
 - `trace` function for debugging evaluation
-- Comprehensive error messages with context
+- Limited error messages with context - more work required in the evaluator
 - Interactive debugging in REPL mode
 
 ## Architecture
@@ -96,15 +113,17 @@ The interpreter uses a clean separation between evaluation logic and function ap
 ### Memory Management
 All Scheme values are allocated on a garbage-collected heap using `GcRef` references. The heap automatically manages memory and handles circular references correctly.
 
-### Modular Design
+### Module Structure
 - `gc.rs` - Garbage collection and object allocation
-- `eval.rs` - Core evaluation engine
+- `eval.rs` - Core evaluation interface
+- `cek.rs` - Continuation-passing evaluator
 - `parser.rs` - S-expression parsing
 - `tokenizer.rs` - Lexical analysis
 - `env.rs` - Environment and scoping
 - `builtin/` - Built-in function implementations
 - `io.rs` - I/O port system
 - `macros.rs` - Macro expansion
+- `builtin/mod.rs` - orchestrates builtin functions
 
 ## Usage
 
