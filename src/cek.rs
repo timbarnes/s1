@@ -3,7 +3,7 @@
 use crate::env::EnvRef;
 use crate::eval::{EvalContext, bind_params, eval_macro};
 use crate::gc::SchemeValue::*;
-use crate::gc::{Callable, GcRef, SchemeValue, list_to_vec};
+use crate::gc::{Callable, GcRef, list_to_vec};
 use crate::gc_value;
 use crate::printer::print_scheme_value;
 //use std::cell::RefCell;
@@ -102,6 +102,7 @@ pub fn eval_main(expr: GcRef, ec: &mut EvalContext, _tail: bool) -> Result<GcRef
         kont: Kont::Halt,
         env: ec.env.current_frame().clone(),
     };
+    dump("***eval_main***", &state, ec);
     Ok(run_cek(state, ec))
 }
 
@@ -111,12 +112,12 @@ pub fn eval_main(expr: GcRef, ec: &mut EvalContext, _tail: bool) -> Result<GcRef
 ///
 pub fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> GcRef {
     loop {
-        dump("run_cek", &state, ctx);
+        dump(" run_cek", &state, ctx);
         // Step the CEK machine; mutates state in place
         if let Err(err) = step(&mut state, ctx) {
             panic!("CEK evaluation error: {}", err);
         }
-
+        //dump("run_cek post step", &state, ctx);
         match &state.control {
             Control::Value(val) => match &state.kont {
                 Kont::Halt => return *val, // fully evaluated, exit
@@ -139,7 +140,7 @@ pub fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> GcRef {
 /// resolving symbols, starting applications, and handling continuations as needed.
 ///
 pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
-    dump("step", &state, ec);
+    dump("  step", &state, ec);
     match &state.control {
         Control::Expr(expr) => {
             // Evaluate the next expression
@@ -160,8 +161,8 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                     // We just evaluated the operator slot (the car). Decide what to do
                     // based on its kind.
                     match ec.heap.get_value(*val) {
-                        SchemeValue::Callable(Callable::SpecialForm { .. })
-                        | SchemeValue::Callable(Callable::Macro { .. }) => {
+                        Callable(Callable::SpecialForm { .. })
+                        | Callable(Callable::Macro { .. }) => {
                             // Special forms/macros: short-circuit to ApplySpecial immediately.
                             let frame = Kont::ApplySpecial {
                                 proc: *val,
@@ -242,7 +243,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
 /// Capture the current environment and control state, then pass the CEKState to the CEK loop.
 ///
 pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
-    dump("eval_cek", &state, ctx);
+    dump("   eval_cek", &state, ctx);
     match &gc_value!(expr) {
         // Self-evaluating values
         Int(_) | Float(_) | Str(_) | Bool(_) | Vector(_) | Char(_) | Nil => {
@@ -286,7 +287,7 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
             print_scheme_value(ctx, &expr)
         ),
     }
-    dump("eval_cek exit", &state, ctx);
+    //dump("eval_cek exit", &state, ctx);
 }
 
 /// Helper: returns true if `control` is already a value
@@ -301,7 +302,7 @@ fn is_value(control: GcRef, _ec: &EvalContext) -> bool {
 /// Process SpecialForm and Macro applications. Argument evaluation is deferred to the callee.
 ///
 fn apply_special(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Result<(), String> {
-    dump("apply_special", &state, ec);
+    dump("     apply_special", &state, ec);
     if let Kont::ApplySpecial {
         proc,
         original_call,
@@ -317,7 +318,7 @@ fn apply_special(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Res
             }
             Callable(Callable::Macro { params, body, env }) => {
                 let (_, cdr) = match gc_value!(original_call) {
-                    SchemeValue::Pair(_, cdr) => ((), *cdr),
+                    Pair(_, cdr) => ((), *cdr),
                     _ => return Err("macro: not a proper call".to_string()),
                 };
                 let raw_args = list_to_vec(ec.heap, cdr)?;
@@ -336,7 +337,7 @@ fn apply_special(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Res
 /// Process Builtin and Closure applications. Arguments are already evaluated.
 ///
 fn apply_proc(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Result<(), String> {
-    dump("apply_proc", &state, ec);
+    dump("     apply_proc", &state, ec);
 
     if let Kont::ApplyProc {
         proc,
@@ -350,6 +351,7 @@ fn apply_proc(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Result
                     let result = func(ec, &evaluated_args)?;
                     state.control = Control::Value(result);
                     state.kont = *next;
+
                     Ok(())
                 }
                 Callable::Closure {
@@ -357,21 +359,12 @@ fn apply_proc(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Result
                     body,
                     env: closure_env,
                 } => {
-                    // Bind the arguments into a new environment frame based on the closure's captured env
                     let new_env = bind_params(params, &evaluated_args, closure_env, ec.heap)?;
-
-                    // Save the current CEK environment so we can restore it later
                     let old_env = state.env.clone();
-
-                    // Update CEKState to use the new closure frame
                     state.env = new_env.current_frame();
-
-                    // Update EvalContext to point to the new closure frame
                     ec.env.set_current_frame(state.env.clone());
-
                     // Push a continuation to restore the old environment after the closure finishes
                     state.kont = Kont::RestoreEnv { old_env, next };
-
                     // Start evaluating the closure body
                     state.control = Control::Expr(*body);
                     Ok(())
@@ -390,14 +383,14 @@ fn dump(loc: &str, state: &CEKState, ec: &EvalContext) {
         match &state.control {
             Control::Expr(obj) => {
                 eprintln!(
-                    "[{loc:14}] Control: Expr={:20}; Kont={}",
+                    "{loc:18} Control: Expr={:20}; Kont={}",
                     print_scheme_value(ec, obj),
                     frame_debug_short(&state.kont)
                 );
             }
             Control::Value(obj) => {
                 eprintln!(
-                    "[{loc:14}] Control: Value={:20}; Kont={}",
+                    "{loc:18} Control: Value={:20}; Kont={}",
                     print_scheme_value(ec, obj),
                     frame_debug_short(&state.kont)
                 );

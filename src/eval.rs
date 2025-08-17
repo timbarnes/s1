@@ -317,7 +317,8 @@ pub fn eval_macro(
     // println!("After expansion: {}", print_scheme_value(&expanded.value));
     evaluator.env.set_current_frame(original_env);
     // Review for tail recursion
-    eval_main(expanded, evaluator, false)
+    //eval_main(expanded, evaluator, false)
+    Ok(expanded)
 }
 
 // ============================================================================
