@@ -1,18 +1,28 @@
 // Only keep this function for pretty-printing SchemeValueSimple:
 use crate::eval::EvalContext;
-use crate::gc::{Callable, GcRef, SchemeValue};
+use crate::gc::SchemeValue::*;
+use crate::gc::{Callable, GcRef};
+
+pub fn display_scheme_value(ec: &EvalContext, obj: &GcRef) -> String {
+    let val = ec.heap.get_value(*obj);
+    match val {
+        Str(s) => s.clone(),
+        Char(c) => format!("{c}"),
+        _ => print_scheme_value(ec, obj),
+    }
+}
 
 pub fn print_scheme_value(ec: &EvalContext, obj: &GcRef) -> String {
     let val = ec.heap.get_value(*obj);
     match val {
-        SchemeValue::Pair(_, _) => {
+        Pair(_, _) => {
             let mut s = String::from("(");
             let mut first = true;
             let mut current = *obj;
             loop {
                 let value = ec.heap.get_value(current);
                 match value {
-                    SchemeValue::Pair(car, cdr) => {
+                    Pair(car, cdr) => {
                         if !first {
                             s.push(' ');
                         }
@@ -20,7 +30,7 @@ pub fn print_scheme_value(ec: &EvalContext, obj: &GcRef) -> String {
                         current = *cdr;
                         first = false;
                     }
-                    SchemeValue::Nil => {
+                    Nil => {
                         s.push(')');
                         break;
                     }
@@ -34,8 +44,8 @@ pub fn print_scheme_value(ec: &EvalContext, obj: &GcRef) -> String {
             }
             s
         }
-        SchemeValue::Symbol(s) => s.clone(),
-        SchemeValue::Vector(v) => {
+        Symbol(s) => s.clone(),
+        Vector(v) => {
             let mut s = "#(".to_string();
             let mut first = true;
             for value in v.iter() {
@@ -48,14 +58,19 @@ pub fn print_scheme_value(ec: &EvalContext, obj: &GcRef) -> String {
             s.push(')');
             s
         }
-        SchemeValue::Int(i) => i.to_string(),
-        SchemeValue::Float(f) => f.to_string(),
-        SchemeValue::Str(s) => s.clone(), // raw string, no quotes
-        SchemeValue::Bool(true) => "#t".to_string(),
-        SchemeValue::Bool(false) => "#f".to_string(),
-        SchemeValue::Char(c) => format!("#\\{}", c),
-        SchemeValue::Nil => "nil".to_string(),
-        SchemeValue::Callable(variant) => match variant {
+        Int(i) => i.to_string(),
+        Float(f) => f.to_string(),
+        Str(s) => {
+            let mut res = "\"".to_string();
+            res.push_str(s);
+            res.push('"');
+            res
+        }
+        Bool(true) => "#t".to_string(),
+        Bool(false) => "#f".to_string(),
+        Char(c) => format!("#\\{}", c),
+        Nil => "nil".to_string(),
+        Callable(variant) => match variant {
             Callable::Builtin { func, doc } => format!("Primitive@{:?} {}", func, doc),
             Callable::SpecialForm { doc, .. } => format!("SpecialForm: {}", doc),
             Callable::Closure { params, body, .. } => print_callable(ec, "Closure", params, *body),
@@ -87,7 +102,7 @@ fn print_callable(
                 s.push(' ');
             }
             match &ec.heap.get_value(params[0]) {
-                SchemeValue::Symbol(name) => {
+                Symbol(name) => {
                     println!("Symbol: {}", name);
                     s.push_str(". ");
                     s.push_str(name.as_str());

@@ -7,7 +7,7 @@ pub mod vector;
 
 use crate::eval::EvalContext;
 use crate::gc::{GcHeap, GcRef, SchemeValue, get_nil, new_string};
-use crate::printer::print_scheme_value;
+use crate::printer::{display_scheme_value, print_scheme_value};
 
 /// Macro to register builtin functions in the environment
 ///
@@ -29,13 +29,34 @@ macro_rules! register_builtin_family {
 // BUILTIN FUNCTIONS
 // ============================================================================
 
-pub fn display(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
+pub fn write(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() < 1 || args.len() > 2 {
         return Err("display: expected 1 or 2 arguments".to_string());
     }
 
     // Extract the SchemeValue reference in its own block to shorten the borrow
     let s = print_scheme_value(&ec, &args[0]);
+
+    if args.len() == 2 {
+        print!("{}", s);
+        use std::io::Write;
+        std::io::stdout().flush().unwrap();
+    } else {
+        print!("{}", s);
+        use std::io::Write;
+        std::io::stdout().flush().unwrap();
+    }
+
+    Ok(ec.heap.nil_s())
+}
+
+pub fn display(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() < 1 || args.len() > 2 {
+        return Err("display: expected 1 or 2 arguments".to_string());
+    }
+
+    // Extract the SchemeValue reference in its own block to shorten the borrow
+    let s = display_scheme_value(&ec, &args[0]);
 
     if args.len() == 2 {
         print!("{}", s);
@@ -146,6 +167,7 @@ pub fn register_builtins(heap: &mut GcHeap, env: &mut crate::env::Environment) {
     vector::register_vector_builtins(heap, env);
     register_builtin_family!(heap, env,
         "help" => help,
+        "write" => write,
         "display" => display,
         "newline" => newline,
         "exit" => exit,
