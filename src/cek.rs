@@ -311,7 +311,7 @@ fn apply_special(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Res
     {
         match gc_value!(proc) {
             Callable(Callable::SpecialForm { func, .. }) => {
-                let result = func(original_call, ec, false)?;
+                let result = func(original_call, ec)?;
                 state.control = Control::Value(result);
                 state.kont = *next;
                 Ok(())

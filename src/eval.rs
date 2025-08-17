@@ -7,11 +7,9 @@
 use crate::cek::eval_main;
 use crate::env::{Environment, Frame};
 use crate::gc::SchemeValue::*;
-use crate::gc::{Callable, GcHeap, GcRef, SchemeValue, list_from_vec, list_to_vec};
-use crate::gc_value;
+use crate::gc::{GcHeap, GcRef, SchemeValue, list_from_vec, list_to_vec};
 use crate::io::PortKind;
 use crate::macros::expand_macro;
-use crate::printer::print_scheme_value;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -129,166 +127,6 @@ pub fn eval_string(ec: &mut EvalContext, code: &str) -> Result<GcRef, String> {
     }
 }
 
-// fn apply_evaluated(
-//     proc: GcRef,
-//     evaluated_args: Vec<GcRef>,
-//     ec: &mut EvalContext,
-//     _tail: bool,
-// ) -> Result<GcRef, String> {
-//     let pv = gc_value!(proc);
-//     match pv {
-//         Callable(callable) => match callable {
-//             Callable::Builtin { func, .. } => {
-//                 eprintln!("Calling builtin");
-//                 // Builtins expect (&mut EvalContext, &[GcRef])
-//                 // Convert Vec -> slice
-//                 func(ec, &evaluated_args)
-//             }
-
-//             Callable::SpecialForm { .. } => {
-//                 // Special forms expect the original expression to parse args themselves;
-//                 // they are not normally called with pre-evaluated args. For now, call old path:
-//                 // Rebuild a call expression (not ideal) or just call eval_callable on original expr:
-//                 // We'll fall back to eval_callable (may re-evaluate args) to keep semantics identical
-//                 // NOTE: in the minimal CEK we avoid treating special-forms here; return error.
-//                 Err("internal: cannot apply special-form with pre-evaluated args".to_string())
-//             }
-
-//             Callable::Closure { params, body, env } => {
-//                 // env is the closure's captured env (likely an Rc<RefCell<Frame>>)
-//                 // call your existing eval_closure helper which takes evaluated args and evaluator:
-//                 eval_closure(params, *body, env, &evaluated_args, ec, false)
-//             }
-
-//             Callable::Macro { .. } => {
-//                 Err("internal: macro invoked in runtime apply_evaluated".to_string())
-//             }
-//         },
-//         _ => Err("apply_evaluated: not a callable".to_string()),
-//     }
-// }
-
-// /// Run the trampoline until no more tail calls are scheduled
-// /// Available for use anywhere we detect a tail call opportunity
-// pub fn run_trampoline(evaluator: &mut EvalContext) -> Result<GcRef, String> {
-//     if evaluator.tail_call.is_none() {
-//         return Err("No tail call scheduled".to_string());
-//     }
-//     let original_env = evaluator.env.current_frame();
-//     let mut result = Err("No tail call scheduled".to_string());
-
-//     while let Some(tail_call) = evaluator.tail_call.take() {
-//         let (params_ref, body, env) = match evaluator.heap.get_value(tail_call.func) {
-//             SchemeValue::Callable(Callable::Closure { params, body, env }) => {
-//                 (params.clone(), *body, env.clone())
-//             }
-//             _ => return Err("Invalid tail call: not a closure".to_string()),
-//         };
-
-//         let new_env = bind_params(&params_ref, &tail_call.args, &env, evaluator.heap)?;
-
-//         evaluator.env.set_current_frame(new_env.current_frame());
-
-//         result = eval_main(body, evaluator);
-//     }
-
-//     evaluator.env.set_current_frame(original_env);
-//     result
-// }
-
-// /// Top level evaluator with tail call management
-// pub fn eval(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
-//     let tail_stub = evaluator.heap.tail_call_s();
-//     evaluator.tail_call = None; // Optional safety
-//     let result = eval_main(expr, evaluator)?;
-
-//     if evaluator.tail_call.is_some() || result == tail_stub {
-//         run_trampoline(evaluator)
-//     } else {
-//         Ok(result)
-//     }
-// }
-
-// /// Handles environment access for symbol lookup application
-// #[inline(always)]
-// pub fn eval_symbol(
-//     func: GcRef,
-//     args: &[GcRef],
-//     evaluator: &mut EvalContext,
-// ) -> Result<GcRef, String> {
-//     if evaluator.trace > evaluator.depth {
-//         //let ec = EvalContext::from_eval(evaluator);
-//         for v in args {
-//             print_scheme_value(&evaluator, &v);
-//         }
-//     }
-//     *evaluator.depth -= 1;
-//     match &evaluator.heap.get_value(func) {
-//         SchemeValue::Symbol(name) => {
-//             // Symbol lookup - check environment using symbol-based lookup
-//             // Since we're working with deduplicated symbols, we can use the symbol directly
-//             evaluator
-//                 .env
-//                 .get_symbol(func)
-//                 .ok_or_else(|| format!("Unbound variable: {}", name))
-//         }
-//         _ => Err("eval_apply: function is not a symbol, primitive, macro or closure".to_string()),
-//     }
-// }
-
-// /// Main evaluation walker - handles self-evaluating forms, symbol resolution, and nested calls
-// pub fn eval_main_old(
-//     expr: GcRef,
-//     evaluator: &mut EvalContext,
-//     tail: bool,
-// ) -> Result<GcRef, String> {
-//     *evaluator.depth += 1;
-//     eprintln!("eval_main_old");
-//     if evaluator.trace > evaluator.depth {
-//         for _ in 1..*evaluator.depth {
-//             print!(">");
-//         }
-//         //println!("{}", print_scheme_value(&expr.value));
-//     }
-
-//     match &evaluator.heap.get_value(expr) {
-//         SchemeValue::Int(_)
-//         | SchemeValue::Float(_)
-//         | SchemeValue::Str(_)
-//         | SchemeValue::Bool(_)
-//         | SchemeValue::Char(_)
-//         | SchemeValue::Nil
-//         | SchemeValue::Callable { .. } => Ok(expr),
-//         SchemeValue::Symbol(_) => eval_symbol(expr, &[], evaluator),
-//         SchemeValue::Pair(_, _) => {
-//             //println!("eval_main: {}", print_scheme_value(&expr.value));
-//             let result = eval_callable(expr, evaluator, tail)?;
-//             //validate_tail_result(result, tail)
-//             Ok(result)
-//         }
-//         _ => Err("eval_main: unsupported expression type".to_string()),
-//     }
-// }
-
-// /// Evaluate a closure by creating a new environment frame and evaluating the body in it
-// #[inline(always)]
-// fn eval_closure(
-//     params: &[GcRef],
-//     body: GcRef,
-//     env: &Rc<RefCell<Frame>>,
-//     args: &[GcRef],
-//     evaluator: &mut EvalContext,
-//     _tail: bool,
-// ) -> Result<GcRef, String> {
-//     *evaluator.depth -= 2;
-//     let new_env = bind_params(params, args, env, evaluator.heap)?;
-//     let original_env = evaluator.env.current_frame();
-//     evaluator.env.set_current_frame(new_env.current_frame());
-//     let result = eval_main(body, evaluator);
-//     evaluator.env.set_current_frame(original_env);
-//     result
-// }
-
 /// Macro handler
 pub fn eval_macro(
     params: &[GcRef],
@@ -311,71 +149,6 @@ pub fn eval_macro(
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
-
-// pub fn eval_callable(
-//     expr: GcRef,
-//     evaluator: &mut EvalContext,
-//     tail: bool,
-// ) -> Result<GcRef, String> {
-//     // Early heap fetches (immutable)
-//     let expression = gc_value!(expr);
-//     let (car, cdr) = match expression {
-//         Pair(car, cdr) => (car, cdr),
-//         _ => return Err("Not a callable".to_string()),
-//     };
-
-//     // Evaluate function position
-//     let func = eval_main(*car, evaluator)?;
-
-//     // Now we must access the Callable, but avoid borrowing heap while calling other functions
-//     let func_value = gc_value!(func);
-//     let callable = match func_value {
-//         Callable(callable) => callable,
-//         _ => return Err("Not a callable".to_string()),
-//     };
-
-//     match callable {
-//         Callable::Builtin {
-//             func: builtin_func, ..
-//         } => {
-//             let processed_args = eval_args(&cdr, evaluator)?;
-//             //let mut ec = EvalContext::from_eval(evaluator);
-//             builtin_func(evaluator, &processed_args)
-//         }
-//         Callable::SpecialForm {
-//             func: special_func, ..
-//         } => special_func(expr, evaluator, tail),
-//         Callable::Closure { params, body, env } => {
-//             let processed_args = eval_args(&cdr, evaluator)?;
-//             if tail {
-//                 // Closure tail call — store func and args for trampoline
-//                 evaluator.tail_call = Some(TailCall {
-//                     func,
-//                     args: processed_args,
-//                 });
-//                 return Ok(evaluator.heap.tail_call_s());
-//             } else {
-//                 eval_closure(params, *body, env, &processed_args, evaluator, false)
-//             }
-//         }
-//         Callable::Macro { params, body, env } => {
-//             let processed_args = list_to_vec(&evaluator.heap, *cdr)?;
-//             eval_macro(params, *body, env, &processed_args, evaluator)
-//         }
-//     }
-// }
-
-// // Evaluate function arguments prior to calling
-// fn eval_args(args: &GcRef, evaluator: &mut EvalContext) -> Result<Vec<GcRef>, String> {
-//     let mut processed_args = Vec::new();
-//     let mut iter = crate::gc::ResultListIter::new(*args);
-
-//     while let Some(arg) = iter.next(&evaluator.heap)? {
-//         processed_args.push(eval_main(arg, evaluator)?);
-//     }
-
-//     Ok(processed_args)
-// }
 
 pub fn bind_params(
     params: &[GcRef],
@@ -452,28 +225,6 @@ fn is_value(v: &SchemeValue) -> bool {
         _ => true,
     }
 }
-
-/// Parse an expression and deduplicate symbols before evaluation.
-///
-/// This wrapper function calls the parser and then runs symbol deduplication
-/// to ensure all symbols are interned. The deduplication is transparent to
-/// eval_logic, which continues to work with string comparisons.
-///
-/// # Examples
-///
-/// ```rust
-/// use s1::gc::GcHeap;
-/// use s1::evalsimple::{parse_and_deduplicate, Evaluator};
-/// use s1::parser::ParserSimple;
-/// use s1::io::Port;
-///
-/// let mut evaluator = Evaluator::new();
-/// let mut parser = ParserSimple::new();
-/// let mut port = Port::new_string_input("(define x 42)");
-///
-/// let expr = parse_and_deduplicate(&mut parser, &mut port, &mut evaluator.heap_mut()).unwrap();
-/// // expr now has interned symbols, but eval_logic doesn't need to know
-/// ```
 
 // ============================================================================
 // TESTS
@@ -714,7 +465,6 @@ mod tests {
         ec.env.set_symbol(plus_sym, plus);
         ec.env.set_symbol(times_sym, times);
         ec.env.set_symbol(minus_sym, minus);
-        println!("_________________EXPR: {}", print_scheme_value(&ec, &expr));
         let result = eval_main(expr, &mut ec).unwrap();
         match &ec.heap.get_value(result) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "-1"),
@@ -1014,6 +764,7 @@ mod tests {
         add1 = eval_main(lambda_expr, &mut ec).unwrap();
 
         // Verify it's a closure
+        use crate::gc::Callable;
         match &ec.heap.get_value(add1) {
             SchemeValue::Callable(callable) => {
                 match callable {
