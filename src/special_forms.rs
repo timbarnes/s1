@@ -1,8 +1,9 @@
 /// special_forms.rs
 /// Definitions of special forms implemented internally
 ///
+use crate::cek::eval_main;
 use crate::eval::{
-    EvalContext, eval_callable, eval_main, eval_non_tail, expect_at_least_n_args, expect_n_args,
+    EvalContext, eval_callable, eval_non_tail, expect_at_least_n_args, expect_n_args,
     expect_symbol,
 };
 use crate::gc::{
@@ -83,7 +84,7 @@ fn create_lambda_or_macro(
     _tail: bool,
 ) -> Result<GcRef, String> {
     use crate::gc::new_closure;
-
+    //eprintln!("Creating lambda or macro");
     *evaluator.depth -= 1;
 
     let heap = &mut evaluator.heap;

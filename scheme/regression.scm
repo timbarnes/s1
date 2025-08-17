@@ -373,7 +373,7 @@
 (newline)
 
 (test-equal 6 (let ((x 2) (y 3)) (* x y)) "Two binding let with single body expression")
-(test-equal 9 (let ((x 3)) (displayln "Returns 9") (* x x)) "Two binding let with single body expression")
+(test-equal 9 (let ((x 3)) (* x x)) "Single binding let with single body expression")
 (test-equal 42 (let ((x 6)) (let ((y (+ x 1))) (* x y))) "Nested let expression")
 (newline)
 (display "          === All tests completed ===")

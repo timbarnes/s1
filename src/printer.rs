@@ -56,7 +56,7 @@ pub fn print_scheme_value(ec: &EvalContext, obj: &GcRef) -> String {
         SchemeValue::Char(c) => format!("#\\{}", c),
         SchemeValue::Nil => "nil".to_string(),
         SchemeValue::Callable(variant) => match variant {
-            Callable::Builtin { doc, .. } => format!("Primitive: {}", doc),
+            Callable::Builtin { func, doc } => format!("Primitive@{:?} {}", func, doc),
             Callable::SpecialForm { doc, .. } => format!("SpecialForm: {}", doc),
             Callable::Closure { params, body, .. } => print_callable(ec, "Closure", params, *body),
             Callable::Macro { params, body, .. } => print_callable(ec, "Macro", params, *body),

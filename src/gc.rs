@@ -20,6 +20,15 @@
 //! ```
 
 #![allow(dead_code)]
+
+#[macro_export]
+macro_rules! gc_value {
+    ($r:expr) => {{
+        // SAFETY: caller must ensure $r is a valid GcRef pointing to live data
+        unsafe { &(*$r).value }
+    }};
+}
+
 use crate::eval::EvalContext;
 use crate::io::PortKind;
 use num_bigint::BigInt;

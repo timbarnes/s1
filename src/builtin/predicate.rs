@@ -115,7 +115,7 @@ mod tests {
     }
 
     #[test]
-    fn test_eq_q() {
+    fn test_eq_equal_q() {
         let mut ev = crate::eval::Evaluator::new();
         let mut ec = crate::eval::EvalContext::from_eval(&mut ev);
 
@@ -186,7 +186,7 @@ mod tests {
         let car2 = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(1));
         let cdr2 = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(2));
         let pair2 = crate::gc::new_pair(ec.heap, car2, cdr2);
-        let result = eq_q(&mut ec, &[pair1, pair2]);
+        let result = equal_q(&mut ec, &[pair1, pair2]);
         assert!(result.is_ok());
         assert!(matches!(
             &ec.heap.get_value(result.unwrap()),
@@ -200,7 +200,7 @@ mod tests {
         let car4 = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(3));
         let cdr4 = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(4));
         let pair4 = crate::gc::new_pair(ec.heap, car4, cdr4);
-        let result = eq_q(&mut ec, &[pair3, pair4]);
+        let result = equal_q(&mut ec, &[pair3, pair4]);
         assert!(result.is_ok());
         assert!(matches!(
             &ec.heap.get_value(result.unwrap()),
@@ -210,7 +210,7 @@ mod tests {
         // Test with equal strings
         let str1 = crate::gc::new_string(ec.heap, "hello");
         let str2 = crate::gc::new_string(ec.heap, "hello");
-        let result = eq_q(&mut ec, &[str1, str2]);
+        let result = equal_q(&mut ec, &[str1, str2]);
         assert!(result.is_ok());
         assert!(matches!(
             &ec.heap.get_value(result.unwrap()),
@@ -220,7 +220,7 @@ mod tests {
         // Test with unequal strings
         let str3 = crate::gc::new_string(ec.heap, "world");
         let str4 = crate::gc::new_string(ec.heap, "hello");
-        let result = eq_q(&mut ec, &[str3, str4]);
+        let result = equal_q(&mut ec, &[str3, str4]);
         assert!(result.is_ok());
         assert!(matches!(
             &ec.heap.get_value(result.unwrap()),
@@ -232,7 +232,7 @@ mod tests {
         let vec1 = crate::gc::new_vector(ec.heap, vec![vec_elem1]);
         let vec_elem2 = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(1));
         let vec2 = crate::gc::new_vector(ec.heap, vec![vec_elem2]);
-        let result = eq_q(&mut ec, &[vec1, vec2]);
+        let result = equal_q(&mut ec, &[vec1, vec2]);
         assert!(result.is_ok());
         assert!(matches!(
             &ec.heap.get_value(result.unwrap()),
@@ -244,7 +244,7 @@ mod tests {
         let vec3 = crate::gc::new_vector(ec.heap, vec![vec_elem3]);
         let vec_elem4 = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(2));
         let vec4 = crate::gc::new_vector(ec.heap, vec![vec_elem4]);
-        let result = eq_q(&mut ec, &[vec3, vec4]);
+        let result = equal_q(&mut ec, &[vec3, vec4]);
         assert!(result.is_ok());
         assert!(matches!(
             &ec.heap.get_value(result.unwrap()),

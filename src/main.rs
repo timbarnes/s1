@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 mod builtin;
+mod cek;
 mod env;
 mod eval;
 mod gc;
@@ -12,9 +13,7 @@ mod tokenizer;
 
 //use crate::parser::Parser;
 //use crate::io::{Port, PortKind};
-use crate::eval::{
-    Evaluator, eval, eval_string, initialize_scheme_io_globals, parse_and_deduplicate,
-};
+use crate::eval::{Evaluator, eval, eval_string, initialize_scheme_io_globals};
 use crate::printer::print_scheme_value;
 use argh::FromArgs;
 use eval::EvalContext;
@@ -108,7 +107,8 @@ fn repl(ev: &mut EvalContext) {
             print!("s1> ");
             stdio::stdout().flush().unwrap();
         }
-        match parse_and_deduplicate(&mut parser, current_port_val, &mut ev.heap) {
+        let expr = parser.parse(ev.heap, current_port_val);
+        match expr {
             Ok(expr) => match eval(expr, ev) {
                 Ok(result) => {
                     if interactive {

@@ -11,6 +11,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+pub type EnvRef = Rc<RefCell<Frame>>;
+
 /// A single environment frame containing variable bindings
 #[derive(Debug)]
 pub struct Frame {
