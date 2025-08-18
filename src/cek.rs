@@ -34,6 +34,30 @@ pub enum Kont {
         original_call: GcRef, // whole form: (op . args)
         next: Box<Kont>,
     },
+    AfterTest {
+        then_branch: GcRef,
+        else_branch: Option<GcRef>,
+        was_tail: bool,
+        next: Box<Kont>,
+    },
+    Seq {
+        rest: Vec<GcRef>, // remaining expressions in the sequence (head first)
+        was_tail: bool,
+        next: Box<Kont>,
+    },
+    BindThen {
+        params: Vec<GcRef>,   // param symbols (or param spec)
+        body: GcRef,          // body expression (or begin)
+        env_for_bind: EnvRef, // environment to use as parent for the new frame
+        was_tail: bool,
+        next: Box<Kont>,
+    },
+    // Exception handler frame - used later for raise/handler support
+    Handler {
+        handler_expr: GcRef,
+        handler_env: EnvRef,
+        next: Box<Kont>,
+    },
 }
 
 impl std::fmt::Debug for Kont {
@@ -79,6 +103,7 @@ impl std::fmt::Debug for Kont {
                     proc, original_call, next
                 )
             }
+            _ => write!(f, "Unknown continuation"),
         }
     }
 }
@@ -94,7 +119,7 @@ pub struct CEKState {
     tail: bool,
 }
 
-/// CEK evaluator entry point for non-tail calls
+/// CEK evaluator entry point from the repl (not used recursively)
 ///
 pub fn eval_main(expr: GcRef, ec: &mut EvalContext) -> Result<GcRef, String> {
     let state = CEKState {
@@ -107,17 +132,18 @@ pub fn eval_main(expr: GcRef, ec: &mut EvalContext) -> Result<GcRef, String> {
     Ok(run_cek(state, ec))
 }
 
-/// CEK evaluator entry point for non-tail calls
+/// Install `expr` into the existing CEKState and return immediately.
+/// If `replace_next` is true, the installed EvalArg (if any) will have `next = Halt`
+/// (i.e., it will replace the current continuation); otherwise the existing kont chain is preserved.
 ///
-pub fn eval_tail(expr: GcRef, ec: &mut EvalContext) -> Result<GcRef, String> {
-    let state = CEKState {
-        control: Control::Expr(expr),
-        kont: Kont::Halt,
-        env: ec.env.current_frame().clone(),
-        tail: true,
-    };
-    dump("***eval_tail***", &state, ec);
-    Ok(run_cek(state, ec))
+pub fn eval_insert(state: &mut CEKState, _ec: &mut EvalContext, expr: GcRef, replace_next: bool) {
+    // if replace_next, set state.kont to Halt so eval_cek will capture Halt as the `current_kont`
+    // and set EvalArg.next = Box::new(Kont::Halt); otherwise leave state.kont as-is.
+    if replace_next {
+        // replace current kont with Halt temporarily so eval_cek will think old kont is Halt
+        let _current_cont = std::mem::replace(&mut state.kont, Kont::Halt);
+    }
+    state.control = Control::Expr(expr);
 }
 
 /// Run the CEK evaluator loop until a result is produced.
@@ -340,9 +366,7 @@ fn apply_special(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Res
     {
         match gc_value!(proc) {
             Callable(Callable::SpecialForm { func, .. }) => {
-                let result = func(original_call, ec)?;
-                state.control = Control::Value(result);
-                state.kont = *next;
+                func(original_call, ec, state)?;
                 Ok(())
             }
             Callable(Callable::Macro { params, body, env }) => {

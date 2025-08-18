@@ -1,7 +1,7 @@
 /// special_forms.rs
 /// Definitions of special forms implemented internally
 ///
-use crate::cek::{eval_main, eval_tail};
+use crate::cek::{CEKState, eval_insert, eval_main};
 use crate::eval::{EvalContext, expect_at_least_n_args, expect_n_args, expect_symbol};
 use crate::gc::{
     GcHeap, GcRef, SchemeValue, car, cdr, cons, get_nil, list_from_vec, list_to_vec, new_float,
@@ -67,10 +67,15 @@ pub fn register_special_forms(heap: &mut GcHeap, env: &mut crate::env::Environme
 ///     - a vec with multiple entries following a nil first entry, meaning named arguments
 ///     - a vec with variadic arguments bound as a list and named arguments
 ///
-fn create_callable(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
+fn create_callable(
+    expr: GcRef,
+    evaluator: &mut EvalContext,
+    state: &mut CEKState,
+) -> Result<(), String> {
     let form = expect_at_least_n_args(&evaluator.heap, expr, 3)?;
     let (params, ptype) = params_to_vec(&mut evaluator.heap, form[1]);
-    create_lambda_or_macro(&form, &params, ptype, evaluator)
+    create_lambda_or_macro(&form, &params, ptype, evaluator);
+    Ok(())
 }
 
 fn create_lambda_or_macro(
@@ -172,14 +177,19 @@ fn create_lambda_or_macro(
     }
 }
 
-fn eval_eval_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
+fn eval_eval_sf(
+    expr: GcRef,
+    evaluator: &mut EvalContext,
+    state: &mut CEKState,
+) -> Result<(), String> {
     *evaluator.depth -= 1;
     let args = expect_n_args(&evaluator.heap, expr, 2)?;
     let result = eval_main(args[1], evaluator)?;
-    eval_tail(result, evaluator)
+    eval_main(result, evaluator);
+    Ok(())
 }
 
-fn apply_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
+fn apply_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
     *evaluator.depth -= 1;
     let func = car(&evaluator.heap, cdr(&evaluator.heap, expr)?)?;
     let unevaluated_args = car(
@@ -188,13 +198,14 @@ fn apply_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
     )?;
     let args = eval_main(unevaluated_args, evaluator)?;
     let apply_expr = cons(func, args, &mut evaluator.heap)?;
-    eval_tail(apply_expr, evaluator)
+    eval_main(apply_expr, evaluator);
+    Ok(())
 }
 
 /// Trace logic: turn the trace function on or off
 /// This function takes an integer value, and sets evaluator.trace to match the argument.
 /// BUG: SHOULD EVALUATE ITS ARGUMENT!
-fn trace_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
+fn trace_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
     use num_traits::ToPrimitive;
     *evaluator.depth -= 1;
     let args = expect_n_args(&evaluator.heap, expr, 2)?;
@@ -208,16 +219,16 @@ fn trace_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
         },
         _ => return Err("trace: requires integer argument".to_string()),
     }
-    Ok(trace_val)
+    Ok(())
 }
 
 /// Quote logic: return first argument unevaluated
-fn quote_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
+fn quote_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
     // (quote x) => return x unevaluated
     *evaluator.depth -= 1;
     match &evaluator.heap.get_value(expr) {
         SchemeValue::Pair(_, cdr) => match &evaluator.heap.get_value(*cdr) {
-            SchemeValue::Pair(arg, _) => Ok(*arg),
+            SchemeValue::Pair(_, _) => Ok(()),
             _ => Err("Malformed quote: missing argument".to_string()),
         },
         _ => Err("Malformed quote: not a pair".to_string()),
@@ -225,32 +236,36 @@ fn quote_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
 }
 
 /// (begin form1 ..)
-fn begin_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
+fn begin_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
     // (begin expr1 expr2 ... exprN) => evaluate each in sequence, return last
     *evaluator.depth -= 1;
     let argvec = expect_at_least_n_args(&evaluator.heap, expr, 2)?;
     //let mut result = get_nil(&mut evaluator.heap);
     for arg in argvec[..argvec.len() - 1].iter() {
         //result = eval_main(*arg, evaluator, tail && i == argvec.len() - 1)?;
-        eval_main(*arg, evaluator)?;
+        eval_insert(state, evaluator, *arg, false);
     }
-    let result = eval_tail(*argvec.last().unwrap(), evaluator)?;
-    Ok(result)
+    eval_insert(state, evaluator, *argvec.last().unwrap(), true);
+    Ok(())
 }
 
 /// (define sym expr)
-pub fn define_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
+pub fn define_sf(
+    expr: GcRef,
+    evaluator: &mut EvalContext,
+    state: &mut CEKState,
+) -> Result<(), String> {
     // (define symbol expr)
     let args = expect_n_args(&evaluator.heap, expr, 3)?; // including 'define
     let sym = expect_symbol(&mut evaluator.heap, &args[1])?;
-    let value = eval_tail(args[2], evaluator)?;
+    let value = eval_main(args[2], evaluator)?;
     evaluator.env.set_symbol(sym, value);
-    Ok(sym)
+    Ok(())
 }
 
 /// (if test consequent alternate)
 /// Requires three arguments.
-pub fn if_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
+pub fn if_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
     *evaluator.depth -= 1;
     // (if test consequent [alternate])
     let args = expect_at_least_n_args(&evaluator.heap, expr, 2)?;
@@ -258,12 +273,14 @@ pub fn if_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> 
     match evaluator.heap.get_value(test) {
         SchemeValue::Bool(val) => {
             if *val {
-                return eval_tail(args[2], evaluator);
+                eval_main(args[2], evaluator);
+                return Ok(());
             } else {
                 if args.len() == 4 {
-                    return eval_tail(args[3], evaluator);
+                    eval_main(args[3], evaluator);
+                    return Ok(());
                 } else {
-                    return Ok(get_nil(&mut evaluator.heap));
+                    return Ok(());
                 }
             }
         }
@@ -272,7 +289,11 @@ pub fn if_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> 
 }
 
 /// (cond (test1 expr) [(test 2...)] [(else expr)])
-pub fn cond_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
+pub fn cond_sf(
+    expr: GcRef,
+    evaluator: &mut EvalContext,
+    state: &mut CEKState,
+) -> Result<(), String> {
     *evaluator.depth -= 1;
     let args = expect_at_least_n_args(&evaluator.heap, expr, 2)?;
 
@@ -310,16 +331,20 @@ pub fn cond_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String
                     eval_main(*expr, evaluator)?;
                 }
             }
-            let result = eval_tail(body_vec[count - 1], evaluator);
-            return result;
+            eval_main(body_vec[count - 1], evaluator);
+            return Ok(());
         }
     }
 
-    Ok(get_nil(&mut evaluator.heap))
+    Ok(())
 }
 
 /// let (basic version, without labels)
-pub fn let_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
+pub fn let_sf(
+    expr: GcRef,
+    evaluator: &mut EvalContext,
+    state: &mut CEKState,
+) -> Result<(), String> {
     let formvec = expect_at_least_n_args(&evaluator.heap, expr, 3)?;
     let bindings = list_to_vec(&mut evaluator.heap, formvec[1])?; // (let bindings . body)
 
@@ -347,44 +372,50 @@ pub fn let_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String>
     // cons the lambda to the list of values
     let call = cons(lambda_expr, exprs, evaluator.heap)?;
 
-    eval_main(call, evaluator)
+    eval_main(call, evaluator);
+    Ok(())
 }
 
-fn expand_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
+fn expand_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
     //let ec = EvalContext::from_eval(evaluator);
     let m = car(&evaluator.heap, cdr(&evaluator.heap, expr)?)?;
     // println!(
     //     "expand_sf: {}",
     //     print_scheme_value(&mut ec, ec.heap.get_value(m))
     // );
-    expand_macro(&m, 0, evaluator)
+    expand_macro(&m, 0, evaluator);
+    Ok(())
 }
 
 /// (and expr1 expr2 ... exprN)
 /// Stops on first false value
-pub fn and_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
+pub fn and_sf(
+    expr: GcRef,
+    evaluator: &mut EvalContext,
+    state: &mut CEKState,
+) -> Result<(), String> {
     *evaluator.depth -= 1;
     // (and expr1 expr2 ... exprN)
     let exprs = expect_at_least_n_args(evaluator.heap, expr, 1)?;
 
     // Returns true if no args
     if exprs.len() == 1 {
-        return Ok(evaluator.heap.true_s());
+        return Ok(());
     }
     let mut val = evaluator.heap.false_s();
     for e in exprs.into_iter().skip(1) {
         val = eval_main(e, evaluator)?;
         match &evaluator.heap.get_value(val) {
-            SchemeValue::Bool(false) => return Ok(evaluator.heap.false_s()),
+            SchemeValue::Bool(false) => return Ok(()),
             _ => continue,
         }
     }
-    Ok(val)
+    Ok(())
 }
 
 /// (or expr1 expr2 ... exprN)
 /// Stops on first true value
-pub fn or_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
+pub fn or_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
     *evaluator.depth -= 1;
     // (or expr1 expr2 ... exprN)
     match evaluator.heap.get_value(expr) {
@@ -394,10 +425,10 @@ pub fn or_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> 
                 let val = eval_main(e, evaluator)?;
                 match &evaluator.heap.get_value(val) {
                     SchemeValue::Bool(false) => continue,
-                    _ => return Ok(val),
+                    _ => return Ok(()),
                 }
             }
-            Ok(evaluator.heap.false_s())
+            Ok(())
         }
         _ => Err("or: not a proper list".to_string()),
     }
@@ -405,11 +436,15 @@ pub fn or_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> 
 
 /// (set! sym expr)
 /// sym must have been previously defined.
-pub fn set_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
+pub fn set_sf(
+    expr: GcRef,
+    evaluator: &mut EvalContext,
+    state: &mut CEKState,
+) -> Result<(), String> {
     *evaluator.depth -= 1;
     let args = expect_n_args(&evaluator.heap, expr, 3)?;
     let sym = expect_symbol(&evaluator.heap, &args[1])?;
-    let value = eval_tail(args[2], evaluator)?;
+    let value = eval_main(args[2], evaluator)?;
 
     match evaluator.env.get_symbol_and_frame(sym) {
         Some((_, sym_frame)) => {
@@ -417,7 +452,7 @@ pub fn set_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String>
             evaluator.env.set_current_frame(sym_frame);
             evaluator.env.set_symbol(sym, value);
             evaluator.env.set_current_frame(current_frame);
-            return Ok(value);
+            return Ok(());
         }
         None => return Err("set!: symbol not found".to_string()),
     }
@@ -433,36 +468,48 @@ pub fn set_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String>
 /// let mut evaluator = Evaluator::new();
 /// evaluator.push_port("example.txt");
 /// ```
-pub fn push_port_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
+pub fn push_port_sf(
+    expr: GcRef,
+    evaluator: &mut EvalContext,
+    state: &mut CEKState,
+) -> Result<(), String> {
     // (push-port! port)
     *evaluator.depth -= 1;
     let args = expect_n_args(&evaluator.heap, expr, 2)?;
     let value = eval_main(args[1], evaluator)?;
     let port_kind = port_kind_from_scheme_port(evaluator, value);
     evaluator.port_stack.push(port_kind);
-    Ok(evaluator.heap.true_s())
+    Ok(())
 }
 
-pub fn pop_port_sf(_expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
+pub fn pop_port_sf(
+    _expr: GcRef,
+    evaluator: &mut EvalContext,
+    state: &mut CEKState,
+) -> Result<(), String> {
     // (pop-port!)
     *evaluator.depth -= 1;
     let port_kind = evaluator.port_stack.pop();
     match port_kind {
         Some(port_kind) => {
             let port = new_port(&mut evaluator.heap, port_kind);
-            Ok(port)
+            Ok(())
         }
         None => Err("Port Stack is empty".to_string()),
     }
 }
 
-fn with_timer_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
+fn with_timer_sf(
+    expr: GcRef,
+    evaluator: &mut EvalContext,
+    state: &mut CEKState,
+) -> Result<(), String> {
     let args = expect_n_args(&evaluator.heap, expr, 2)?;
     let timer = Instant::now();
     eval_main(args[1], evaluator)?;
     let elapsed_time = timer.elapsed().as_secs_f64();
     let time = new_float(&mut evaluator.heap, elapsed_time);
-    Ok(time)
+    Ok(())
 }
 
 /// Utility functions

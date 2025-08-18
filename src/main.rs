@@ -13,7 +13,7 @@ mod tokenizer;
 
 //use crate::parser::Parser;
 //use crate::io::{Port, PortKind};
-use crate::cek::eval_tail;
+use crate::cek::eval_main;
 use crate::eval::{Evaluator, eval_string, initialize_scheme_io_globals};
 use crate::printer::print_scheme_value;
 use argh::FromArgs;
@@ -110,7 +110,7 @@ fn repl(ev: &mut EvalContext) {
         }
         let expr = parser.parse(ev.heap, current_port_val);
         match expr {
-            Ok(expr) => match eval_tail(expr, ev) {
+            Ok(expr) => match eval_main(expr, ev) {
                 Ok(result) => {
                     if interactive {
                         //let ec = eval::EvalContext::from_eval(ev);

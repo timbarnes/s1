@@ -29,6 +29,7 @@ macro_rules! gc_value {
     }};
 }
 
+use crate::cek::CEKState;
 use crate::eval::EvalContext;
 use crate::io::PortKind;
 use num_bigint::BigInt;
@@ -44,7 +45,7 @@ pub enum Callable {
         doc: String,
     },
     SpecialForm {
-        func: fn(GcRef, &mut EvalContext) -> Result<GcRef, String>,
+        func: fn(GcRef, &mut EvalContext, &mut CEKState) -> Result<(), String>,
         doc: String,
     },
     Closure {
@@ -617,7 +618,7 @@ pub fn new_primitive(
 /// Create a new special form.
 pub fn new_special_form(
     heap: &mut GcHeap,
-    f: fn(GcRef, &mut EvalContext) -> Result<GcRef, String>,
+    f: fn(GcRef, &mut EvalContext, &mut CEKState) -> Result<(), String>,
     doc: String,
 ) -> GcRef {
     let primitive = SchemeValue::Callable(Callable::SpecialForm { func: f, doc });
