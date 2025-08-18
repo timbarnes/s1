@@ -91,18 +91,32 @@ pub struct CEKState {
     control: Control, // Current expression
     env: EnvRef,      // Current environment (linked frame or hashmap)
     kont: Kont,       // Continuation (enum)
+    tail: bool,
 }
 
-/// CEK evaluator entry point
+/// CEK evaluator entry point for non-tail calls
 ///
-
 pub fn eval_main(expr: GcRef, ec: &mut EvalContext) -> Result<GcRef, String> {
     let state = CEKState {
         control: Control::Expr(expr),
         kont: Kont::Halt,
         env: ec.env.current_frame().clone(),
+        tail: false,
     };
     dump("***eval_main***", &state, ec);
+    Ok(run_cek(state, ec))
+}
+
+/// CEK evaluator entry point for non-tail calls
+///
+pub fn eval_tail(expr: GcRef, ec: &mut EvalContext) -> Result<GcRef, String> {
+    let state = CEKState {
+        control: Control::Expr(expr),
+        kont: Kont::Halt,
+        env: ec.env.current_frame().clone(),
+        tail: true,
+    };
+    dump("***eval_tail***", &state, ec);
     Ok(run_cek(state, ec))
 }
 
@@ -258,30 +272,45 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
             }
         }
 
-        // Pair: potentially a function application
-        Pair(car, cdr) => {
-            let current_kont = std::mem::replace(&mut state.kont, Kont::Halt);
-
-            // Turn the cdr (a proper list) into a flat Vec<GcRef]
-            let args_vec = list_to_vec(&ctx.heap, *cdr)
-                .map_err(|_| "invalid argument list".to_string())
-                .unwrap();
-
-            state.control = Control::Expr(*car);
-            state.kont = Kont::EvalArg {
-                proc: None,
-                remaining: args_vec.into_iter().rev().collect(),
-                evaluated: vec![],
-                original_call: expr,
-                env: state.env.clone(),
-                next: Box::new(current_kont),
-            };
-        }
         // Callables: Builtin, Closure, Macro, or SpecialForm
         Callable(_) => {
             state.control = Control::Value(expr);
         }
 
+        // Pair: potentially a function application
+        Pair(car, cdr) => {
+            let current_kont = std::mem::replace(&mut state.kont, Kont::Halt);
+
+            let args_vec = list_to_vec(&ctx.heap, *cdr)
+                .map_err(|_| "invalid argument list".to_string())
+                .unwrap();
+
+            state.control = Control::Expr(*car);
+            // Tail call handling:
+            let next_kont = if state.tail {
+                // replace (don’t add another layer)
+                Kont::EvalArg {
+                    proc: None,
+                    remaining: args_vec.into_iter().rev().collect(),
+                    evaluated: vec![],
+                    original_call: expr,
+                    env: state.env.clone(),
+                    next: Box::new(Kont::Halt), // tail means "this frame replaces"
+                }
+            } else {
+                // normal push
+                Kont::EvalArg {
+                    proc: None,
+                    remaining: args_vec.into_iter().rev().collect(),
+                    evaluated: vec![],
+                    original_call: expr,
+                    env: state.env.clone(),
+                    next: Box::new(current_kont),
+                }
+            };
+            state.tail = false;
+            state.kont = next_kont;
+        }
         _ => panic!(
             "Unsupported expression in eval_cek: {}",
             print_scheme_value(ctx, &expr)
@@ -361,13 +390,26 @@ fn apply_proc(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Result
                 } => {
                     let new_env = bind_params(params, &evaluated_args, closure_env, ec.heap)?;
                     let old_env = state.env.clone();
-                    state.env = new_env.current_frame();
-                    ec.env.set_current_frame(state.env.clone());
-                    // Push a continuation to restore the old environment after the closure finishes
-                    state.kont = Kont::RestoreEnv { old_env, next };
-                    // Start evaluating the closure body
-                    state.control = Control::Expr(*body);
-                    Ok(())
+
+                    if state.tail {
+                        // Tail-call optimization: no RestoreEnv frame.
+                        ec.env.set_current_frame(new_env.current_frame());
+                        state.env = new_env.current_frame();
+                        state.kont = *next; // reuse continuation depth
+                        state.control = Control::Expr(*body);
+                        // keep state.tail = true; still in tail position down this path
+                        Ok(())
+                    } else {
+                        // Normal (non-tail) call: push a RestoreEnv barrier.
+                        state.kont = Kont::RestoreEnv {
+                            old_env: old_env.clone(),
+                            next,
+                        };
+                        ec.env.set_current_frame(new_env.current_frame());
+                        state.env = new_env.current_frame();
+                        state.control = Control::Expr(*body);
+                        Ok(())
+                    }
                 }
                 _ => Err("apply_proc: expected Builtin or Closure".to_string()),
             },
@@ -378,14 +420,17 @@ fn apply_proc(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Result
     }
 }
 
+/// Dump a summary of the CEK machine state
+///
 fn dump(loc: &str, state: &CEKState, ec: &EvalContext) {
     if false {
         match &state.control {
             Control::Expr(obj) => {
                 eprintln!(
-                    "{loc:18} Control: Expr={:20}; Kont={}",
+                    "{loc:18} Control: Expr={:20}; Kont={}; Tail={}",
                     print_scheme_value(ec, obj),
-                    frame_debug_short(&state.kont)
+                    frame_debug_short(&state.kont),
+                    state.tail
                 );
             }
             Control::Value(obj) => {

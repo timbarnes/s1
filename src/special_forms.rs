@@ -1,7 +1,7 @@
 /// special_forms.rs
 /// Definitions of special forms implemented internally
 ///
-use crate::cek::eval_main;
+use crate::cek::{eval_main, eval_tail};
 use crate::eval::{EvalContext, expect_at_least_n_args, expect_n_args, expect_symbol};
 use crate::gc::{
     GcHeap, GcRef, SchemeValue, car, cdr, cons, get_nil, list_from_vec, list_to_vec, new_float,
@@ -84,12 +84,10 @@ fn create_lambda_or_macro(
     *evaluator.depth -= 1;
 
     let heap = &mut evaluator.heap;
-
     let mut args = Vec::new();
 
     match ptype {
         Ptype::Empty => { /* no params */ }
-
         Ptype::List => {
             let nil = get_nil(heap);
             args.push(nil);
@@ -103,7 +101,6 @@ fn create_lambda_or_macro(
                 }
             }
         }
-
         Ptype::Variadic => {
             match heap.get_value(params[0]) {
                 SchemeValue::Symbol(name) => {
@@ -114,7 +111,6 @@ fn create_lambda_or_macro(
                 _ => { /* ignore */ }
             }
         }
-
         Ptype::Dotted => {
             for arg in params.iter() {
                 match heap.get_value(*arg) {
@@ -180,7 +176,7 @@ fn eval_eval_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, Strin
     *evaluator.depth -= 1;
     let args = expect_n_args(&evaluator.heap, expr, 2)?;
     let result = eval_main(args[1], evaluator)?;
-    eval_main(result, evaluator)
+    eval_tail(result, evaluator)
 }
 
 fn apply_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
@@ -192,7 +188,7 @@ fn apply_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
     )?;
     let args = eval_main(unevaluated_args, evaluator)?;
     let apply_expr = cons(func, args, &mut evaluator.heap)?;
-    eval_main(apply_expr, evaluator)
+    eval_tail(apply_expr, evaluator)
 }
 
 /// Trace logic: turn the trace function on or off
@@ -238,7 +234,7 @@ fn begin_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> {
         //result = eval_main(*arg, evaluator, tail && i == argvec.len() - 1)?;
         eval_main(*arg, evaluator)?;
     }
-    let result = eval_main(*argvec.last().unwrap(), evaluator)?;
+    let result = eval_tail(*argvec.last().unwrap(), evaluator)?;
     Ok(result)
 }
 
@@ -247,7 +243,7 @@ pub fn define_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, Stri
     // (define symbol expr)
     let args = expect_n_args(&evaluator.heap, expr, 3)?; // including 'define
     let sym = expect_symbol(&mut evaluator.heap, &args[1])?;
-    let value = eval_main(args[2], evaluator)?;
+    let value = eval_tail(args[2], evaluator)?;
     evaluator.env.set_symbol(sym, value);
     Ok(sym)
 }
@@ -262,10 +258,10 @@ pub fn if_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String> 
     match evaluator.heap.get_value(test) {
         SchemeValue::Bool(val) => {
             if *val {
-                return eval_main(args[2], evaluator);
+                return eval_tail(args[2], evaluator);
             } else {
                 if args.len() == 4 {
-                    return eval_main(args[3], evaluator);
+                    return eval_tail(args[3], evaluator);
                 } else {
                     return Ok(get_nil(&mut evaluator.heap));
                 }
@@ -314,7 +310,7 @@ pub fn cond_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String
                     eval_main(*expr, evaluator)?;
                 }
             }
-            let result = eval_main(body_vec[count - 1], evaluator);
+            let result = eval_tail(body_vec[count - 1], evaluator);
             return result;
         }
     }
@@ -413,7 +409,7 @@ pub fn set_sf(expr: GcRef, evaluator: &mut EvalContext) -> Result<GcRef, String>
     *evaluator.depth -= 1;
     let args = expect_n_args(&evaluator.heap, expr, 3)?;
     let sym = expect_symbol(&evaluator.heap, &args[1])?;
-    let value = eval_main(args[2], evaluator)?;
+    let value = eval_tail(args[2], evaluator)?;
 
     match evaluator.env.get_symbol_and_frame(sym) {
         Some((_, sym_frame)) => {
