@@ -73,7 +73,8 @@ fn create_callable(
 ) -> Result<(), String> {
     let form = expect_at_least_n_args(&evaluator.heap, expr, 3)?;
     let (params, ptype) = params_to_vec(&mut evaluator.heap, form[1]);
-    create_lambda_or_macro(&form, &params, ptype, evaluator);
+    let closure = create_lambda_or_macro(&form, &params, ptype, evaluator).unwrap();
+    value_insert(state, closure);
     Ok(())
 }
 
@@ -97,10 +98,10 @@ fn create_lambda_or_macro(
             args.push(nil);
 
             for arg in params.iter() {
-                let val = heap.get_value(*arg); // <-- clone the SchemeValue
+                let val = heap.get_value(*arg);
                 if let SchemeValue::Symbol(name) = val {
-                    let name: String = name.clone(); // force ownership — no ref
-                    let sym = heap.intern_symbol(&name); // name is a String, passed as &str
+                    let name: String = name.clone();
+                    let sym = heap.intern_symbol(&name);
                     args.push(sym);
                 }
             }

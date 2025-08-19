@@ -158,17 +158,13 @@ pub fn eval_main(expr: GcRef, ec: &mut EvalContext) -> Result<GcRef, String> {
 pub fn eval_insert(state: &mut CEKState, expr: GcRef, replace_next: bool) {
     // if replace_next, set state.kont to Halt so eval_cek will capture Halt as the `current_kont`
     // and set EvalArg.next = Box::new(Kont::Halt); otherwise leave state.kont as-is.
-    if replace_next {
-        // replace current kont with Halt temporarily so eval_cek will think old kont is Halt
-        let _current_cont = std::mem::replace(&mut state.kont, Kont::Halt);
-    }
+    state.tail = replace_next;
     state.control = Control::Expr(expr);
 }
 
 /// Return a value from a special form without evaluation.
 ///
 pub fn value_insert(state: &mut CEKState, expr: GcRef) {
-    let _current_cont = std::mem::replace(&mut state.kont, Kont::Halt);
     state.control = Control::Value(expr);
 }
 
@@ -176,11 +172,13 @@ pub fn value_insert(state: &mut CEKState, expr: GcRef) {
 /// The bind operation takes the value returned by the previous continuation.
 ///
 pub fn bind_insert(state: &mut CEKState, sym: GcRef) {
-    let current_cont = std::mem::replace(&mut state.kont, Kont::Halt);
+    // clone the current continuation and link it under the new Bind
+    let current_cont = state.kont.clone();
     state.kont = Kont::Bind {
         symbol: sym,
         next: Box::new(current_cont),
     };
+    //eprintln!("bind_insert {}", frame_debug_short(&state.kont));
 }
 
 pub fn after_test_insert(state: &mut CEKState, then_branch: GcRef, else_branch: GcRef) {
@@ -200,10 +198,11 @@ pub fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> GcRef {
     dump(" run_cek", &state);
     loop {
         // Step the CEK machine; mutates state in place
+        //eprintln!("Pre-step {}", frame_debug_short(&state.kont));
         if let Err(err) = step(&mut state, ctx) {
             panic!("CEK evaluation error: {}", err);
         }
-        //dump("run_cek post step", &state, ctx);
+        //eprintln!("Post-step {}", frame_debug_short(&state.kont));
         match &state.control {
             Control::Value(val) => match &state.kont {
                 Kont::Halt => return *val, // fully evaluated, exit
@@ -319,25 +318,23 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                 apply_special(state, ec, frame)?;
                 Ok(())
             }
-            Kont::Bind { symbol, .. } => {
-                // The value for the symbol has been evaluated and is in state.control
-                match &state.control {
-                    Control::Value(val) => {
-                        state.env.borrow_mut().set_local(*symbol, *val);
-                        //let next = *next.clone();
-                        let sym = symbol.clone();
-                        state.kont = Kont::Halt; // next;
-                        // Return a clone of the symbol as the value of define
-                        state.control = Control::Value(sym);
-                        Ok(())
-                    }
-                    _ => panic!("Kont::Bind reached but control is not a Value"),
+            Kont::Bind { symbol, next } => {
+                eprintln!("[Kont::Bind...]");
+                if let Control::Value(val) = state.control {
+                    state.env.borrow_mut().set_local(*symbol, val);
+                    // For define, we typically leave the symbol as the value
+                    state.control = Control::Value(*symbol);
+                    // Resume with whatever was waiting
+                    state.kont = *next.clone();
+                    Ok(())
+                } else {
+                    panic!("Kont::Bind reached but control is not a Value");
                 }
             }
             Kont::AfterTest {
                 then_branch,
                 else_branch,
-                ..
+                next,
             } => {
                 // The test value is in state.control
                 match &state.control {
@@ -346,18 +343,18 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                             Bool(v) => {
                                 if *v {
                                     state.control = Control::Expr(*then_branch);
-                                    state.kont = Kont::Halt; // next;
+                                    state.kont = *next.clone();
                                     Ok(())
                                 } else {
                                     state.control = Control::Expr(*else_branch);
-                                    state.kont = Kont::Halt; // next;
+                                    state.kont = *next.clone(); // next;
                                     Ok(())
                                 }
                             }
                             _ => {
                                 // All non-Bool values are treated as true
                                 state.control = Control::Expr(*then_branch);
-                                state.kont = Kont::Halt; // next;
+                                state.kont = *next.clone(); // next;
                                 Ok(())
                             }
                         }
@@ -396,37 +393,39 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
 
         // Pair: potentially a function application
         Pair(car, cdr) => {
-            let current_kont = std::mem::replace(&mut state.kont, Kont::Halt);
+            // Quick path: is this a special form?
+            if let Symbol(_) = &gc_value!(*car) {
+                if let Some(op) = ctx.env.get_symbol(*car) {
+                    if matches!(gc_value!(op), Callable(Callable::SpecialForm { .. })) {
+                        // Call the special-form handler in-place.
+                        state.control = Control::Expr(*car); // or set Value/Expr as your handler expects
+                        apply_special_direct(expr, ctx, state).unwrap();
+                        return; // let run_cek loop continue
+                    }
+                }
+            }
 
             let args_vec = list_to_vec(&ctx.heap, *cdr)
                 .map_err(|_| "invalid argument list".to_string())
                 .unwrap();
 
-            state.control = Control::Expr(*car);
-            // Tail call handling:
-            let next_kont = if state.tail {
-                // replace (don’t add another layer)
-                Kont::EvalArg {
-                    proc: None,
-                    remaining: args_vec.into_iter().rev().collect(),
-                    evaluated: vec![],
-                    original_call: expr,
-                    env: state.env.clone(),
-                    next: Box::new(Kont::Halt), // tail means "this frame replaces"
-                }
+            let current_kont = state.kont.clone();
+            let next_box = if state.tail {
+                Box::new(Kont::Halt)
             } else {
-                // normal push
-                Kont::EvalArg {
-                    proc: None,
-                    remaining: args_vec.into_iter().rev().collect(),
-                    evaluated: vec![],
-                    original_call: expr,
-                    env: state.env.clone(),
-                    next: Box::new(current_kont),
-                }
+                Box::new(current_kont)
             };
-            state.tail = false;
-            state.kont = next_kont;
+
+            state.control = Control::Expr(*car);
+            state.kont = Kont::EvalArg {
+                proc: None,
+                remaining: args_vec.into_iter().rev().collect(),
+                evaluated: vec![],
+                original_call: expr,
+                env: state.env.clone(),
+                next: next_box,
+            };
+            state.tail = false; // reset after using it
         }
         _ => panic!(
             "Unsupported expression in eval_cek: {}",
@@ -442,6 +441,20 @@ fn is_value(control: GcRef, _ec: &EvalContext) -> bool {
         Pair(_, _) => false,
         Symbol(_) => false,
         _ => true,
+    }
+}
+
+fn apply_special_direct(
+    expr: GcRef,
+    ec: &mut EvalContext,
+    state: &mut CEKState,
+) -> Result<(), String> {
+    let op_sym = crate::gc::car(ec.heap, expr)?;
+    let op_val = ec.env.get_symbol(op_sym).ok_or("unbound special form")?;
+    if let Callable(Callable::SpecialForm { func, .. }) = gc_value!(op_val) {
+        func(expr, ec, state) // handler mutates state; returns Ok(()) immediately
+    } else {
+        unreachable!("early-dispatch promised a SpecialForm");
     }
 }
 
@@ -585,6 +598,37 @@ fn frame_debug_short(frame: &Kont) -> String {
                 "ApplyProc{{proc={:?}, args={}}}",
                 proc,
                 evaluated_args.len()
+            )
+        }
+        Kont::ApplySpecial {
+            proc,
+            original_call,
+            next,
+        } => {
+            format!(
+                "ApplySpecial{{proc={}, orig={}, next={:?}}}",
+                print_scheme_value(proc),
+                print_scheme_value(original_call),
+                next
+            )
+        }
+        Kont::AfterTest {
+            then_branch,
+            else_branch,
+            next,
+        } => {
+            format!(
+                "AfterTest{{then={}, else={}, next={:?}}}",
+                print_scheme_value(then_branch),
+                print_scheme_value(else_branch),
+                next
+            )
+        }
+        Kont::Bind { symbol, next } => {
+            format!(
+                "Bind{{symbol={}, next={:?}}}",
+                print_scheme_value(symbol),
+                next
             )
         }
         other => format!("{:?}", other),
