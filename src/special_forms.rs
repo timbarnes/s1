@@ -340,7 +340,7 @@ pub fn let_sf(
     // cons the lambda to the list of values
     let call = cons(lambda_expr, exprs, evaluator.heap)?;
 
-    eval_main(call, evaluator);
+    eval_main(call, evaluator)?;
     Ok(())
 }
 
@@ -351,7 +351,7 @@ fn expand_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> 
     //     "expand_sf: {}",
     //     print_scheme_value(&mut ec, ec.heap.get_value(m))
     // );
-    expand_macro(&m, 0, evaluator);
+    expand_macro(&m, 0, evaluator)?;
     Ok(())
 }
 
@@ -403,7 +403,7 @@ pub fn or_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> 
 }
 
 /// (set! sym expr)
-/// sym must have been previously defined.
+/// sym must have been previously defined. BUG: NOT CURRENTLY CHECKED
 pub fn set_sf(
     expr: GcRef,
     evaluator: &mut EvalContext,
@@ -412,18 +412,9 @@ pub fn set_sf(
     *evaluator.depth -= 1;
     let args = expect_n_args(&evaluator.heap, expr, 3)?;
     let sym = expect_symbol(&evaluator.heap, &args[1])?;
-    let value = eval_main(args[2], evaluator)?;
-
-    match evaluator.env.get_symbol_and_frame(sym) {
-        Some((_, sym_frame)) => {
-            let current_frame = evaluator.env.current_frame();
-            evaluator.env.set_current_frame(sym_frame);
-            evaluator.env.set_symbol(sym, value);
-            evaluator.env.set_current_frame(current_frame);
-            return Ok(());
-        }
-        None => return Err("set!: symbol not found".to_string()),
-    }
+    bind_insert(state, sym);
+    eval_insert(state, args[2], false);
+    Ok(())
 }
 
 /// (push-port! port)
