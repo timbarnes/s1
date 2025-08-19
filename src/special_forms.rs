@@ -412,9 +412,13 @@ pub fn set_sf(
     *evaluator.depth -= 1;
     let args = expect_n_args(&evaluator.heap, expr, 3)?;
     let sym = expect_symbol(&evaluator.heap, &args[1])?;
-    bind_insert(state, sym);
-    eval_insert(state, args[2], false);
-    Ok(())
+    if evaluator.env.has_local(sym) {
+        bind_insert(state, sym);
+        eval_insert(state, args[2], false);
+        Ok(())
+    } else {
+        Err("set!: symbol not found".to_string())
+    }
 }
 
 /// (push-port! port)
