@@ -319,7 +319,6 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                 Ok(())
             }
             Kont::Bind { symbol, next } => {
-                eprintln!("[Kont::Bind...]");
                 if let Control::Value(val) = state.control {
                     state.env.borrow_mut().set_local(*symbol, val);
                     // For define, we typically leave the symbol as the value
@@ -551,7 +550,7 @@ fn apply_proc(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Result
 /// Dump a summary of the CEK machine state
 ///
 fn dump(loc: &str, state: &CEKState) {
-    if true {
+    if false {
         match &state.control {
             Control::Expr(obj) => {
                 eprintln!(
