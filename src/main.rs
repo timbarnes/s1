@@ -114,7 +114,7 @@ fn repl(ev: &mut EvalContext) {
                 Ok(result) => {
                     if interactive {
                         //let ec = eval::EvalContext::from_eval(ev);
-                        println!("=> {}", print_scheme_value(&ev, &result));
+                        println!("=> {}", print_scheme_value(&result));
                     }
                 }
                 Err(e) => println!("Evaluation error: {}", e),

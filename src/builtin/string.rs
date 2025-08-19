@@ -16,7 +16,7 @@ use num_bigint::BigInt;
 /// Convert a lisp object to a string
 fn to_string(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() == 1 {
-        let result = new_string(ec.heap, display_scheme_value(ec, &args[0]).as_str());
+        let result = new_string(ec.heap, display_scheme_value(&args[0]).as_str());
         Ok(result)
     } else {
         Err("to-string expects exactly one argument".to_string())

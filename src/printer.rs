@@ -1,32 +1,32 @@
 // Only keep this function for pretty-printing SchemeValueSimple:
-use crate::eval::EvalContext;
 use crate::gc::SchemeValue::*;
 use crate::gc::{Callable, GcRef};
+use crate::gc_value;
 
-pub fn display_scheme_value(ec: &EvalContext, obj: &GcRef) -> String {
-    let val = ec.heap.get_value(*obj);
+pub fn display_scheme_value(obj: &GcRef) -> String {
+    let val = gc_value!(*obj);
     match val {
         Str(s) => s.clone(),
         Char(c) => format!("{c}"),
-        _ => print_scheme_value(ec, obj),
+        _ => print_scheme_value(obj),
     }
 }
 
-pub fn print_scheme_value(ec: &EvalContext, obj: &GcRef) -> String {
-    let val = ec.heap.get_value(*obj);
+pub fn print_scheme_value(obj: &GcRef) -> String {
+    let val = gc_value!(*obj);
     match val {
         Pair(_, _) => {
             let mut s = String::from("(");
             let mut first = true;
             let mut current = *obj;
             loop {
-                let value = ec.heap.get_value(current);
+                let value = gc_value!(current);
                 match value {
                     Pair(car, cdr) => {
                         if !first {
                             s.push(' ');
                         }
-                        s.push_str(&print_scheme_value(ec, car));
+                        s.push_str(&print_scheme_value(car));
                         current = *cdr;
                         first = false;
                     }
@@ -36,7 +36,7 @@ pub fn print_scheme_value(ec: &EvalContext, obj: &GcRef) -> String {
                     }
                     _ => {
                         s.push_str(" . ");
-                        s.push_str(&print_scheme_value(ec, &current));
+                        s.push_str(&print_scheme_value(&current));
                         s.push(')');
                         break;
                     }
@@ -52,7 +52,7 @@ pub fn print_scheme_value(ec: &EvalContext, obj: &GcRef) -> String {
                 if !first {
                     s.push(' ');
                 }
-                s.push_str(print_scheme_value(ec, &value).as_str());
+                s.push_str(print_scheme_value(&value).as_str());
                 first = false;
             }
             s.push(')');
@@ -73,35 +73,30 @@ pub fn print_scheme_value(ec: &EvalContext, obj: &GcRef) -> String {
         Callable(variant) => match variant {
             Callable::Builtin { func, doc } => format!("Primitive@{:?} {}", func, doc),
             Callable::SpecialForm { doc, .. } => format!("SpecialForm: {}", doc),
-            Callable::Closure { params, body, .. } => print_callable(ec, "Closure", params, *body),
-            Callable::Macro { params, body, .. } => print_callable(ec, "Macro", params, *body),
+            Callable::Closure { params, body, .. } => print_callable("Closure", params, *body),
+            Callable::Macro { params, body, .. } => print_callable("Macro", params, *body),
         },
         _ => format!("print_scheme_value: unprintable."),
     }
 }
 
-fn print_callable(
-    ec: &EvalContext,
-    callable_type: &str,
-    params: &Vec<GcRef>,
-    body: GcRef,
-) -> String {
+fn print_callable(callable_type: &str, params: &Vec<GcRef>, body: GcRef) -> String {
     let mut s = callable_type.to_string();
     match params.len() {
         0 => s.push_str(" () "),
         1 => {
             s.push(' ');
-            s.push_str(print_scheme_value(&ec, &params[0]).as_str());
+            s.push_str(print_scheme_value(&params[0]).as_str());
             s.push(' ');
         }
         _ => {
             // two cases: list and dotted, depending on the value of params[0]
             s.push_str(" (");
             for arg in params[1..].iter() {
-                s.push_str(print_scheme_value(&ec, arg).as_str());
+                s.push_str(print_scheme_value(arg).as_str());
                 s.push(' ');
             }
-            match &ec.heap.get_value(params[0]) {
+            match &gc_value!(params[0]) {
                 Symbol(name) => {
                     println!("Symbol: {}", name);
                     s.push_str(". ");
@@ -114,6 +109,6 @@ fn print_callable(
             s.push_str(") ");
         }
     }
-    s.push_str(print_scheme_value(&ec, &body).as_str());
+    s.push_str(print_scheme_value(&body).as_str());
     s
 }

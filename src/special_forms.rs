@@ -1,7 +1,7 @@
 /// special_forms.rs
 /// Definitions of special forms implemented internally
 ///
-use crate::cek::{CEKState, eval_insert, eval_main};
+use crate::cek::{CEKState, after_test_insert, bind_insert, eval_insert, eval_main, value_insert};
 use crate::eval::{EvalContext, expect_at_least_n_args, expect_n_args, expect_symbol};
 use crate::gc::{
     GcHeap, GcRef, SchemeValue, car, cdr, cons, get_nil, list_from_vec, list_to_vec, new_float,
@@ -184,8 +184,8 @@ fn eval_eval_sf(
 ) -> Result<(), String> {
     *evaluator.depth -= 1;
     let args = expect_n_args(&evaluator.heap, expr, 2)?;
-    let result = eval_main(args[1], evaluator)?;
-    eval_main(result, evaluator);
+    eval_insert(state, args[1], true);
+    eval_insert(state, args[1], true);
     Ok(())
 }
 
@@ -198,13 +198,12 @@ fn apply_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> R
     )?;
     let args = eval_main(unevaluated_args, evaluator)?;
     let apply_expr = cons(func, args, &mut evaluator.heap)?;
-    eval_main(apply_expr, evaluator);
+    eval_insert(state, apply_expr, true);
     Ok(())
 }
 
 /// Trace logic: turn the trace function on or off
 /// This function takes an integer value, and sets evaluator.trace to match the argument.
-/// BUG: SHOULD EVALUATE ITS ARGUMENT!
 fn trace_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
     use num_traits::ToPrimitive;
     *evaluator.depth -= 1;
@@ -228,7 +227,11 @@ fn quote_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> R
     *evaluator.depth -= 1;
     match &evaluator.heap.get_value(expr) {
         SchemeValue::Pair(_, cdr) => match &evaluator.heap.get_value(*cdr) {
-            SchemeValue::Pair(_, _) => Ok(()),
+            SchemeValue::Pair(_, _) => {
+                let arg = car(evaluator.heap, *cdr)?;
+                value_insert(state, arg);
+                Ok(())
+            }
             _ => Err("Malformed quote: missing argument".to_string()),
         },
         _ => Err("Malformed quote: not a pair".to_string()),
@@ -243,9 +246,9 @@ fn begin_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> R
     //let mut result = get_nil(&mut evaluator.heap);
     for arg in argvec[..argvec.len() - 1].iter() {
         //result = eval_main(*arg, evaluator, tail && i == argvec.len() - 1)?;
-        eval_insert(state, evaluator, *arg, false);
+        eval_insert(state, *arg, false);
     }
-    eval_insert(state, evaluator, *argvec.last().unwrap(), true);
+    eval_insert(state, *argvec.last().unwrap(), true);
     Ok(())
 }
 
@@ -258,8 +261,8 @@ pub fn define_sf(
     // (define symbol expr)
     let args = expect_n_args(&evaluator.heap, expr, 3)?; // including 'define
     let sym = expect_symbol(&mut evaluator.heap, &args[1])?;
-    let value = eval_main(args[2], evaluator)?;
-    evaluator.env.set_symbol(sym, value);
+    bind_insert(state, sym);
+    eval_insert(state, args[2], false);
     Ok(())
 }
 
@@ -269,23 +272,9 @@ pub fn if_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> 
     *evaluator.depth -= 1;
     // (if test consequent [alternate])
     let args = expect_at_least_n_args(&evaluator.heap, expr, 2)?;
-    let test = eval_main(args[1], evaluator)?;
-    match evaluator.heap.get_value(test) {
-        SchemeValue::Bool(val) => {
-            if *val {
-                eval_main(args[2], evaluator);
-                return Ok(());
-            } else {
-                if args.len() == 4 {
-                    eval_main(args[3], evaluator);
-                    return Ok(());
-                } else {
-                    return Ok(());
-                }
-            }
-        }
-        _ => return Err("if: invalid test expression".to_string()),
-    }
+    after_test_insert(state, args[2], args[3]);
+    eval_insert(state, args[1], false);
+    Ok(())
 }
 
 /// (cond (test1 expr) [(test 2...)] [(else expr)])

@@ -35,12 +35,12 @@ impl Frame {
     }
 
     /// Set a binding in this frame using a symbol key
-    fn set_local(&mut self, symbol: GcRef, value: GcRef) {
+    pub fn set_local(&mut self, symbol: GcRef, value: GcRef) {
         self.bindings.insert(symbol, value);
     }
 
     /// Check if this frame has a local binding using a symbol key
-    fn has_local(&self, symbol: GcRef) -> bool {
+    pub fn has_local(&self, symbol: GcRef) -> bool {
         self.bindings.contains_key(&symbol)
     }
 }

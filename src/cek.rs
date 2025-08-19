@@ -36,8 +36,8 @@ pub enum Kont {
     },
     AfterTest {
         then_branch: GcRef,
-        else_branch: Option<GcRef>,
-        was_tail: bool,
+        else_branch: GcRef,
+        //was_tail: bool,
         next: Box<Kont>,
     },
     Seq {
@@ -45,11 +45,9 @@ pub enum Kont {
         was_tail: bool,
         next: Box<Kont>,
     },
-    BindThen {
-        params: Vec<GcRef>,   // param symbols (or param spec)
-        body: GcRef,          // body expression (or begin)
-        env_for_bind: EnvRef, // environment to use as parent for the new frame
-        was_tail: bool,
+    Bind {
+        symbol: GcRef, // body expression (or begin)
+        //env_for_bind: EnvRef, // environment to use as parent for the new frame
         next: Box<Kont>,
     },
     // Exception handler frame - used later for raise/handler support
@@ -103,6 +101,27 @@ impl std::fmt::Debug for Kont {
                     proc, original_call, next
                 )
             }
+            Kont::Bind { symbol, next } => {
+                write!(
+                    f,
+                    "Bind {{ symbol: {}, next: {:?} }}",
+                    print_scheme_value(symbol),
+                    next
+                )
+            }
+            Kont::AfterTest {
+                then_branch,
+                else_branch,
+                next,
+            } => {
+                write!(
+                    f,
+                    "AfterTest {{ then: {}, else_: {}, next: {:?} }}",
+                    print_scheme_value(then_branch),
+                    print_scheme_value(else_branch),
+                    next
+                )
+            }
             _ => write!(f, "Unknown continuation"),
         }
     }
@@ -136,7 +155,7 @@ pub fn eval_main(expr: GcRef, ec: &mut EvalContext) -> Result<GcRef, String> {
 /// If `replace_next` is true, the installed EvalArg (if any) will have `next = Halt`
 /// (i.e., it will replace the current continuation); otherwise the existing kont chain is preserved.
 ///
-pub fn eval_insert(state: &mut CEKState, _ec: &mut EvalContext, expr: GcRef, replace_next: bool) {
+pub fn eval_insert(state: &mut CEKState, expr: GcRef, replace_next: bool) {
     // if replace_next, set state.kont to Halt so eval_cek will capture Halt as the `current_kont`
     // and set EvalArg.next = Box::new(Kont::Halt); otherwise leave state.kont as-is.
     if replace_next {
@@ -146,13 +165,40 @@ pub fn eval_insert(state: &mut CEKState, _ec: &mut EvalContext, expr: GcRef, rep
     state.control = Control::Expr(expr);
 }
 
+/// Return a value from a special form without evaluation.
+///
+pub fn value_insert(state: &mut CEKState, expr: GcRef) {
+    let _current_cont = std::mem::replace(&mut state.kont, Kont::Halt);
+    state.control = Control::Value(expr);
+}
+
+/// Bind a symbol to a value. This is installed before evaluation of the right hand side.
+/// The bind operation takes the value returned by the previous continuation.
+///
+pub fn bind_insert(state: &mut CEKState, sym: GcRef) {
+    let current_cont = std::mem::replace(&mut state.kont, Kont::Halt);
+    state.kont = Kont::Bind {
+        symbol: sym,
+        next: Box::new(current_cont),
+    };
+}
+
+pub fn after_test_insert(state: &mut CEKState, then_branch: GcRef, else_branch: GcRef) {
+    let current_cont = std::mem::replace(&mut state.kont, Kont::Halt);
+    state.kont = Kont::AfterTest {
+        then_branch,
+        else_branch,
+        next: Box::new(current_cont),
+    };
+}
+
 /// Run the CEK evaluator loop until a result is produced.
 ///
 /// All the state information is contained in the CEKState struct, so no result is returned until the end.
 ///
 pub fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> GcRef {
+    dump(" run_cek", &state, ctx);
     loop {
-        dump(" run_cek", &state, ctx);
         // Step the CEK machine; mutates state in place
         if let Err(err) = step(&mut state, ctx) {
             panic!("CEK evaluation error: {}", err);
@@ -273,7 +319,52 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                 apply_special(state, ec, frame)?;
                 Ok(())
             }
-
+            Kont::Bind { symbol, .. } => {
+                // The value for the symbol has been evaluated and is in state.control
+                match &state.control {
+                    Control::Value(val) => {
+                        state.env.borrow_mut().set_local(*symbol, *val);
+                        //let next = *next.clone();
+                        let sym = symbol.clone();
+                        state.kont = Kont::Halt; // next;
+                        // Return a clone of the symbol as the value of define
+                        state.control = Control::Value(sym);
+                        Ok(())
+                    }
+                    _ => panic!("Kont::Bind reached but control is not a Value"),
+                }
+            }
+            Kont::AfterTest {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                // The test value is in state.control
+                match &state.control {
+                    Control::Value(val) => {
+                        match gc_value!(*val) {
+                            Bool(v) => {
+                                if *v {
+                                    state.control = Control::Expr(*then_branch);
+                                    state.kont = Kont::Halt; // next;
+                                    Ok(())
+                                } else {
+                                    state.control = Control::Expr(*else_branch);
+                                    state.kont = Kont::Halt; // next;
+                                    Ok(())
+                                }
+                            }
+                            _ => {
+                                // All non-Bool values are treated as true
+                                state.control = Control::Expr(*then_branch);
+                                state.kont = Kont::Halt; // next;
+                                Ok(())
+                            }
+                        }
+                    }
+                    _ => panic!("Kont::AfterTest reached but control is not a value"),
+                }
+            }
             // Other continuations do nothing here
             _ => Ok(()),
         },
@@ -339,7 +430,7 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
         }
         _ => panic!(
             "Unsupported expression in eval_cek: {}",
-            print_scheme_value(ctx, &expr)
+            print_scheme_value(&expr)
         ),
     }
     //dump("eval_cek exit", &state, ctx);
@@ -447,12 +538,12 @@ fn apply_proc(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Result
 /// Dump a summary of the CEK machine state
 ///
 fn dump(loc: &str, state: &CEKState, ec: &EvalContext) {
-    if false {
+    if true {
         match &state.control {
             Control::Expr(obj) => {
                 eprintln!(
                     "{loc:18} Control: Expr={:20}; Kont={}; Tail={}",
-                    print_scheme_value(ec, obj),
+                    print_scheme_value(obj),
                     frame_debug_short(&state.kont),
                     state.tail
                 );
@@ -460,7 +551,7 @@ fn dump(loc: &str, state: &CEKState, ec: &EvalContext) {
             Control::Value(obj) => {
                 eprintln!(
                     "{loc:18} Control: Value={:20}; Kont={}",
-                    print_scheme_value(ec, obj),
+                    print_scheme_value(obj),
                     frame_debug_short(&state.kont)
                 );
             }

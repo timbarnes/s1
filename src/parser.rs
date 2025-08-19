@@ -241,7 +241,7 @@ mod tests {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "42"),
             _ => panic!(
                 "Expected integer, got {}",
-                crate::printer::print_scheme_value(&ec, &expr)
+                crate::printer::print_scheme_value(&expr)
             ),
         }
     }
@@ -256,7 +256,7 @@ mod tests {
         let expr = parser.parse(ec.heap, &mut port).unwrap();
         match &ec.heap.get_value(expr) {
             crate::gc::SchemeValue::Symbol(s) => assert_eq!(s, "hello"),
-            _ => panic!("Expected symbol, got {}", print_scheme_value(&ec, &expr)),
+            _ => panic!("Expected symbol, got {}", print_scheme_value(&expr)),
         }
     }
 
@@ -271,7 +271,7 @@ mod tests {
         let expr = parser.parse(ec.heap, &mut port).unwrap();
         match &ec.heap.get_value(expr) {
             crate::gc::SchemeValue::Str(s) => assert_eq!(s, "hello world"),
-            _ => panic!("Expected string, got {}", print_scheme_value(&ec, &expr)),
+            _ => panic!("Expected string, got {}", print_scheme_value(&expr)),
         }
     }
 
@@ -286,7 +286,7 @@ mod tests {
         let expr = parser.parse(ec.heap, &mut port).unwrap();
         match &ec.heap.get_value(expr) {
             crate::gc::SchemeValue::Nil => assert!(true), // Success
-            _ => panic!("Expected nil, got {}", print_scheme_value(&ec, &expr)),
+            _ => panic!("Expected nil, got {}", print_scheme_value(&expr)),
         }
     }
 
@@ -305,14 +305,14 @@ mod tests {
             SchemeValue::Pair(car, cdr) => {
                 match &ec.heap.get_value(*car) {
                     SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
-                    _ => panic!("Expected integer 1, got {}", print_scheme_value(&ec, car)),
+                    _ => panic!("Expected integer 1, got {}", print_scheme_value(car)),
                 }
                 match &ec.heap.get_value(*cdr) {
                     SchemeValue::Pair(car2, cdr2) => {
                         match &ec.heap.get_value(*car2) {
                             crate::gc::SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
                             _ => {
-                                panic!("Expected integer 2, got {}", print_scheme_value(&ec, car2))
+                                panic!("Expected integer 2, got {}", print_scheme_value(car2))
                             }
                         }
                         match &ec.heap.get_value(*cdr2) {
@@ -324,25 +324,22 @@ mod tests {
                                     _ => {
                                         panic!(
                                             "Expected integer 3, got {}",
-                                            print_scheme_value(&ec, car3)
+                                            print_scheme_value(car3)
                                         )
                                     }
                                 }
                                 match &ec.heap.get_value(*cdr3) {
                                     SchemeValue::Nil => assert!(true), // Success
-                                    _ => panic!(
-                                        "Expected nil, got {}",
-                                        print_scheme_value(&ec, cdr3)
-                                    ),
+                                    _ => panic!("Expected nil, got {}", print_scheme_value(cdr3)),
                                 }
                             }
-                            _ => panic!("Expected pair, got {}", print_scheme_value(&ec, cdr2)),
+                            _ => panic!("Expected pair, got {}", print_scheme_value(cdr2)),
                         }
                     }
-                    _ => panic!("Expected pair, got {}", print_scheme_value(&ec, cdr)),
+                    _ => panic!("Expected pair, got {}", print_scheme_value(cdr)),
                 }
             }
-            _ => panic!("Expected pair, got {}", print_scheme_value(&ec, &expr)),
+            _ => panic!("Expected pair, got {}", print_scheme_value(&expr)),
         }
     }
 
@@ -357,13 +354,13 @@ mod tests {
         let expr = parser.parse(ec.heap, &mut port).unwrap();
         match &ec.heap.get_value(expr) {
             crate::gc::SchemeValue::Bool(b) => assert_eq!(*b, true),
-            _ => panic!("Expected true, got {}", print_scheme_value(&ec, &expr)),
+            _ => panic!("Expected true, got {}", print_scheme_value(&expr)),
         }
 
         let expr = parser.parse(ec.heap, &mut port).unwrap();
         match &ec.heap.get_value(expr) {
             crate::gc::SchemeValue::Bool(b) => assert_eq!(*b, false),
-            _ => panic!("Expected false, got {}", print_scheme_value(&ec, &expr)),
+            _ => panic!("Expected false, got {}", print_scheme_value(&expr)),
         }
     }
 
@@ -380,19 +377,13 @@ mod tests {
         let expr = parser.parse(ec.heap, &mut port).unwrap();
         match &heap.get_value(expr) {
             SchemeValue::Char(c) => assert_eq!(*c, 'a'),
-            _ => panic!(
-                "Expected character 'a', got {}",
-                print_scheme_value(&ec, &expr)
-            ),
+            _ => panic!("Expected character 'a', got {}", print_scheme_value(&expr)),
         }
 
         let expr = parser.parse(ec.heap, &mut port).unwrap();
         match &heap.get_value(expr) {
             SchemeValue::Char(c) => assert_eq!(*c, ' '),
-            _ => panic!(
-                "Expected character ' ', got {}",
-                print_scheme_value(&ec, &expr)
-            ),
+            _ => panic!("Expected character ' ', got {}", print_scheme_value(&expr)),
         }
     }
 
@@ -413,7 +404,7 @@ mod tests {
                     SchemeValue::Symbol(s) => assert_eq!(s, "quote"),
                     _ => panic!(
                         "Expected symbol 'quote', got {}",
-                        print_scheme_value(&ec, quote_sym)
+                        print_scheme_value(quote_sym)
                     ),
                 }
                 match &heap.get_value(*quoted_expr) {
@@ -422,21 +413,18 @@ mod tests {
                             SchemeValue::Symbol(s) => assert_eq!(s, "hello"),
                             _ => panic!(
                                 "Expected symbol 'hello', got {}",
-                                print_scheme_value(&ec, hello_sym)
+                                print_scheme_value(hello_sym)
                             ),
                         }
                         match &heap.get_value(*nil) {
                             SchemeValue::Nil => assert!(true), // Success
-                            _ => panic!("Expected nil, got {}", print_scheme_value(&ec, nil)),
+                            _ => panic!("Expected nil, got {}", print_scheme_value(nil)),
                         }
                     }
-                    _ => panic!(
-                        "Expected pair, got {}",
-                        print_scheme_value(&ec, quoted_expr)
-                    ),
+                    _ => panic!("Expected pair, got {}", print_scheme_value(quoted_expr)),
                 }
             }
-            _ => panic!("Expected pair, got {}", print_scheme_value(&ec, &expr)),
+            _ => panic!("Expected pair, got {}", print_scheme_value(&expr)),
         }
     }
 
@@ -454,14 +442,14 @@ mod tests {
             SchemeValue::Pair(car, cdr) => {
                 match &ec.heap.get_value(*car) {
                     SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
-                    _ => panic!("Expected integer 1, got {}", print_scheme_value(&ec, car)),
+                    _ => panic!("Expected integer 1, got {}", print_scheme_value(car)),
                 }
                 match &ec.heap.get_value(*cdr) {
                     SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
-                    _ => panic!("Expected integer 2, got {}", print_scheme_value(&ec, cdr)),
+                    _ => panic!("Expected integer 2, got {}", print_scheme_value(cdr)),
                 }
             }
-            _ => panic!("Expected pair, got {}", print_scheme_value(&ec, &expr)),
+            _ => panic!("Expected pair, got {}", print_scheme_value(&expr)),
         }
     }
 
@@ -480,18 +468,18 @@ mod tests {
                 assert_eq!(v.len(), 3);
                 match &ec.heap.get_value(v[0]) {
                     SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
-                    _ => panic!("Expected integer 1, got {}", print_scheme_value(&ec, &v[0])),
+                    _ => panic!("Expected integer 1, got {}", print_scheme_value(&v[0])),
                 }
                 match &ec.heap.get_value(v[1]) {
                     SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
-                    _ => panic!("Expected integer 2, got {}", print_scheme_value(&ec, &v[1])),
+                    _ => panic!("Expected integer 2, got {}", print_scheme_value(&v[1])),
                 }
                 match &ec.heap.get_value(v[2]) {
                     SchemeValue::Int(i) => assert_eq!(i.to_string(), "3"),
-                    _ => panic!("Expected integer 3, got {}", print_scheme_value(&ec, &v[2])),
+                    _ => panic!("Expected integer 3, got {}", print_scheme_value(&v[2])),
                 }
             }
-            _ => panic!("Expected vector, got {}", print_scheme_value(&ec, &expr)),
+            _ => panic!("Expected vector, got {}", print_scheme_value(&expr)),
         }
     }
 
@@ -506,7 +494,7 @@ mod tests {
         let expr = parser.parse(ec.heap, &mut port).unwrap();
         match &ec.heap.get_value(expr) {
             SchemeValue::Float(f) => assert_eq!(*f, 3.14),
-            _ => panic!("Expected float, got {}", print_scheme_value(&ec, &expr)),
+            _ => panic!("Expected float, got {}", print_scheme_value(&expr)),
         }
     }
 }

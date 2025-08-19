@@ -35,7 +35,7 @@ pub fn write(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     }
 
     // Extract the SchemeValue reference in its own block to shorten the borrow
-    let s = print_scheme_value(&ec, &args[0]);
+    let s = print_scheme_value(&args[0]);
 
     if args.len() == 2 {
         print!("{}", s);
@@ -56,7 +56,7 @@ pub fn display(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     }
 
     // Extract the SchemeValue reference in its own block to shorten the borrow
-    let s = display_scheme_value(&ec, &args[0]);
+    let s = display_scheme_value(&args[0]);
 
     if args.len() == 2 {
         print!("{}", s);
