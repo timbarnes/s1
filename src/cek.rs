@@ -147,7 +147,7 @@ pub fn eval_main(expr: GcRef, ec: &mut EvalContext) -> Result<GcRef, String> {
         env: ec.env.current_frame().clone(),
         tail: false,
     };
-    dump("***eval_main***", &state, ec);
+    dump("***eval_main***", &state);
     Ok(run_cek(state, ec))
 }
 
@@ -197,7 +197,7 @@ pub fn after_test_insert(state: &mut CEKState, then_branch: GcRef, else_branch: 
 /// All the state information is contained in the CEKState struct, so no result is returned until the end.
 ///
 pub fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> GcRef {
-    dump(" run_cek", &state, ctx);
+    dump(" run_cek", &state);
     loop {
         // Step the CEK machine; mutates state in place
         if let Err(err) = step(&mut state, ctx) {
@@ -226,7 +226,7 @@ pub fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> GcRef {
 /// resolving symbols, starting applications, and handling continuations as needed.
 ///
 pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
-    dump("  step", &state, ec);
+    dump("  step", &state);
     match &state.control {
         Control::Expr(expr) => {
             // Evaluate the next expression
@@ -374,7 +374,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
 /// Capture the current environment and control state, then pass the CEKState to the CEK loop.
 ///
 pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
-    dump("   eval_cek", &state, ctx);
+    dump("   eval_cek", &state);
     match &gc_value!(expr) {
         // Self-evaluating values
         Int(_) | Float(_) | Str(_) | Bool(_) | Vector(_) | Char(_) | Nil => {
@@ -448,7 +448,7 @@ fn is_value(control: GcRef, _ec: &EvalContext) -> bool {
 /// Process SpecialForm and Macro applications. Argument evaluation is deferred to the callee.
 ///
 fn apply_special(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Result<(), String> {
-    dump("     apply_special", &state, ec);
+    dump("     apply_special", &state);
     if let Kont::ApplySpecial {
         proc,
         original_call,
@@ -481,7 +481,7 @@ fn apply_special(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Res
 /// Process Builtin and Closure applications. Arguments are already evaluated.
 ///
 fn apply_proc(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Result<(), String> {
-    dump("     apply_proc", &state, ec);
+    dump("     apply_proc", &state);
 
     if let Kont::ApplyProc {
         proc,
@@ -537,7 +537,7 @@ fn apply_proc(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Result
 
 /// Dump a summary of the CEK machine state
 ///
-fn dump(loc: &str, state: &CEKState, ec: &EvalContext) {
+fn dump(loc: &str, state: &CEKState) {
     if true {
         match &state.control {
             Control::Expr(obj) => {

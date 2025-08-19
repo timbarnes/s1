@@ -39,7 +39,6 @@ pub fn register_special_forms(heap: &mut GcHeap, env: &mut crate::env::Environme
     register_special_form!(heap, env,
         "eval" => eval_eval_sf,
         "apply" => apply_sf,
-        "trace" => trace_sf,
         "quote" => quote_sf,
         "define" => define_sf,
         "set!" => set_sf,
@@ -202,25 +201,6 @@ fn apply_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> R
     Ok(())
 }
 
-/// Trace logic: turn the trace function on or off
-/// This function takes an integer value, and sets evaluator.trace to match the argument.
-fn trace_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
-    use num_traits::ToPrimitive;
-    *evaluator.depth -= 1;
-    let args = expect_n_args(&evaluator.heap, expr, 2)?;
-    let trace_val = eval_main(args[1], evaluator)?;
-    match &evaluator.heap.get_value(trace_val) {
-        SchemeValue::Int(v) => match v.to_i32() {
-            Some(value) => {
-                *evaluator.trace = value;
-            }
-            None => return Err("trace: requires integer argument".to_string()),
-        },
-        _ => return Err("trace: requires integer argument".to_string()),
-    }
-    Ok(())
-}
-
 /// Quote logic: return first argument unevaluated
 fn quote_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
     // (quote x) => return x unevaluated
@@ -243,9 +223,7 @@ fn begin_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> R
     // (begin expr1 expr2 ... exprN) => evaluate each in sequence, return last
     *evaluator.depth -= 1;
     let argvec = expect_at_least_n_args(&evaluator.heap, expr, 2)?;
-    //let mut result = get_nil(&mut evaluator.heap);
     for arg in argvec[..argvec.len() - 1].iter() {
-        //result = eval_main(*arg, evaluator, tail && i == argvec.len() - 1)?;
         eval_insert(state, *arg, false);
     }
     eval_insert(state, *argvec.last().unwrap(), true);
