@@ -8,8 +8,7 @@ pub mod string;
 pub mod vector;
 
 use crate::eval::EvalContext;
-use crate::gc::{GcHeap, GcRef, SchemeValue, get_nil, new_string};
-use crate::printer::{display_scheme_value, print_scheme_value};
+use crate::gc::{GcHeap, GcRef, SchemeValue, new_string};
 
 /// Macro to register builtin functions in the environment
 ///

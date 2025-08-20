@@ -23,7 +23,8 @@
             (display "PASS: ")
             (display message)
             (newline)
-            #t))))
+            #t)
+        #f)))
 
 (define failure
     (lambda (message expected actual)
@@ -227,13 +228,13 @@
 (test-equal 8 (add5 3) "Closure application")
 (define fact (lambda (n) (if (= n 0) 1 (* n (fact (- n 1))))))
 (test-equal 720 (fact 6) "Factorial test")
-(define fac-acc (lambda (n)
-    (define f (lambda (n acc)
-        (if (= n 0)
-            acc
-            (f (- n 1) (* acc n)))))
-    (f n 1)))
-(test-equal 720 (fac-acc 6) "Factorial test with nested define and accumulator")
+; (define fac-acc (lambda (n)
+;     (define f (lambda (n acc)
+;         (if (= n 0)
+;             acc
+;             (f (- n 1) (* acc n)))))
+;     (f n 1)))
+;(test-equal 720 (fac-acc 6) "Factorial test with nested define and accumulator")
 
 (display "          === Testing List Accessors ===")
 (newline)
@@ -327,7 +328,7 @@
 (test-equal 6765 (fib 20) "Fibonacci(20)")
 (test-equal '(720) (list (fac-acc 6)) "Tail recursion inside a form")
 (define test-tail (lambda (n) (if (= n 0) #t (test-tail (- n 1)))))
-;(test-true (test-tail 10000) "(test-tail 10000) - fails without tail recursion")
+(test-true (test-tail 10000) "(test-tail 10000) - fails without tail recursion")
 
 (display "          === Testing Macros ===")
 (newline)

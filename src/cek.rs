@@ -3,7 +3,7 @@
 use crate::env::EnvRef;
 use crate::eval::{EvalContext, bind_params, eval_macro};
 use crate::gc::SchemeValue::*;
-use crate::gc::{Callable, GcRef, list_to_vec};
+use crate::gc::{Callable, GcRef, cons, list_to_vec};
 use crate::gc_value;
 use crate::printer::print_scheme_value;
 //use std::cell::RefCell;
@@ -35,9 +35,17 @@ pub enum Kont {
         next: Box<Kont>,
     },
     AfterTest {
+        // processes if
         then_branch: GcRef,
         else_branch: GcRef,
         //was_tail: bool,
+        next: Box<Kont>,
+    },
+    Cond {
+        // processes cond
+        remaining: Vec<GcRef>,
+        current: Option<GcRef>,
+        arrow: Option<GcRef>,
         next: Box<Kont>,
     },
     Seq {
@@ -46,6 +54,7 @@ pub enum Kont {
         next: Box<Kont>,
     },
     Bind {
+        // processes define
         symbol: GcRef, // body expression (or begin)
         //env_for_bind: EnvRef, // environment to use as parent for the new frame
         next: Box<Kont>,
@@ -122,6 +131,18 @@ impl std::fmt::Debug for Kont {
                     next
                 )
             }
+            Kont::Cond {
+                remaining,
+                current,
+                arrow,
+                next,
+            } => {
+                write!(
+                    f,
+                    "Cond {{ remaining: {:?}, current: {:?}, arrow: {:?}, next: {:?} }}",
+                    remaining, current, arrow, next
+                )
+            }
             _ => write!(f, "Unknown continuation"),
         }
     }
@@ -155,7 +176,7 @@ pub fn eval_main(expr: GcRef, ec: &mut EvalContext) -> Result<GcRef, String> {
 /// If `replace_next` is true, the installed EvalArg (if any) will have `next = Halt`
 /// (i.e., it will replace the current continuation); otherwise the existing kont chain is preserved.
 ///
-pub fn eval_insert(state: &mut CEKState, expr: GcRef, replace_next: bool) {
+pub fn insert_eval(state: &mut CEKState, expr: GcRef, replace_next: bool) {
     // if replace_next, set state.kont to Halt so eval_cek will capture Halt as the `current_kont`
     // and set EvalArg.next = Box::new(Kont::Halt); otherwise leave state.kont as-is.
     state.tail = replace_next;
@@ -164,14 +185,14 @@ pub fn eval_insert(state: &mut CEKState, expr: GcRef, replace_next: bool) {
 
 /// Return a value from a special form without evaluation.
 ///
-pub fn value_insert(state: &mut CEKState, expr: GcRef) {
+pub fn insert_value(state: &mut CEKState, expr: GcRef) {
     state.control = Control::Value(expr);
 }
 
 /// Bind a symbol to a value. This is installed before evaluation of the right hand side.
 /// The bind operation takes the value returned by the previous continuation.
 ///
-pub fn bind_insert(state: &mut CEKState, sym: GcRef) {
+pub fn insert_bind(state: &mut CEKState, sym: GcRef) {
     // clone the current continuation and link it under the new Bind
     let current_cont = state.kont.clone();
     state.kont = Kont::Bind {
@@ -181,7 +202,22 @@ pub fn bind_insert(state: &mut CEKState, sym: GcRef) {
     //eprintln!("bind_insert {}", frame_debug_short(&state.kont));
 }
 
-pub fn after_test_insert(state: &mut CEKState, then_branch: GcRef, else_branch: GcRef) {
+pub fn insert_cond(
+    state: &mut CEKState,
+    current: Option<GcRef>,
+    remaining: Vec<GcRef>,
+    arrow: Option<GcRef>,
+) {
+    let current_cont = state.kont.clone();
+    state.kont = Kont::Cond {
+        current,
+        remaining,
+        arrow,
+        next: Box::new(current_cont),
+    };
+}
+
+pub fn insert_after_test(state: &mut CEKState, then_branch: GcRef, else_branch: GcRef) {
     let current_cont = std::mem::replace(&mut state.kont, Kont::Halt);
     state.kont = Kont::AfterTest {
         then_branch,
@@ -361,6 +397,51 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                     _ => panic!("Kont::AfterTest reached but control is not a value"),
                 }
             }
+            Kont::Cond {
+                remaining,
+                current,
+                arrow,
+                next,
+            } => {
+                let test_val = match &state.control {
+                    Control::Value(v) => *v,
+                    _ => panic!("AfterCond reached but control is not Value"),
+                };
+
+                if test_val == ec.heap.false_s() {
+                    // Test failed: move to next clause
+                    if let Some(next_clause) = remaining.pop() {
+                        state.control = Control::Expr(next_clause);
+                        // Update continuation with new remaining clauses
+                        state.kont = Kont::Cond {
+                            remaining: remaining.clone(),
+                            current: None,
+                            arrow: None,
+                            next: next.clone(),
+                        };
+                        Ok(())
+                    } else {
+                        // No more clauses: return unspecified or #f
+                        state.control = Control::Value(ec.heap.false_s());
+                        state.kont = *next.clone();
+                        Ok(())
+                    }
+                } else if let Some(arrow) = arrow {
+                    // Test passed with arrow: call arrow function with test value
+                    let mut call = cons(test_val, ec.heap.nil_s(), ec.heap)?;
+                    call = cons(*arrow, call, ec.heap)?;
+                    state.control = Control::Expr(call);
+                    state.kont = *next.clone(); // continuation after cond
+                    Ok(())
+                } else if let Some(body) = current {
+                    // Test passed without arrow: evaluate body normally
+                    state.control = Control::Expr(*body);
+                    state.kont = *next.clone();
+                    Ok(())
+                } else {
+                    panic!("AfterCond reached but no body or arrow function");
+                }
+            }
             // Other continuations do nothing here
             _ => Ok(()),
         },
@@ -432,15 +513,6 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
         ),
     }
     //dump("eval_cek exit", &state, ctx);
-}
-
-/// Helper: returns true if `control` is already a value
-fn is_value(control: GcRef, _ec: &EvalContext) -> bool {
-    match gc_value!(control) {
-        Pair(_, _) => false,
-        Symbol(_) => false,
-        _ => true,
-    }
 }
 
 fn apply_special_direct(
@@ -550,7 +622,7 @@ fn apply_proc(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Result
 /// Dump a summary of the CEK machine state
 ///
 fn dump(loc: &str, state: &CEKState) {
-    if false {
+    if true {
         match &state.control {
             Control::Expr(obj) => {
                 eprintln!(

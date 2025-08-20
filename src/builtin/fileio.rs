@@ -1,5 +1,6 @@
 use crate::eval::EvalContext;
 use crate::gc::{GcHeap, GcRef, SchemeValue, new_port};
+use crate::io::port_kind_from_scheme_port;
 
 /// (open-input-file filename) -> port
 pub fn open_input_file_builtin(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
@@ -55,6 +56,40 @@ pub fn load_builtin_evaluator(
         ec.heap,
         &format!("Loaded file: {}", filename),
     ))
+}
+
+/// (push-port! port)
+/// Pushes a port onto the port stack, causing the evaluator to load scheme code from it.
+/// At EOF, the evaluator will pop the port and continue evaluating code from the next port on the stack.
+///
+/// # Examples
+///
+/// ```
+/// let mut evaluator = Evaluator::new();
+/// evaluator.push_port("example.txt");
+/// ```
+pub fn push_port(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
+    // (push-port! port)
+    *ec.depth -= 1;
+    if args.len() != 1 {
+        return Err("push_port!: expected exactly 1 argument".to_string());
+    }
+    let port_kind = port_kind_from_scheme_port(ec, args[1]);
+    ec.port_stack.push(port_kind);
+    Ok(ec.heap.nil_s())
+}
+
+pub fn pop_port(ec: &mut EvalContext, _args: &[GcRef]) -> Result<GcRef, String> {
+    // (pop-port!)
+    *ec.depth -= 1;
+    let port_kind = ec.port_stack.pop();
+    match port_kind {
+        Some(port_kind) => {
+            let port = new_port(&mut ec.heap, port_kind);
+            Ok(port)
+        }
+        None => Err("Port Stack is empty".to_string()),
+    }
 }
 
 #[cfg(test)]
@@ -120,5 +155,9 @@ macro_rules! register_builtin_family {
 }
 
 pub fn register_fileio_builtins(heap: &mut GcHeap, env: &mut crate::env::Environment) {
-    register_builtin_family!(heap, env, "open-input-file" => open_input_file_builtin,);
+    register_builtin_family!(heap, env,
+        "open-input-file" => open_input_file_builtin,
+        "push-port!" => push_port,
+        "pop-port!" => pop_port,
+    );
 }
