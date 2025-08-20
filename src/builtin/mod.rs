@@ -1,4 +1,5 @@
 pub mod debug;
+pub mod display;
 pub mod fileio;
 pub mod list;
 pub mod number;
@@ -29,61 +30,6 @@ macro_rules! register_builtin_family {
 // ============================================================================
 // BUILTIN FUNCTIONS
 // ============================================================================
-
-pub fn write(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() < 1 || args.len() > 2 {
-        return Err("display: expected 1 or 2 arguments".to_string());
-    }
-
-    // Extract the SchemeValue reference in its own block to shorten the borrow
-    let s = print_scheme_value(&args[0]);
-
-    if args.len() == 2 {
-        print!("{}", s);
-        use std::io::Write;
-        std::io::stdout().flush().unwrap();
-    } else {
-        print!("{}", s);
-        use std::io::Write;
-        std::io::stdout().flush().unwrap();
-    }
-
-    Ok(ec.heap.nil_s())
-}
-
-pub fn display(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() < 1 || args.len() > 2 {
-        return Err("display: expected 1 or 2 arguments".to_string());
-    }
-
-    // Extract the SchemeValue reference in its own block to shorten the borrow
-    let s = display_scheme_value(&args[0]);
-
-    if args.len() == 2 {
-        print!("{}", s);
-        use std::io::Write;
-        std::io::stdout().flush().unwrap();
-    } else {
-        print!("{}", s);
-        use std::io::Write;
-        std::io::stdout().flush().unwrap();
-    }
-
-    Ok(ec.heap.nil_s())
-}
-
-pub fn newline(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() > 1 {
-        return Err("newline: expected 0 or 1 arguments".to_string());
-    }
-
-    // For now, just print a newline to stdout
-    // TODO: In a full implementation, we'd write to the specified port
-    println!();
-
-    // Return undefined (we'll use nil for now)
-    Ok(get_nil(ec.heap))
-}
 
 /// Builtin function: (exit)
 ///
@@ -160,6 +106,7 @@ fn eval_string(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
 /// Register all builtin functions in the environment
 pub fn register_builtins(heap: &mut GcHeap, env: &mut crate::env::Environment) {
     // Register builtins using the macro for cleaner syntax
+    display::register_display_builtins(heap, env);
     list::register_list_builtins(heap, env);
     fileio::register_fileio_builtins(heap, env);
     number::register_number_builtins(heap, env);
@@ -168,9 +115,6 @@ pub fn register_builtins(heap: &mut GcHeap, env: &mut crate::env::Environment) {
     vector::register_vector_builtins(heap, env);
     register_builtin_family!(heap, env,
         "help" => help,
-        "write" => write,
-        "display" => display,
-        "newline" => newline,
         "exit" => exit,
         "eval-string" => eval_string,
     );
