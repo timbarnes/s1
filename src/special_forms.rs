@@ -1,16 +1,20 @@
 /// special_forms.rs
 /// Definitions of special forms implemented internally
 ///
+/// Special forms are given the full expression, including the name of the form.
+/// This is required for lambda and macro differentiation.
+///
 use crate::cek::{
-    CEKState, eval_main, insert_after_test, insert_bind, insert_cond, insert_eval, insert_value,
+    CEKState, CondClause, eval_main, insert_bind, insert_cond, insert_eval, insert_if, insert_value,
 };
 use crate::eval::{EvalContext, expect_at_least_n_args, expect_n_args, expect_symbol};
 use crate::gc::{
-    GcHeap, GcRef, SchemeValue, car, cdr, cons, get_nil, list_from_vec, list_to_vec, new_float,
-    new_macro, new_port, new_special_form,
+    GcHeap, GcRef, SchemeValue, car, cdr, cons, get_nil, list_from_vec, list_to_vec, matches_sym,
+    new_float, new_macro, new_special_form,
 };
 use crate::gc_value;
 use crate::macros::expand_macro;
+//use crate::printer::print_scheme_value;
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -235,7 +239,7 @@ pub fn define_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Res
 pub fn if_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
     *evaluator.depth -= 1;
     let args = expect_at_least_n_args(&evaluator.heap, expr, 2)?;
-    insert_after_test(state, args[2], args[3]);
+    insert_if(state, args[2], args[3]);
     insert_eval(state, args[1], false);
     Ok(())
 }
@@ -243,52 +247,47 @@ pub fn if_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> 
 /// (cond (test1 expr) [(test 2...)] [(else expr)])
 pub fn cond_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
     *ec.depth -= 1;
-    let args = expect_at_least_n_args(&ec.heap, expr, 2)?;
+    let mut args = expect_at_least_n_args(&ec.heap, expr, 2)?;
+    args = args.into_iter().skip(1).collect();
+    args.reverse();
 
     let mut clauses = Vec::new();
-    let mut test_val;
-    let mut remaining_val;
-    let mut arrow_val;
-    for clause in args {
-        let (test, rest) = match gc_value!(clause) {
-            SchemeValue::Pair(car, cdr) => (car, cdr),
-            _ => return Err("cond: clause is not a list".to_string()),
-        };
-
-        let exprs = list_to_vec(ec.heap, *rest)?;
-
-        if crate::gc::eq(ec.heap, *test, ec.heap.intern_symbol("else")) {
-            if clauses.len() > 0
-                && clauses
-                    .iter()
-                    .any(|(t, _, _)| crate::gc::eq(ec.heap, *t, ec.heap.intern_symbol("else")))
-            {
-                return Err("cond: 'else' must be last".to_string());
-            }
+    for clause in args.iter() { 
+        let parts = list_to_vec(ec.heap, *clause)?;
+        if parts.is_empty() {
+            return Err("cond: clause cannot be empty".to_string());
         }
-        // Wrap multi-expression bodies in (begin …)
-        let body_expr = if exprs.is_empty() {
-            ec.heap.nil_s()
-        } else {
-            wrap_body_in_begin(exprs, &mut ec.heap)
-        };
 
-        // Handle "=>" arrow clauses
-        let (body_opt, arrow) = if let SchemeValue::Pair(arrow, tail) = gc_value!(body_expr) {
-            // `(test => proc)`
-            (None, Some(arrow))
+        if matches_sym(parts[0], "else") {
+            let body = if parts.len() == 1 {
+                None
+            } else {
+                Some(wrap_body_in_begin(parts[1..].to_vec(), ec.heap))
+            };
+            clauses.push(CondClause::Normal {
+                test: ec.heap.true_s(),
+                body,
+            });
+        } else if parts.len() >= 2 && matches_sym(parts[1], "=>") {
+            clauses.push(CondClause::Arrow {
+                test: parts[0],
+                arrow_proc: parts[2],
+            });
         } else {
-            (Some(body_expr), None)
-        };
-
-        clauses.push((*test, body_opt, arrow));
-        test_val = test;
-        remaining_val = clauses;
-        arrow_val = arrow;
+            let body = if parts.len() == 1 {
+                Some(parts[0])
+            } else {
+                Some(wrap_body_in_begin(parts[1..].to_vec(), ec.heap))
+            };
+            clauses.push(CondClause::Normal {
+                test: parts[0],
+                body,
+            });
+        }
     }
 
-    insert_cond(state, Some(*test_val), remaining_val, arrow_val);
-    Ok(())
+insert_cond(state, clauses);
+Ok(())
 }
 
 /// let (basic version, without labels)
@@ -399,7 +398,7 @@ fn with_timer_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Res
 /// Utility functions
 ///
 
-fn wrap_body_in_begin(body_exprs: Vec<GcRef>, heap: &mut GcHeap) -> GcRef {
+pub fn wrap_body_in_begin(body_exprs: Vec<GcRef>, heap: &mut GcHeap) -> GcRef {
     if body_exprs.len() == 1 {
         body_exprs[0]
     } else {

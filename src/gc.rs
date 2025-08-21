@@ -185,6 +185,20 @@ pub fn equal(heap: &GcHeap, a: GcRef, b: GcRef) -> bool {
     }
 }
 
+pub fn matches_sym(symbol: GcRef, name: &str) -> bool {
+    match gc_value!(symbol) {
+        SchemeValue::Symbol(s_name) => s_name == name,
+        _ => false,
+    }
+}
+
+pub fn is_false(value: GcRef) -> bool {
+    match gc_value!(value) {
+        SchemeValue::Bool(b) => !b,
+        _ => false,
+    }
+}
+
 // Manual Debug implementation for SchemeValueSimple
 // impl std::fmt::Debug for SchemeValue {
 //     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

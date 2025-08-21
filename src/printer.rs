@@ -76,6 +76,7 @@ pub fn print_scheme_value(obj: &GcRef) -> String {
             Callable::Closure { params, body, .. } => print_callable("Closure", params, *body),
             Callable::Macro { params, body, .. } => print_callable("Macro", params, *body),
         },
+        Port(port) => format!("Port({:?})", port),
         _ => format!("print_scheme_value: unprintable."),
     }
 }

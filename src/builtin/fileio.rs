@@ -74,7 +74,7 @@ pub fn push_port(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> 
     if args.len() != 1 {
         return Err("push_port!: expected exactly 1 argument".to_string());
     }
-    let port_kind = port_kind_from_scheme_port(ec, args[1]);
+    let port_kind = port_kind_from_scheme_port(ec, args[0]);
     ec.port_stack.push(port_kind);
     Ok(ec.heap.nil_s())
 }

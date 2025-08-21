@@ -3,11 +3,9 @@
 use crate::env::EnvRef;
 use crate::eval::{EvalContext, bind_params, eval_macro};
 use crate::gc::SchemeValue::*;
-use crate::gc::{Callable, GcRef, cons, list_to_vec};
+use crate::gc::{Callable, GcRef, cons, is_false, list_to_vec};
 use crate::gc_value;
 use crate::printer::print_scheme_value;
-//use std::cell::RefCell;
-//use std::rc::Rc;
 
 #[derive(Clone)]
 pub enum Kont {
@@ -34,7 +32,7 @@ pub enum Kont {
         original_call: GcRef, // whole form: (op . args)
         next: Box<Kont>,
     },
-    AfterTest {
+    If {
         // processes if
         then_branch: GcRef,
         else_branch: GcRef,
@@ -43,9 +41,11 @@ pub enum Kont {
     },
     Cond {
         // processes cond
-        remaining: Vec<GcRef>,
-        current: Option<GcRef>,
-        arrow: Option<GcRef>,
+        remaining: Vec<CondClause>,
+        next: Box<Kont>,
+    },
+    CondClause {
+        clause: CondClause,
         next: Box<Kont>,
     },
     Seq {
@@ -118,7 +118,7 @@ impl std::fmt::Debug for Kont {
                     next
                 )
             }
-            Kont::AfterTest {
+            Kont::If {
                 then_branch,
                 else_branch,
                 next,
@@ -131,27 +131,50 @@ impl std::fmt::Debug for Kont {
                     next
                 )
             }
-            Kont::Cond {
-                remaining,
-                current,
-                arrow,
-                next,
-            } => {
+            Kont::Cond { remaining, next } => {
                 write!(
                     f,
-                    "Cond {{ remaining: {:?}, current: {:?}, arrow: {:?}, next: {:?} }}",
-                    remaining, current, arrow, next
+                    "Cond {{ remaining: {}, next: {:?} }}",
+                    remaining.len(),
+                    next
                 )
+            }
+            Kont::CondClause { clause, next } => {
+                match clause {
+                    CondClause::Normal { test, body} => {
+                        match body {
+                            Some(body) => {
+                                write!(f, "CondClause {{ clause: Normal(test:{}, body:{}), next: {:?} }}", 
+                                print_scheme_value(test), print_scheme_value(body), next)
+                            }
+                            None => {
+                                write!(f, "CondClause {{ clause: Normal(test:{}, body:None), next: {:?} }}", 
+                                print_scheme_value(test), next)
+                            }
+                        }
+                    }
+                    CondClause::Arrow { test, arrow_proc } => {
+                        write!(f, "CondClause {{ clause: Arrow(test={}, proc={}), next: {:?} }}", 
+                               print_scheme_value(test), print_scheme_value(arrow_proc), next)
+                    }
+                }
             }
             _ => write!(f, "Unknown continuation"),
         }
     }
 }
 
+#[derive(Clone)]
+pub enum CondClause {
+    Normal { test: GcRef, body: Option<GcRef> },
+    Arrow { test: GcRef, arrow_proc: GcRef },
+}
+
 enum Control {
     Expr(GcRef),  // Unevaluated expression
     Value(GcRef), // Fully evaluated result
 }
+
 pub struct CEKState {
     control: Control, // Current expression
     env: EnvRef,      // Current environment (linked frame or hashmap)
@@ -194,35 +217,28 @@ pub fn insert_value(state: &mut CEKState, expr: GcRef) {
 ///
 pub fn insert_bind(state: &mut CEKState, sym: GcRef) {
     // clone the current continuation and link it under the new Bind
-    let current_cont = state.kont.clone();
+    let prev = std::mem::replace(&mut state.kont, Kont::Halt);
     state.kont = Kont::Bind {
         symbol: sym,
-        next: Box::new(current_cont),
+        next: Box::new(prev),
     };
     //eprintln!("bind_insert {}", frame_debug_short(&state.kont));
 }
 
-pub fn insert_cond(
-    state: &mut CEKState,
-    current: Option<GcRef>,
-    remaining: Vec<GcRef>,
-    arrow: Option<GcRef>,
-) {
-    let current_cont = state.kont.clone();
+pub fn insert_cond(state: &mut CEKState, remaining: Vec<CondClause>) {
+    let prev = std::mem::replace(&mut state.kont, Kont::Halt);
     state.kont = Kont::Cond {
-        current,
         remaining,
-        arrow,
-        next: Box::new(current_cont),
+        next: Box::new(prev),
     };
 }
 
-pub fn insert_after_test(state: &mut CEKState, then_branch: GcRef, else_branch: GcRef) {
-    let current_cont = std::mem::replace(&mut state.kont, Kont::Halt);
-    state.kont = Kont::AfterTest {
+pub fn insert_if(state: &mut CEKState, then_branch: GcRef, else_branch: GcRef) {
+    let prev = std::mem::replace(&mut state.kont, Kont::Halt);
+    state.kont = Kont::If {
         then_branch,
         else_branch,
-        next: Box::new(current_cont),
+        next: Box::new(prev),
     };
 }
 
@@ -366,7 +382,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                     panic!("Kont::Bind reached but control is not a Value");
                 }
             }
-            Kont::AfterTest {
+            Kont::If {
                 then_branch,
                 else_branch,
                 next,
@@ -397,50 +413,105 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                     _ => panic!("Kont::AfterTest reached but control is not a value"),
                 }
             }
-            Kont::Cond {
-                remaining,
-                current,
-                arrow,
-                next,
-            } => {
-                let test_val = match &state.control {
-                    Control::Value(v) => *v,
-                    _ => panic!("AfterCond reached but control is not Value"),
+            Kont::Cond { .. } => {
+                match std::mem::replace(&mut state.kont, Kont::Halt) {
+                    Kont::Cond { mut remaining, next } => {
+                        if let Some(clause) = remaining.pop() {
+                            state.kont = Kont::Cond { remaining, next };
+                            let test_expr = match &clause {
+                                CondClause::Normal { test, .. } => test.clone(),
+                                CondClause::Arrow { test, .. } => test.clone(),
+                            };
+                            // Evaluate the test
+                            state.control = Control::Expr(test_expr);
+                            // Push a CondClause frame whose `next` points to the Cond we just installed.
+                            //    We grab the Cond frame we just installed by replacing state.kont with Halt (cheap).
+                            let cond_frame = std::mem::replace(&mut state.kont, Kont::Halt);
+                            state.kont = Kont::CondClause {
+                                clause,                  // move the owned clause here
+                                next: Box::new(cond_frame),
+                            };
+                            Ok(())
+                        } else {
+                            // no more clauses: return false and restore the continuation after Cond
+                            state.control = Control::Value(ec.heap.false_s());
+                            state.kont = *next; // move inner Kont out of the Box
+                            Ok(())
+                        }
+                    }
+                    other => {
+                        // Put it back and report an internal error (shouldn't happen).
+                        state.kont = other;
+                        Err("internal error: expected Kont::Cond".to_string())
+                    }
+                }
+            }
+
+            Kont::CondClause { .. } => {
+                // Move the entire CondClause frame out of state.kont first
+                let (clause, next_box) = match std::mem::replace(&mut state.kont, Kont::Halt) {
+                    Kont::CondClause { clause, next } => (clause, next),
+                    _ => return Err("internal error: expected CondClause".to_string()),
                 };
 
-                if test_val == ec.heap.false_s() {
-                    // Test failed: move to next clause
-                    if let Some(next_clause) = remaining.pop() {
-                        state.control = Control::Expr(next_clause);
-                        // Update continuation with new remaining clauses
-                        state.kont = Kont::Cond {
-                            remaining: remaining.clone(),
-                            current: None,
-                            arrow: None,
-                            next: next.clone(),
-                        };
-                        Ok(())
-                    } else {
-                        // No more clauses: return unspecified or #f
-                        state.control = Control::Value(ec.heap.false_s());
-                        state.kont = *next.clone();
-                        Ok(())
+                // Extract the value of the test
+                let test_value = match state.control {
+                    Control::Value(v) => v,
+                    Control::Expr(_) => {
+                        return Err("CondClause reached with unevaluated test".to_string());
                     }
-                } else if let Some(arrow) = arrow {
-                    // Test passed with arrow: call arrow function with test value
-                    let mut call = cons(test_val, ec.heap.nil_s(), ec.heap)?;
-                    call = cons(*arrow, call, ec.heap)?;
-                    state.control = Control::Expr(call);
-                    state.kont = *next.clone(); // continuation after cond
-                    Ok(())
-                } else if let Some(body) = current {
-                    // Test passed without arrow: evaluate body normally
-                    state.control = Control::Expr(*body);
-                    state.kont = *next.clone();
-                    Ok(())
-                } else {
-                    panic!("AfterCond reached but no body or arrow function");
+                };
+
+                match clause {
+                    CondClause::Normal { body, .. } => {
+                        if !is_false(test_value) {
+                            if let Some(body_expr) = body {
+                                // Chain two nexts: CondClause.next -> Cond frame -> rest
+                                if let Kont::Cond { next: cond_next, .. } = *next_box {
+                                    state.kont = *cond_next;  // skip Cond frame
+                                    insert_eval(state, body_expr, false);
+                                } else {
+                                    return Err("expected Cond frame after CondClause".to_string());
+                                }
+                            } else {
+                                // No body: just return test_value
+                                if let Kont::Cond { next: cond_next, .. } = *next_box {
+                                    state.kont = *cond_next;  // skip Cond frame
+                                    state.control = Control::Value(test_value);
+                                } else {
+                                    return Err("expected Cond frame after CondClause".to_string());
+                                }
+                            }
+                        } else {
+                            // Test failed: keep Cond frame to continue with remaining clauses
+                            state.kont = *next_box;
+                        }
+                    }
+
+                    CondClause::Arrow { test: _, arrow_proc } => {
+                        if !is_false(test_value) {
+                            // Chain two nexts: CondClause.next -> Cond frame -> rest
+                            let rest_kont = if let Kont::Cond { next: cond_next, .. } = *next_box {
+                                *cond_next  // skip Cond frame
+                            } else {
+                                return Err("expected Cond frame after CondClause".to_string());
+                            };
+
+                            state.kont = rest_kont;
+
+                            // Build (arrow_proc test_value) for evaluation
+                            let mut call_expr = cons(test_value, ec.heap.nil_s(), ec.heap)?;
+                            call_expr = cons(arrow_proc, call_expr, ec.heap)?;
+
+                            insert_eval(state, call_expr, false);
+                        } else {
+                            // Test failed: continue with remaining Cond clauses
+                            state.kont = *next_box;
+                        }
+                    }
                 }
+
+                Ok(())
             }
             // Other continuations do nothing here
             _ => Ok(()),
@@ -520,8 +591,11 @@ fn apply_special_direct(
     ec: &mut EvalContext,
     state: &mut CEKState,
 ) -> Result<(), String> {
+    //println!("apply_special_direct - expr: {}", print_scheme_value(&expr));
+    dump("apply_special_direct", &state);
     let op_sym = crate::gc::car(ec.heap, expr)?;
     let op_val = ec.env.get_symbol(op_sym).ok_or("unbound special form")?;
+    //println!("op_val: {}", print_scheme_value(&op_val));
     if let Callable(Callable::SpecialForm { func, .. }) = gc_value!(op_val) {
         func(expr, ec, state) // handler mutates state; returns Ok(()) immediately
     } else {
@@ -532,7 +606,7 @@ fn apply_special_direct(
 /// Process SpecialForm and Macro applications. Argument evaluation is deferred to the callee.
 ///
 fn apply_special(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Result<(), String> {
-    dump("     apply_special", &state);
+    //dump("     apply_special", &state);
     if let Kont::ApplySpecial {
         proc,
         original_call,
@@ -622,7 +696,7 @@ fn apply_proc(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Result
 /// Dump a summary of the CEK machine state
 ///
 fn dump(loc: &str, state: &CEKState) {
-    if true {
+    if false {
         match &state.control {
             Control::Expr(obj) => {
                 eprintln!(
@@ -683,7 +757,7 @@ fn frame_debug_short(frame: &Kont) -> String {
                 next
             )
         }
-        Kont::AfterTest {
+        Kont::If {
             then_branch,
             else_branch,
             next,
