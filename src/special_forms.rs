@@ -5,7 +5,8 @@
 /// This is required for lambda and macro differentiation.
 ///
 use crate::cek::{
-    CEKState, CondClause, eval_main, insert_bind, insert_cond, insert_eval, insert_if, insert_value,
+    CEKState, CondClause, eval_main, insert_bind, insert_cond, insert_eval, insert_if, insert_seq, 
+    insert_value,
 };
 use crate::eval::{EvalContext, expect_at_least_n_args, expect_n_args, expect_symbol};
 use crate::gc::{
@@ -216,11 +217,18 @@ fn quote_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(
 fn begin_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
     // (begin expr1 expr2 ... exprN) => evaluate each in sequence, return last
     *ec.depth -= 1;
-    let argvec = expect_at_least_n_args(&ec.heap, expr, 2)?;
-    for arg in argvec[..argvec.len() - 1].iter() {
-        insert_eval(state, *arg, false);
+    let mut argvec = expect_at_least_n_args(&ec.heap, expr, 2)?;
+    eprintln!("begin_sf: args: {:?}", argvec);
+    match argvec.len() {
+        0 => return Err("begin: no arguments provided".to_string()),
+        1 => insert_value(state, ec.heap.false_s()),
+        2 => insert_eval(state, argvec[1], true),
+        _ => {
+            // If there are more than two arguments, evaluate the sequence.
+            argvec = argvec[1..].to_vec();
+            insert_seq(state, argvec, false);
+        }
     }
-    insert_eval(state, *argvec.last().unwrap(), true);
     Ok(())
 }
 

@@ -204,6 +204,7 @@ pub fn insert_eval(state: &mut CEKState, expr: GcRef, replace_next: bool) {
     // and set EvalArg.next = Box::new(Kont::Halt); otherwise leave state.kont as-is.
     state.tail = replace_next;
     state.control = Control::Expr(expr);
+    dump(" insert_eval", &state);
 }
 
 /// Return a value from a special form without evaluation.
@@ -238,6 +239,17 @@ pub fn insert_if(state: &mut CEKState, then_branch: GcRef, else_branch: GcRef) {
     state.kont = Kont::If {
         then_branch,
         else_branch,
+        next: Box::new(prev),
+    };
+}
+
+pub fn insert_seq(state: &mut CEKState, mut exprs: Vec<GcRef>, tail: bool) {
+    // exprs has length ≥ 2
+    exprs.reverse();
+    let prev = std::mem::replace(&mut state.kont, Kont::Halt);
+    state.kont = Kont::Seq {
+        rest: exprs,
+        was_tail: tail,
         next: Box::new(prev),
     };
 }
@@ -447,70 +459,21 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                 }
             }
 
-            Kont::CondClause { .. } => {
-                // Move the entire CondClause frame out of state.kont first
-                let (clause, next_box) = match std::mem::replace(&mut state.kont, Kont::Halt) {
-                    Kont::CondClause { clause, next } => (clause, next),
-                    _ => return Err("internal error: expected CondClause".to_string()),
-                };
+            Kont::Seq { rest, was_tail, next } => {
+                // Pop the next expression from the sequence
+                let next_expr = rest.pop().unwrap(); // safe: Seq always has >=2 exprs
 
-                // Extract the value of the test
-                let test_value = match state.control {
-                    Control::Value(v) => v,
-                    Control::Expr(_) => {
-                        return Err("CondClause reached with unevaluated test".to_string());
-                    }
-                };
+                state.control = Control::Expr(next_expr);
+                
+                // Determine if this is the last expression
+                if rest.is_empty() {
+                    // Last expression: mark tail if needed and drop the Seq frame
+                    state.tail = *was_tail;
 
-                match clause {
-                    CondClause::Normal { body, .. } => {
-                        if !is_false(test_value) {
-                            if let Some(body_expr) = body {
-                                // Chain two nexts: CondClause.next -> Cond frame -> rest
-                                if let Kont::Cond { next: cond_next, .. } = *next_box {
-                                    state.kont = *cond_next;  // skip Cond frame
-                                    insert_eval(state, body_expr, false);
-                                } else {
-                                    return Err("expected Cond frame after CondClause".to_string());
-                                }
-                            } else {
-                                // No body: just return test_value
-                                if let Kont::Cond { next: cond_next, .. } = *next_box {
-                                    state.kont = *cond_next;  // skip Cond frame
-                                    state.control = Control::Value(test_value);
-                                } else {
-                                    return Err("expected Cond frame after CondClause".to_string());
-                                }
-                            }
-                        } else {
-                            // Test failed: keep Cond frame to continue with remaining clauses
-                            state.kont = *next_box;
-                        }
-                    }
-
-                    CondClause::Arrow { test: _, arrow_proc } => {
-                        if !is_false(test_value) {
-                            // Chain two nexts: CondClause.next -> Cond frame -> rest
-                            let rest_kont = if let Kont::Cond { next: cond_next, .. } = *next_box {
-                                *cond_next  // skip Cond frame
-                            } else {
-                                return Err("expected Cond frame after CondClause".to_string());
-                            };
-
-                            state.kont = rest_kont;
-
-                            // Build (arrow_proc test_value) for evaluation
-                            let mut call_expr = cons(test_value, ec.heap.nil_s(), ec.heap)?;
-                            call_expr = cons(arrow_proc, call_expr, ec.heap)?;
-
-                            insert_eval(state, call_expr, false);
-                        } else {
-                            // Test failed: continue with remaining Cond clauses
-                            state.kont = *next_box;
-                        }
-                    }
+                    // Move the continuation out of the Box safely
+                    let next_cont = std::mem::replace(next, Box::new(Kont::Halt));
+                    state.kont = *next_cont;
                 }
-
                 Ok(())
             }
             // Other continuations do nothing here
