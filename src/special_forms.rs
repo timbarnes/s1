@@ -218,7 +218,7 @@ fn begin_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(
     // (begin expr1 expr2 ... exprN) => evaluate each in sequence, return last
     *ec.depth -= 1;
     let mut argvec = expect_at_least_n_args(&ec.heap, expr, 2)?;
-    eprintln!("begin_sf: args: {:?}", argvec);
+
     match argvec.len() {
         0 => return Err("begin: no arguments provided".to_string()),
         1 => insert_value(state, ec.heap.false_s()),
@@ -384,12 +384,14 @@ pub fn set_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result
     *ec.depth -= 1;
     let args = expect_n_args(&ec.heap, expr, 3)?;
     let sym = expect_symbol(&ec.heap, &args[1])?;
-    if ec.env.has_local(sym) {
-        insert_bind(state, sym);
-        insert_eval(state, args[2], false);
-        Ok(())
-    } else {
-        Err("set!: symbol not found".to_string())
+    
+    match &ec.env.get_symbol(sym) {
+        Some(_) => {
+            insert_bind(state, sym);
+            insert_eval(state, args[2], false);
+            Ok(())
+        }
+        None => Err("set!: symbol not found".to_string())
     }
 }
 
