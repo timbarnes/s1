@@ -30,6 +30,7 @@ macro_rules! gc_value {
 }
 
 use crate::cek::CEKState;
+use crate::env::EnvRef;
 use crate::eval::EvalContext;
 use crate::io::PortKind;
 use num_bigint::BigInt;
@@ -74,6 +75,7 @@ pub enum SchemeValue {
     Nil,
     TailCallScheduled,
     Port(PortKind),
+    Env(EnvRef)
     // Extend with more types as needed.
 }
 

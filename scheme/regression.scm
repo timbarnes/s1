@@ -228,13 +228,13 @@
 (test-equal 8 (add5 3) "Closure application")
 (define fact (lambda (n) (if (= n 0) 1 (* n (fact (- n 1))))))
 (test-equal 720 (fact 6) "Factorial test")
-; (define fac-acc (lambda (n)
-;     (define f (lambda (n acc)
-;         (if (= n 0)
-;             acc
-;             (f (- n 1) (* acc n)))))
-;     (f n 1)))
-;(test-equal 720 (fac-acc 6) "Factorial test with nested define and accumulator")
+(define fac-acc (lambda (n)
+    (define f (lambda (n acc)
+        (if (= n 0)
+            acc
+            (f (- n 1) (* acc n)))))
+    (f n 1)))
+test-equal 720 (fac-acc 6) "Factorial test with nested define and accumulator")
 
 (display "          === Testing List Accessors ===")
 (newline)

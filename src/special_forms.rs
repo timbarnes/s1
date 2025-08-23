@@ -6,7 +6,7 @@
 ///
 use crate::cek::{
     AndOrKind, CEKState, CondClause, eval_main, insert_and_or, insert_bind, insert_cond, 
-    insert_eval, insert_if, insert_seq, insert_value,
+    insert_eval, insert_eval_eval, insert_if, insert_seq, insert_value,
 };
 use crate::eval::{EvalContext, expect_at_least_n_args, expect_n_args, expect_symbol};
 use crate::gc::{
@@ -180,9 +180,12 @@ fn create_lambda_or_macro(
 
 fn eval_eval_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
     *ec.depth -= 1;
-    let args = expect_n_args(&ec.heap, expr, 2)?;
-    insert_eval(state, args[1], true);
-    insert_eval(state, args[1], true);
+    let argvec = expect_n_args(&ec.heap, expr, 2)?;
+    match argvec.len() {
+        2 => insert_eval_eval(state, argvec[1], None, false),
+        3 => insert_eval_eval(state, argvec[1],Some(argvec[2]), false),
+        _ => return Err("eval: requires 1 or 2 arguments".to_string()),
+    }
     Ok(())
 }
 
