@@ -5,8 +5,8 @@
 /// This is required for lambda and macro differentiation.
 ///
 use crate::cek::{
-    CEKState, CondClause, eval_main, insert_bind, insert_cond, insert_eval, insert_if, insert_seq, 
-    insert_value,
+    AndOrKind, CEKState, CondClause, eval_main, insert_and_or, insert_bind, insert_cond, 
+    insert_eval, insert_if, insert_seq, insert_value,
 };
 use crate::eval::{EvalContext, expect_at_least_n_args, expect_n_args, expect_symbol};
 use crate::gc::{
@@ -15,7 +15,7 @@ use crate::gc::{
 };
 use crate::gc_value;
 use crate::macros::expand_macro;
-//use crate::printer::print_scheme_value;
+use crate::printer::print_scheme_value;
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -338,20 +338,20 @@ fn expand_sf(expr: GcRef, ec: &mut EvalContext, _state: &mut CEKState) -> Result
 
 /// (and expr1 expr2 ... exprN)
 /// Stops on first false value
-pub fn and_sf(expr: GcRef, ec: &mut EvalContext, _state: &mut CEKState) -> Result<(), String> {
+pub fn and_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
     *ec.depth -= 1;
     // (and expr1 expr2 ... exprN)
-    let exprs = expect_at_least_n_args(ec.heap, expr, 1)?;
+    let mut argvec = expect_at_least_n_args(&ec.heap, expr, 1)?;
 
-    // Returns true if no args
-    if exprs.len() == 1 {
-        return Ok(());
-    }
-    for e in exprs.into_iter().skip(1) {
-        let val = eval_main(e, ec).unwrap();
-        match &gc_value!(val) {
-            SchemeValue::Bool(false) => return Ok(()),
-            _ => continue,
+    match argvec.len() {
+        0 => return Err("and: no arguments provided".to_string()),
+        1 => insert_value(state, ec.heap.true_s()),
+        2 => insert_eval(state, argvec[1], true),
+        _ => {
+            // If there are more than two arguments, evaluate the sequence.
+            argvec = argvec[1..].to_vec();
+
+            insert_and_or(state, AndOrKind::And, argvec, false);
         }
     }
     Ok(())
@@ -359,23 +359,22 @@ pub fn and_sf(expr: GcRef, ec: &mut EvalContext, _state: &mut CEKState) -> Resul
 
 /// (or expr1 expr2 ... exprN)
 /// Stops on first true value
-pub fn or_sf(expr: GcRef, ec: &mut EvalContext, _state: &mut CEKState) -> Result<(), String> {
+pub fn or_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
     *ec.depth -= 1;
-    // (or expr1 expr2 ... exprN)
-    match ec.heap.get_value(expr) {
-        SchemeValue::Pair(_, _) => {
-            let exprs = list_to_vec(&ec.heap, expr)?;
-            for e in exprs.into_iter().skip(1) {
-                let val = eval_main(e, ec)?;
-                match &gc_value!(val) {
-                    SchemeValue::Bool(false) => continue,
-                    _ => return Ok(()),
-                }
-            }
-            Ok(())
+    // (and expr1 expr2 ... exprN)
+    let mut argvec = expect_at_least_n_args(&ec.heap, expr, 1)?;
+
+    match argvec.len() {
+        0 => return Err("or: no arguments provided".to_string()),
+        1 => insert_value(state, ec.heap.false_s()),
+        2 => insert_eval(state, argvec[1], true),
+        _ => {
+            // If there are more than two arguments, evaluate the sequence.
+            argvec = argvec[1..].to_vec();
+            insert_and_or(state, AndOrKind::Or, argvec, false);
         }
-        _ => Err("or: not a proper list".to_string()),
     }
+    Ok(())
 }
 
 /// (set! sym expr)

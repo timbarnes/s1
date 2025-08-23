@@ -53,6 +53,12 @@ pub enum Kont {
         was_tail: bool,
         next: Box<Kont>,
     },
+    AndOr {
+        kind: AndOrKind,
+        rest: Vec<GcRef>, // remaining expressions in the sequence (head first)
+        was_tail: bool,
+        next: Box<Kont>,
+    },
     Bind {
         // processes define
         symbol: GcRef, // body expression (or begin)
@@ -159,6 +165,24 @@ impl std::fmt::Debug for Kont {
                     }
                 }
             }
+            Kont::Seq { rest, was_tail, next } => {
+                write!(
+                    f,
+                    "Seq {{ rest: {:?}, was_tail: {}, next: {:?} }}",
+                    rest, was_tail, next
+                )
+            }
+            Kont::AndOr { kind, rest, was_tail, next } => {
+                let k = match kind {
+                    AndOrKind::And => "And",
+                    AndOrKind::Or => "Or",
+                };
+                write!(
+                    f,
+                    "Seq {{ kind: {}, rest: {:?}, was_tail: {}, next: {:?} }}",
+                    k, rest, was_tail, next
+                )
+            }
             _ => write!(f, "Unknown continuation"),
         }
     }
@@ -168,6 +192,12 @@ impl std::fmt::Debug for Kont {
 pub enum CondClause {
     Normal { test: GcRef, body: Option<GcRef> },
     Arrow { test: GcRef, arrow_proc: GcRef },
+}
+
+#[derive(Clone)]
+pub enum AndOrKind {
+    And,
+    Or,
 }
 
 enum Control {
@@ -248,6 +278,19 @@ pub fn insert_seq(state: &mut CEKState, mut exprs: Vec<GcRef>, tail: bool) {
     exprs.reverse();
     let prev = std::mem::replace(&mut state.kont, Kont::Halt);
     state.kont = Kont::Seq {
+        rest: exprs,
+        was_tail: tail,
+        next: Box::new(prev),
+    };
+}
+
+pub fn insert_and_or(state: &mut CEKState, kind: AndOrKind, mut exprs: Vec<GcRef>, tail: bool) {
+    // exprs has length ≥ 2
+    exprs.reverse();
+    let prev = std::mem::replace(&mut state.kont, Kont::Halt);
+    state.control = Control::Expr(exprs.pop().unwrap());
+    state.kont = Kont::AndOr {
+        kind,
         rest: exprs,
         was_tail: tail,
         next: Box::new(prev),
@@ -476,6 +519,32 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                 }
                 Ok(())
             }
+            Kont::AndOr { kind, rest, was_tail, next } => {
+
+                if let Control::Value(val) = &state.control {
+                    let short_circuit = match kind {
+                        AndOrKind::And => is_false(*val),   // false ⇒ stop early
+                        AndOrKind::Or  => !is_false(*val),  // truthy ⇒ stop early
+                    };
+
+                    if short_circuit || rest.is_empty() {
+                        // Done: this value is the result of the whole (and ...) / (or ...)
+                        state.tail = *was_tail;
+                        let next_cont = std::mem::replace(next, Box::new(Kont::Halt));
+                        state.kont = *next_cont;
+                        return Ok(());
+                    }
+                } else {
+                    unreachable!("AndOr should only see a Value here");
+                }
+
+                // Otherwise: evaluate the next expr in the rest
+                let next_expr = rest.pop().unwrap(); // safe if not empty
+                state.control = Control::Expr(next_expr);
+
+                Ok(())
+            }
+
             // Other continuations do nothing here
             _ => Ok(()),
         },
