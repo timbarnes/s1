@@ -231,7 +231,7 @@ pub fn eval_main(expr: GcRef, ec: &mut EvalContext) -> Result<GcRef, String> {
     let state = CEKState {
         control: Control::Expr(expr),
         kont: Kont::Halt,
-        env: ec.env.current_frame().clone(),
+        env: ec.env.current_frame(),
         tail: false,
     };
     dump("***eval_main***", &state);
@@ -383,14 +383,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
         }
 
         Control::Value(val) => match &mut state.kont {
-            Kont::EvalArg {
-                proc,
-                remaining,
-                evaluated,
-                original_call,
-                env: _,
-                next,
-            } => {
+            Kont::EvalArg { .. } => {
                 // Extract the entire EvalArg continuation first to avoid all cloning
                 let evalarg_kont = std::mem::replace(&mut state.kont, Kont::Halt);
                 if let Kont::EvalArg {
@@ -477,7 +470,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                     return Ok(());
                 }
             }
-            Kont::RestoreEnv { old_env, next, .. } => {
+            Kont::RestoreEnv { old_env, .. } => {
                 // Restore environment and continue
                 // restore EvalContext's active frame so subsequent lookups see parent's environment
                 ec.env.set_current_frame(old_env.clone());
@@ -493,7 +486,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                 state.control = Control::Value(*val);
                 return Ok(());
             }
-            Kont::Eval { expr, env, phase, next } => {
+            Kont::Eval { .. } => {
                 // Extract the entire Eval continuation first
                 let eval_kont = std::mem::replace(&mut state.kont, Kont::Halt);
                 match eval_kont {
@@ -540,11 +533,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                 }
             }
 
-            Kont::ApplySpecial {
-                proc,
-                original_call,
-                next,
-            } => {
+            Kont::ApplySpecial { .. } => {
                 // Extract continuation to avoid cloning
                 let applyspecial_kont = std::mem::replace(&mut state.kont, Kont::Halt);
                 if let Kont::ApplySpecial { proc, original_call, next } = applyspecial_kont {
@@ -560,7 +549,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                 }
                 Ok(())
             }
-            Kont::Bind { symbol, next } => {
+            Kont::Bind { symbol, .. } => {
                 if let Control::Value(val) = state.control {
                     state.env.borrow_mut().set_local(*symbol, val);
                     // For define, we typically leave the symbol as the value
@@ -579,10 +568,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                 }
             }
             Kont::If {
-                then_branch,
-                else_branch,
-                next,
-            } => {
+                then_branch, else_branch, .. } => {
                 // The test value is in state.control
                 match &state.control {
                     Control::Value(val) => {
@@ -636,11 +622,11 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                         if let Some(clause) = remaining.pop() {
                             state.kont = Kont::Cond { remaining, next };
                             let test_expr = match &clause {
-                                CondClause::Normal { test, .. } => test.clone(),
-                                CondClause::Arrow { test, .. } => test.clone(),
+                                CondClause::Normal { test, .. } => test,
+                                CondClause::Arrow { test, .. } => test,
                             };
                             // Evaluate the test
-                            state.control = Control::Expr(test_expr);
+                            state.control = Control::Expr(*test_expr);
                             // Push a CondClause frame whose `next` points to the Cond we just installed.
                             //    We grab the Cond frame we just installed by replacing state.kont with Halt (cheap).
                             let cond_frame = std::mem::replace(&mut state.kont, Kont::Halt);
@@ -938,7 +924,7 @@ fn apply_proc(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Result
                     } else {
                         // Normal (non-tail) call: push a RestoreEnv barrier.
                         state.kont = Kont::RestoreEnv {
-                            old_env: old_env.clone(),
+                            old_env: old_env,
                             next,
                         };
                         ec.env.set_current_frame(new_env.current_frame());
