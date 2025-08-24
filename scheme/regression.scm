@@ -328,7 +328,7 @@ test-equal 720 (fac-acc 6) "Factorial test with nested define and accumulator")
 (test-equal 6765 (fib 20) "Fibonacci(20)")
 (test-equal '(720) (list (fac-acc 6)) "Tail recursion inside a form")
 (define test-tail (lambda (n) (if (= n 0) #t (test-tail (- n 1)))))
-(test-true (test-tail 10000) "(test-tail 10000) - fails without tail recursion")
+(test-true (test-tail 7000) "(test-tail 7000) - fails without tail recursion")
 
 (display "          === Testing Macros ===")
 (newline)

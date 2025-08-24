@@ -391,56 +391,89 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                 env: _,
                 next,
             } => {
-                if proc.is_none() {
-                    // We just evaluated the operator slot (the car). Decide what to do
-                    // based on its kind.
-                    match ec.heap.get_value(*val) {
-                        Callable(Callable::SpecialForm { .. })
-                        | Callable(Callable::Macro { .. }) => {
-                            // Special forms/macros: short-circuit to ApplySpecial immediately.
-                            let frame = Kont::ApplySpecial {
-                                proc: *val,
-                                original_call: *original_call,
-                                next: next.clone(),
-                            };
-                            apply_special(state, ec, frame)?;
-                            return Ok(());
-                        }
-                        _ => {
-                            // Normal procedure. If there are no remaining args, apply now with zero args.
-                            *proc = Some(*val);
-                            if remaining.is_empty() {
-                                // zero-arg call -> directly transition to ApplyProc with empty args
-                                let frame = Kont::ApplyProc {
-                                    proc: proc.unwrap(),
-                                    evaluated_args: evaluated.clone(), // should be empty
-                                    next: next.clone(),
+                // Extract the entire EvalArg continuation first to avoid all cloning
+                let evalarg_kont = std::mem::replace(&mut state.kont, Kont::Halt);
+                if let Kont::EvalArg {
+                    mut proc,
+                    mut remaining,
+                    mut evaluated,
+                    original_call,
+                    env: _,
+                    next,
+                } = evalarg_kont {
+                    if proc.is_none() {
+                        // We just evaluated the operator slot (the car). Decide what to do
+                        // based on its kind.
+                        match ec.heap.get_value(*val) {
+                            Callable(Callable::SpecialForm { .. })
+                            | Callable(Callable::Macro { .. }) => {
+                                // Special forms/macros: short-circuit to ApplySpecial immediately.
+                                let frame = Kont::ApplySpecial {
+                                    proc: *val,
+                                    original_call,
+                                    next,
                                 };
-                                apply_proc(state, ec, frame)?;
-                                return Ok(());
-                            } else {
-                                // still have args to evaluate: evaluate next one
-                                if let Some(next_expr) = remaining.pop() {
-                                    state.control = Control::Expr(next_expr);
-                                }
+                                apply_special(state, ec, frame)?;
                                 return Ok(());
                             }
+                            _ => {
+                                // Normal procedure. If there are no remaining args, apply now with zero args.
+                                proc = Some(*val);
+                                if remaining.is_empty() {
+                                    // zero-arg call -> directly transition to ApplyProc with empty args
+                                    let frame = Kont::ApplyProc {
+                                        proc: proc.unwrap(),
+                                        evaluated_args: evaluated.clone(), // should be empty
+                                        next,
+                                    };
+                                    apply_proc(state, ec, frame)?;
+                                    return Ok(());
+                                } else {
+                                    // still have args to evaluate: evaluate next one
+                                    if let Some(next_expr) = remaining.pop() {
+                                        state.control = Control::Expr(next_expr);
+                                        // Put the modified EvalArg back
+                                        state.kont = Kont::EvalArg {
+                                            proc,
+                                            remaining,
+                                            evaluated,
+                                            original_call,
+                                            env: state.env.clone(),
+                                            next,
+                                        };
+                                    }
+                                    return Ok(());
+                                }
+                            }
                         }
+                    } else {
+                        // Already have a proc; the current value is an evaluated argument.
+                        evaluated.push(*val);
+                        if let Some(next_expr) = remaining.pop() {
+                            state.control = Control::Expr(next_expr);
+                            // Put the modified EvalArg back
+                            state.kont = Kont::EvalArg {
+                                proc,
+                                remaining,
+                                evaluated,
+                                original_call,
+                                env: state.env.clone(),
+                                next,
+                            };
+                        } else {
+                            // All args evaluated: go to apply with evaluated args
+                            let frame = Kont::ApplyProc {
+                                proc: proc.unwrap(),
+                                evaluated_args: evaluated.clone(),
+                                next,
+                            };
+                            apply_proc(state, ec, frame)?;
+                        }
+                        return Ok(());
                     }
                 } else {
-                    // Already have a proc; the current value is an evaluated argument.
-                    evaluated.push(*val);
-                    if let Some(next_expr) = remaining.pop() {
-                        state.control = Control::Expr(next_expr);
-                    } else {
-                        // All args evaluated: go to apply with evaluated args
-                        let frame = Kont::ApplyProc {
-                            proc: proc.unwrap(),
-                            evaluated_args: evaluated.clone(),
-                            next: next.clone(),
-                        };
-                        apply_proc(state, ec, frame)?;
-                    }
+                    // This should never happen, but if it does, put it back
+                    state.kont = evalarg_kont;
                     return Ok(());
                 }
             }
@@ -449,7 +482,14 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                 // restore EvalContext's active frame so subsequent lookups see parent's environment
                 ec.env.set_current_frame(old_env.clone());
                 state.env = old_env.clone();
-                state.kont = *next.clone();
+                // Extract continuation to avoid cloning
+                let restoreenv_kont = std::mem::replace(&mut state.kont, Kont::Halt);
+                if let Kont::RestoreEnv { old_env: _, next, .. } = restoreenv_kont {
+                    state.kont = *next;
+                } else {
+                    // This should never happen, but if it does, put it back
+                    state.kont = restoreenv_kont;
+                }
                 state.control = Control::Value(*val);
                 return Ok(());
             }
@@ -505,12 +545,19 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                 original_call,
                 next,
             } => {
-                let frame = Kont::ApplySpecial {
-                    proc: *proc,
-                    original_call: *original_call,
-                    next: Box::new(*next.clone()),
-                };
-                apply_special(state, ec, frame)?;
+                // Extract continuation to avoid cloning
+                let applyspecial_kont = std::mem::replace(&mut state.kont, Kont::Halt);
+                if let Kont::ApplySpecial { proc, original_call, next } = applyspecial_kont {
+                    let frame = Kont::ApplySpecial {
+                        proc,
+                        original_call,
+                        next: Box::new(*next),
+                    };
+                    apply_special(state, ec, frame)?;
+                } else {
+                    // This should never happen, but if it does, put it back
+                    state.kont = applyspecial_kont;
+                }
                 Ok(())
             }
             Kont::Bind { symbol, next } => {
@@ -518,8 +565,14 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                     state.env.borrow_mut().set_local(*symbol, val);
                     // For define, we typically leave the symbol as the value
                     state.control = Control::Value(*symbol);
-                    // Resume with whatever was waiting
-                    state.kont = *next.clone();
+                    // Extract continuation to avoid cloning
+                    let bind_kont = std::mem::replace(&mut state.kont, Kont::Halt);
+                    if let Kont::Bind { symbol: _, next } = bind_kont {
+                        state.kont = *next;
+                    } else {
+                        // This should never happen, but if it does, put it back
+                        state.kont = bind_kont;
+                    }
                     Ok(())
                 } else {
                     panic!("Kont::Bind reached but control is not a Value");
@@ -537,18 +590,39 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                             Bool(v) => {
                                 if *v {
                                     state.control = Control::Expr(*then_branch);
-                                    state.kont = *next.clone();
+                                    // Extract continuation to avoid cloning
+                                    let if_kont = std::mem::replace(&mut state.kont, Kont::Halt);
+                                    if let Kont::If { then_branch: _, else_branch: _, next } = if_kont {
+                                        state.kont = *next;
+                                    } else {
+                                        // This should never happen, but if it does, put it back
+                                        state.kont = if_kont;
+                                    }
                                     Ok(())
                                 } else {
                                     state.control = Control::Expr(*else_branch);
-                                    state.kont = *next.clone(); // next;
+                                    // Extract continuation to avoid cloning
+                                    let if_kont = std::mem::replace(&mut state.kont, Kont::Halt);
+                                    if let Kont::If { then_branch: _, else_branch: _, next } = if_kont {
+                                        state.kont = *next;
+                                    } else {
+                                        // This should never happen, but if it does, put it back
+                                        state.kont = if_kont;
+                                    }
                                     Ok(())
                                 }
                             }
                             _ => {
                                 // All non-Bool values are treated as true
                                 state.control = Control::Expr(*then_branch);
-                                state.kont = *next.clone(); // next;
+                                // Extract continuation to avoid cloning
+                                let if_kont = std::mem::replace(&mut state.kont, Kont::Halt);
+                                if let Kont::If { then_branch: _, else_branch: _, next } = if_kont {
+                                    state.kont = *next;
+                                } else {
+                                    // This should never happen, but if it does, put it back
+                                    state.kont = if_kont;
+                                }
                                 Ok(())
                             }
                         }
