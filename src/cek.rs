@@ -42,7 +42,6 @@ pub enum Kont {
         // processes if
         then_branch: GcRef,
         else_branch: GcRef,
-        //was_tail: bool,
         next: Box<Kont>,
     },
     Cond {
@@ -56,13 +55,11 @@ pub enum Kont {
     },
     Seq {
         rest: Vec<GcRef>, // remaining expressions in the sequence (head first)
-        was_tail: bool,
         next: Box<Kont>,
     },
     AndOr {
         kind: AndOrKind,
         rest: Vec<GcRef>, // remaining expressions in the sequence (head first)
-        was_tail: bool,
         next: Box<Kont>,
     },
     Bind {
@@ -171,22 +168,22 @@ impl std::fmt::Debug for Kont {
                     }
                 }
             }
-            Kont::Seq { rest, was_tail, next } => {
+            Kont::Seq { rest, next } => {
                 write!(
                     f,
-                    "Seq {{ rest: {:?}, was_tail: {}, next: {:?} }}",
-                    rest, was_tail, next
+                    "Seq {{ rest: {:?}, next: {:?} }}",
+                    rest, next
                 )
             }
-            Kont::AndOr { kind, rest, was_tail, next } => {
+            Kont::AndOr { kind, rest, next } => {
                 let k = match kind {
                     AndOrKind::And => "And",
                     AndOrKind::Or => "Or",
                 };
                 write!(
                     f,
-                    "Seq {{ kind: {}, rest: {:?}, was_tail: {}, next: {:?} }}",
-                    k, rest, was_tail, next
+                    "Seq {{ kind: {}, rest: {:?}, next: {:?} }}",
+                    k, rest, next
                 )
             }
             _ => write!(f, "Unknown continuation"),
@@ -315,18 +312,17 @@ pub fn insert_if(state: &mut CEKState, then_branch: GcRef, else_branch: GcRef) {
     };
 }
 
-pub fn insert_seq(state: &mut CEKState, mut exprs: Vec<GcRef>, tail: bool) {
+pub fn insert_seq(state: &mut CEKState, mut exprs: Vec<GcRef>) {
     // exprs has length ≥ 2
     exprs.reverse();
     let prev = std::mem::replace(&mut state.kont, Kont::Halt);
     state.kont = Kont::Seq {
         rest: exprs,
-        was_tail: tail,
         next: Box::new(prev),
     };
 }
 
-pub fn insert_and_or(state: &mut CEKState, kind: AndOrKind, mut exprs: Vec<GcRef>, tail: bool) {
+pub fn insert_and_or(state: &mut CEKState, kind: AndOrKind, mut exprs: Vec<GcRef>) {
     // exprs has length ≥ 2
     exprs.reverse();
     let prev = std::mem::replace(&mut state.kont, Kont::Halt);
@@ -334,7 +330,6 @@ pub fn insert_and_or(state: &mut CEKState, kind: AndOrKind, mut exprs: Vec<GcRef
     state.kont = Kont::AndOr {
         kind,
         rest: exprs,
-        was_tail: tail,
         next: Box::new(prev),
     };
 }
@@ -717,7 +712,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                 Ok(())
             }
 
-            Kont::Seq { rest, was_tail, next } => {
+            Kont::Seq { rest, next } => {
                 // Pop the next expression from the sequence
                 let next_expr = rest.pop().unwrap(); // safe: Seq always has >=2 exprs
 
@@ -726,7 +721,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                 // Determine if this is the last expression
                 if rest.is_empty() {
                     // Last expression: mark tail if needed and drop the Seq frame
-                    state.tail = *was_tail;
+                    state.tail = false;
 
                     // Move the continuation out of the Box safely
                     let next_cont = std::mem::replace(next, Box::new(Kont::Halt));
@@ -734,7 +729,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                 }
                 Ok(())
             }
-            Kont::AndOr { kind, rest, was_tail, next } => {
+            Kont::AndOr { kind, rest, next } => {
 
                 if let Control::Value(val) = &state.control {
                     let short_circuit = match kind {
@@ -744,7 +739,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
 
                     if short_circuit || rest.is_empty() {
                         // Done: this value is the result of the whole (and ...) / (or ...)
-                        state.tail = *was_tail;
+                        state.tail = false;
                         let next_cont = std::mem::replace(next, Box::new(Kont::Halt));
                         state.kont = *next_cont;
                         return Ok(());

@@ -229,7 +229,7 @@ fn begin_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(
         _ => {
             // If there are more than two arguments, evaluate the sequence.
             argvec = argvec[1..].to_vec();
-            insert_seq(state, argvec, false);
+            insert_seq(state, argvec);
         }
     }
     Ok(())
@@ -354,7 +354,7 @@ pub fn and_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result
             // If there are more than two arguments, evaluate the sequence.
             argvec = argvec[1..].to_vec();
 
-            insert_and_or(state, AndOrKind::And, argvec, false);
+            insert_and_or(state, AndOrKind::And, argvec);
         }
     }
     Ok(())
@@ -374,7 +374,7 @@ pub fn or_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<
         _ => {
             // If there are more than two arguments, evaluate the sequence.
             argvec = argvec[1..].to_vec();
-            insert_and_or(state, AndOrKind::Or, argvec, false);
+            insert_and_or(state, AndOrKind::Or, argvec);
         }
     }
     Ok(())
