@@ -13,9 +13,9 @@ use crate::gc::{
     GcHeap, GcRef, SchemeValue, car, cdr, cons, get_nil, list_from_vec, list_to_vec, matches_sym,
     new_float, new_macro, new_special_form,
 };
-use crate::gc_value;
+//use crate::gc_value;
 use crate::macros::expand_macro;
-use crate::printer::print_scheme_value;
+//use crate::printer::print_scheme_value;
 use std::collections::HashMap;
 use std::time::Instant;
 

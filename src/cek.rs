@@ -414,12 +414,14 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                                         evaluated_args: evaluated.clone(), // should be empty
                                         next,
                                     };
+                                    state.tail = true;
                                     apply_proc(state, ec, frame)?;
                                     return Ok(());
                                 } else {
                                     // still have args to evaluate: evaluate next one
                                     if let Some(next_expr) = remaining.pop() {
                                         state.control = Control::Expr(next_expr);
+                                        state.tail = false;
                                         // Put the modified EvalArg back
                                         state.kont = Kont::EvalArg {
                                             proc,
@@ -439,6 +441,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                         evaluated.push(*val);
                         if let Some(next_expr) = remaining.pop() {
                             state.control = Control::Expr(next_expr);
+                            state.tail = false;
                             // Put the modified EvalArg back
                             state.kont = Kont::EvalArg {
                                 proc,
@@ -466,20 +469,25 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                 }
             }
             Kont::RestoreEnv { old_env, .. } => {
-                // Restore environment and continue
-                // restore EvalContext's active frame so subsequent lookups see parent's environment
+                // Restore environment
                 ec.env.set_current_frame(old_env.clone());
                 state.env = old_env.clone();
-                // Extract continuation to avoid cloning
+
+                // Propagate the value
+                state.control = Control::Value(*val);
+
+                // Pop this frame unconditionally
                 let restoreenv_kont = std::mem::replace(&mut state.kont, Kont::Halt);
-                if let Kont::RestoreEnv { old_env: _, next, .. } = restoreenv_kont {
+                if let Kont::RestoreEnv { old_env: _, next } = restoreenv_kont {
                     state.kont = *next;
                 } else {
-                    // This should never happen, but if it does, put it back
-                    state.kont = restoreenv_kont;
+                    state.kont = restoreenv_kont; // safety fallback
                 }
-                state.control = Control::Value(*val);
-                return Ok(());
+
+                // Reset tail because restoring the environment is not a tail position
+                state.tail = false;
+
+                Ok(())
             }
             Kont::Eval { .. } => {
                 // Extract the entire Eval continuation first
@@ -527,7 +535,6 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                     }
                 }
             }
-
             Kont::ApplySpecial { .. } => {
                 // Extract continuation to avoid cloning
                 let applyspecial_kont = std::mem::replace(&mut state.kont, Kont::Halt);
@@ -537,6 +544,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                         original_call,
                         next: Box::new(*next),
                     };
+                    state.tail = false;
                     apply_special(state, ec, frame)?;
                 } else {
                     // This should never happen, but if it does, put it back
@@ -549,6 +557,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                     state.env.borrow_mut().set_local(*symbol, val);
                     // For define, we typically leave the symbol as the value
                     state.control = Control::Value(*symbol);
+                    state.tail = false;
                     // Extract continuation to avoid cloning
                     let bind_kont = std::mem::replace(&mut state.kont, Kont::Halt);
                     if let Kont::Bind { symbol: _, next } = bind_kont {
@@ -571,6 +580,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                             Bool(v) => {
                                 if *v {
                                     state.control = Control::Expr(*then_branch);
+                                    state.tail = true;
                                     // Extract continuation to avoid cloning
                                     let if_kont = std::mem::replace(&mut state.kont, Kont::Halt);
                                     if let Kont::If { then_branch: _, else_branch: _, next } = if_kont {
@@ -582,6 +592,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                                     Ok(())
                                 } else {
                                     state.control = Control::Expr(*else_branch);
+                                    state.tail = true;
                                     // Extract continuation to avoid cloning
                                     let if_kont = std::mem::replace(&mut state.kont, Kont::Halt);
                                     if let Kont::If { then_branch: _, else_branch: _, next } = if_kont {
@@ -596,6 +607,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                             _ => {
                                 // All non-Bool values are treated as true
                                 state.control = Control::Expr(*then_branch);
+                                state.tail = true;
                                 // Extract continuation to avoid cloning
                                 let if_kont = std::mem::replace(&mut state.kont, Kont::Halt);
                                 if let Kont::If { then_branch: _, else_branch: _, next } = if_kont {
@@ -622,6 +634,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                             };
                             // Evaluate the test
                             state.control = Control::Expr(*test_expr);
+                            state.tail = false;
                             // Push a CondClause frame whose `next` points to the Cond we just installed.
                             //    We grab the Cond frame we just installed by replacing state.kont with Halt (cheap).
                             let cond_frame = std::mem::replace(&mut state.kont, Kont::Halt);
@@ -644,7 +657,6 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                     }
                 }
             }
-
             Kont::CondClause { .. } => {
                 // Move the entire CondClause frame out of state.kont first
                 let (clause, next_box) = match std::mem::replace(&mut state.kont, Kont::Halt) {
@@ -667,7 +679,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                                 // Chain two nexts: CondClause.next -> Cond frame -> rest
                                 if let Kont::Cond { next: cond_next, .. } = *next_box {
                                     state.kont = *cond_next;  // skip Cond frame
-                                    insert_eval(state, body_expr, false);
+                                    insert_eval(state, body_expr, true);
                                 } else {
                                     return Err("expected Cond frame after CondClause".to_string());
                                 }
@@ -701,7 +713,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                             let mut call_expr = cons(test_value, ec.heap.nil_s(), ec.heap)?;
                             call_expr = cons(arrow_proc, call_expr, ec.heap)?;
 
-                            insert_eval(state, call_expr, false);
+                            insert_eval(state, call_expr, true);
                         } else {
                             // Test failed: continue with remaining Cond clauses
                             state.kont = *next_box;
@@ -711,17 +723,17 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
 
                 Ok(())
             }
-
             Kont::Seq { rest, next } => {
                 // Pop the next expression from the sequence
                 let next_expr = rest.pop().unwrap(); // safe: Seq always has >=2 exprs
 
                 state.control = Control::Expr(next_expr);
+                state.tail = false;
                 
                 // Determine if this is the last expression
                 if rest.is_empty() {
                     // Last expression: mark tail if needed and drop the Seq frame
-                    state.tail = false;
+                    state.tail = true;
 
                     // Move the continuation out of the Box safely
                     let next_cont = std::mem::replace(next, Box::new(Kont::Halt));
@@ -751,7 +763,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                 // Otherwise: evaluate the next expr in the rest
                 let next_expr = rest.pop().unwrap(); // safe if not empty
                 state.control = Control::Expr(next_expr);
-
+                state.tail = false;
                 Ok(())
             }
 
@@ -804,14 +816,11 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
                 .map_err(|_| "invalid argument list".to_string())
                 .unwrap();
 
-            let current_kont = state.kont.clone();
-            let next_box = if state.tail {
-                Box::new(Kont::Halt)
-            } else {
-                Box::new(current_kont)
-            };
+            let prev = std::mem::replace(&mut state.kont, Kont::Halt);
+            let next_box = Box::new(prev);
 
             state.control = Control::Expr(*car);
+            state.tail = false; // reset after using it
             state.kont = Kont::EvalArg {
                 proc: None,
                 remaining: args_vec.into_iter().rev().collect(),
@@ -820,14 +829,12 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
                 env: state.env.clone(),
                 next: next_box,
             };
-            state.tail = false; // reset after using it
         }
         _ => panic!(
             "Unsupported expression in eval_cek: {}",
             print_scheme_value(&expr)
         ),
     }
-    //dump("eval_cek exit", &state, ctx);
 }
 
 fn apply_special_direct(
@@ -870,6 +877,7 @@ fn apply_special(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Res
                 let raw_args = list_to_vec(ec.heap, cdr)?;
                 let expanded = eval_macro(params, *body, env, &raw_args, ec)?;
                 state.control = Control::Expr(expanded);
+                state.tail = true;
                 state.kont = *next;
                 Ok(())
             }
@@ -914,7 +922,6 @@ fn apply_proc(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Result
                         state.env = new_env.current_frame();
                         state.kont = *next; // reuse continuation depth
                         state.control = Control::Expr(*body);
-                        // keep state.tail = true; still in tail position down this path
                         Ok(())
                     } else {
                         // Normal (non-tail) call: push a RestoreEnv barrier.
