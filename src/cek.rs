@@ -25,6 +25,7 @@ pub enum Kont {
         remaining: Vec<GcRef>,
         evaluated: Vec<GcRef>,
         original_call: GcRef,
+        tail: bool,
         env: EnvRef,
         next: Box<Kont>,
     },
@@ -386,6 +387,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                     mut remaining,
                     mut evaluated,
                     original_call,
+                    tail,
                     env: _,
                     next,
                 } = evalarg_kont {
@@ -428,6 +430,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                                             remaining,
                                             evaluated,
                                             original_call,
+                                            tail,
                                             env: state.env.clone(),
                                             next,
                                         };
@@ -448,6 +451,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                                 remaining,
                                 evaluated,
                                 original_call,
+                                tail,
                                 env: state.env.clone(),
                                 next,
                             };
@@ -825,6 +829,7 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
                 proc: None,
                 remaining: args_vec.into_iter().rev().collect(),
                 evaluated: vec![],
+                tail: true,
                 original_call: expr,
                 env: state.env.clone(),
                 next: next_box,

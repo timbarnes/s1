@@ -337,12 +337,12 @@ test-equal 720 (fac-acc 6) "Factorial test with nested define and accumulator")
 (test-equal '(11 22) (m1 22) "Simple macro")
 
 (define when (macro (p body)
-    `(if ,p ,body)))
+    `(if ,p ,body nil)))
 (test-equal 22 (when #t 22) "when with #t")
 (test-equal nil (when #f 22) "when with #f")
 
 (define unless (macro (p body)
-    `(if (not ,p) ,body)))
+    `(if (not ,p) ,body nil)))
 (test-equal nil (unless #t 22) "unless with #t")
 (test-equal 22 (unless #f 22) "when with #f")
 

@@ -249,7 +249,7 @@ pub fn define_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Res
 /// Requires three arguments.
 pub fn if_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
     *evaluator.depth -= 1;
-    let args = expect_at_least_n_args(&evaluator.heap, expr, 3)?;
+    let args = expect_at_least_n_args(&evaluator.heap, expr, 4)?;
     insert_if(state, args[2], args[3]);
     insert_eval(state, args[1], false);
     Ok(())
