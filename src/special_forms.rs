@@ -5,7 +5,7 @@
 /// This is required for lambda and macro differentiation.
 ///
 use crate::cek::{
-    AndOrKind, CEKState, CondClause, eval_main, insert_and_or, insert_bind, insert_cond, 
+    AndOrKind, CEKState, CondClause, eval_main, insert_and_or, insert_bind, insert_cond,
     insert_eval, insert_eval_eval, insert_if, insert_seq, insert_value,
 };
 use crate::eval::{EvalContext, expect_at_least_n_args, expect_n_args, expect_symbol};
@@ -183,7 +183,7 @@ fn eval_eval_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Resu
     let argvec = expect_n_args(&ec.heap, expr, 2)?;
     match argvec.len() {
         2 => insert_eval_eval(state, argvec[1], None, false),
-        3 => insert_eval_eval(state, argvec[1],Some(argvec[2]), false),
+        3 => insert_eval_eval(state, argvec[1], Some(argvec[2]), false),
         _ => return Err("eval: requires 1 or 2 arguments".to_string()),
     }
     Ok(())
@@ -240,9 +240,26 @@ pub fn define_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Res
     // (define symbol expr)
     let args = expect_n_args(&ec.heap, expr, 3)?; // including 'define
     let sym = expect_symbol(&mut ec.heap, &args[1])?;
-    insert_bind(state, sym);
+    insert_bind(state, sym, None);
     insert_eval(state, args[2], false);
     Ok(())
+}
+
+/// (set! sym expr)
+/// sym must have been previously defined.
+pub fn set_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
+    *ec.depth -= 1;
+    let args = expect_n_args(&ec.heap, expr, 3)?;
+    //let sym = expect_symbol(&ec.heap, &args[1])?;
+
+    match &ec.env.get_symbol_and_frame(args[1]) {
+        Some((_val, binding_env)) => {
+            insert_bind(state, args[1], Some(binding_env.clone()));
+            insert_eval(state, args[2], false);
+            Ok(())
+        }
+        None => Err("set!: symbol not found".to_string()),
+    }
 }
 
 /// (if test consequent alternate)
@@ -263,7 +280,7 @@ pub fn cond_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Resul
     args.reverse();
 
     let mut clauses = Vec::new();
-    for clause in args.iter() { 
+    for clause in args.iter() {
         let parts = list_to_vec(ec.heap, *clause)?;
         if parts.is_empty() {
             return Err("cond: clause cannot be empty".to_string());
@@ -297,8 +314,8 @@ pub fn cond_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Resul
         }
     }
 
-insert_cond(state, clauses);
-Ok(())
+    insert_cond(state, clauses);
+    Ok(())
 }
 
 /// let (basic version, without labels)
@@ -378,23 +395,6 @@ pub fn or_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<
         }
     }
     Ok(())
-}
-
-/// (set! sym expr)
-/// sym must have been previously defined.
-pub fn set_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
-    *ec.depth -= 1;
-    let args = expect_n_args(&ec.heap, expr, 3)?;
-    let sym = expect_symbol(&ec.heap, &args[1])?;
-    
-    match &ec.env.get_symbol(sym) {
-        Some(_) => {
-            insert_bind(state, sym);
-            insert_eval(state, args[2], false);
-            Ok(())
-        }
-        None => Err("set!: symbol not found".to_string())
-    }
 }
 
 fn with_timer_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {

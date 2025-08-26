@@ -64,9 +64,8 @@ pub enum Kont {
         next: Box<Kont>,
     },
     Bind {
-        // processes define
         symbol: GcRef, // body expression (or begin)
-        //env_for_bind: EnvRef, // environment to use as parent for the new frame
+        env: Option<EnvRef>,
         next: Box<Kont>,
     },
     // Exception handler frame - used later for raise/handler support
@@ -120,7 +119,11 @@ impl std::fmt::Debug for Kont {
                     proc, original_call, next
                 )
             }
-            Kont::Bind { symbol, next } => {
+            Kont::Bind {
+                symbol,
+                env: _,
+                next,
+            } => {
                 write!(
                     f,
                     "Bind {{ symbol: {}, next: {:?} }}",
@@ -149,32 +152,38 @@ impl std::fmt::Debug for Kont {
                     next
                 )
             }
-            Kont::CondClause { clause, next } => {
-                match clause {
-                    CondClause::Normal { test, body} => {
-                        match body {
-                            Some(body) => {
-                                write!(f, "CondClause {{ clause: Normal(test:{}, body:{}), next: {:?} }}", 
-                                print_scheme_value(test), print_scheme_value(body), next)
-                            }
-                            None => {
-                                write!(f, "CondClause {{ clause: Normal(test:{}, body:None), next: {:?} }}", 
-                                print_scheme_value(test), next)
-                            }
-                        }
+            Kont::CondClause { clause, next } => match clause {
+                CondClause::Normal { test, body } => match body {
+                    Some(body) => {
+                        write!(
+                            f,
+                            "CondClause {{ clause: Normal(test:{}, body:{}), next: {:?} }}",
+                            print_scheme_value(test),
+                            print_scheme_value(body),
+                            next
+                        )
                     }
-                    CondClause::Arrow { test, arrow_proc } => {
-                        write!(f, "CondClause {{ clause: Arrow(test={}, proc={}), next: {:?} }}", 
-                               print_scheme_value(test), print_scheme_value(arrow_proc), next)
+                    None => {
+                        write!(
+                            f,
+                            "CondClause {{ clause: Normal(test:{}, body:None), next: {:?} }}",
+                            print_scheme_value(test),
+                            next
+                        )
                     }
+                },
+                CondClause::Arrow { test, arrow_proc } => {
+                    write!(
+                        f,
+                        "CondClause {{ clause: Arrow(test={}, proc={}), next: {:?} }}",
+                        print_scheme_value(test),
+                        print_scheme_value(arrow_proc),
+                        next
+                    )
                 }
-            }
+            },
             Kont::Seq { rest, next } => {
-                write!(
-                    f,
-                    "Seq {{ rest: {:?}, next: {:?} }}",
-                    rest, next
-                )
+                write!(f, "Seq {{ rest: {:?}, next: {:?} }}", rest, next)
             }
             Kont::AndOr { kind, rest, next } => {
                 let k = match kind {
@@ -203,6 +212,12 @@ pub enum EvalPhase {
 pub enum CondClause {
     Normal { test: GcRef, body: Option<GcRef> },
     Arrow { test: GcRef, arrow_proc: GcRef },
+}
+
+#[derive(Clone)]
+pub enum BindKind {
+    Define,
+    Set,
 }
 
 #[derive(Clone)]
@@ -261,36 +276,37 @@ pub fn insert_eval_eval(state: &mut CEKState, expr: GcRef, env: Option<GcRef>, t
             // Process environment evaluation first, if provided
             state.control = Control::Expr(e);
             state.kont = Kont::Eval {
-                    expr,
-                    env: None,
-                    phase: EvalPhase::EvalEnv,
-                    next: Box::new(prev),
-                };
+                expr,
+                env: None,
+                phase: EvalPhase::EvalEnv,
+                next: Box::new(prev),
+            };
             state.tail = tail;
         }
         None => {
             // Move straight to evaluating the expression
             state.control = Control::Expr(expr);
             state.kont = Kont::Eval {
-                    expr,
-                    env: None,
-                    phase: EvalPhase::EvalExpr,
-                    next: Box::new(prev),
-                };
+                expr,
+                env: None,
+                phase: EvalPhase::EvalExpr,
+                next: Box::new(prev),
+            };
             state.tail = tail;
- 
         }
     }
 }
 
 /// Bind a symbol to a value. This is installed before evaluation of the right hand side.
 /// The bind operation takes the value returned by the previous continuation.
+/// Supports both define and set! semantics.
 ///
-pub fn insert_bind(state: &mut CEKState, sym: GcRef) {
+pub fn insert_bind(state: &mut CEKState, symbol: GcRef, env: Option<EnvRef>) {
     // clone the current continuation and link it under the new Bind
     let prev = std::mem::replace(&mut state.kont, Kont::Halt);
     state.kont = Kont::Bind {
-        symbol: sym,
+        symbol,
+        env,
         next: Box::new(prev),
     };
     //eprintln!("bind_insert {}", frame_debug_short(&state.kont));
@@ -390,7 +406,8 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                     tail,
                     env: _,
                     next,
-                } = evalarg_kont {
+                } = evalarg_kont
+                {
                     if proc.is_none() {
                         // We just evaluated the operator slot (the car). Decide what to do
                         // based on its kind.
@@ -497,15 +514,24 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                 // Extract the entire Eval continuation first
                 let eval_kont = std::mem::replace(&mut state.kont, Kont::Halt);
                 match eval_kont {
-                    Kont::Eval { expr, env, phase, next } => {
+                    Kont::Eval {
+                        expr,
+                        env,
+                        phase,
+                        next,
+                    } => {
                         match phase {
                             EvalPhase::EvalEnv => {
                                 if let Control::Value(env_val) = state.control {
                                     // Capture environment and move to first expression evaluation
                                     let new_env = Some(env_val);
                                     state.control = Control::Expr(expr);
-                                    state.kont = Kont::Eval { expr, env: new_env, 
-                                        phase: EvalPhase::EvalExpr, next };
+                                    state.kont = Kont::Eval {
+                                        expr,
+                                        env: new_env,
+                                        phase: EvalPhase::EvalExpr,
+                                        next,
+                                    };
                                 } else {
                                     unreachable!("EvalEnv phase should yield a value");
                                 }
@@ -514,8 +540,12 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                                 if let Control::Value(val) = state.control {
                                     // Save the intermediate result, then prepare to re-evaluate
                                     state.control = Control::Expr(val);
-                                    state.kont = Kont::Eval { expr: val, env, phase: EvalPhase::Done, 
-                                        next };
+                                    state.kont = Kont::Eval {
+                                        expr: val,
+                                        env,
+                                        phase: EvalPhase::Done,
+                                        next,
+                                    };
                                 } else {
                                     unreachable!("EvalExpr phase should yield a value");
                                 }
@@ -542,7 +572,12 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
             Kont::ApplySpecial { .. } => {
                 // Extract continuation to avoid cloning
                 let applyspecial_kont = std::mem::replace(&mut state.kont, Kont::Halt);
-                if let Kont::ApplySpecial { proc, original_call, next } = applyspecial_kont {
+                if let Kont::ApplySpecial {
+                    proc,
+                    original_call,
+                    next,
+                } = applyspecial_kont
+                {
                     let frame = Kont::ApplySpecial {
                         proc,
                         original_call,
@@ -556,27 +591,40 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                 }
                 Ok(())
             }
-            Kont::Bind { symbol, .. } => {
+            Kont::Bind { symbol, env, .. } => {
                 if let Control::Value(val) = state.control {
-                    state.env.borrow_mut().set_local(*symbol, val);
-                    // For define, we typically leave the symbol as the value
-                    state.control = Control::Value(*symbol);
+                    match env {
+                        Some(frame) => {
+                            // set! path: update existing frame directly
+                            frame.borrow_mut().set_local(*symbol, val);
+                            state.control = Control::Value(val);
+                        }
+                        None => {
+                            // define path: bind in current frame
+                            state.env.borrow_mut().set_local(*symbol, val);
+                            state.control = Control::Value(*symbol);
+                        }
+                    }
                     state.tail = false;
+
                     // Extract continuation to avoid cloning
                     let bind_kont = std::mem::replace(&mut state.kont, Kont::Halt);
-                    if let Kont::Bind { symbol: _, next } = bind_kont {
+                    if let Kont::Bind { next, .. } = bind_kont {
                         state.kont = *next;
                     } else {
-                        // This should never happen, but if it does, put it back
-                        state.kont = bind_kont;
+                        state.kont = bind_kont; // shouldn't happen
                     }
+
                     Ok(())
                 } else {
                     panic!("Kont::Bind reached but control is not a Value");
                 }
             }
             Kont::If {
-                then_branch, else_branch, .. } => {
+                then_branch,
+                else_branch,
+                ..
+            } => {
                 // The test value is in state.control
                 match &state.control {
                     Control::Value(val) => {
@@ -587,7 +635,12 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                                     state.tail = true;
                                     // Extract continuation to avoid cloning
                                     let if_kont = std::mem::replace(&mut state.kont, Kont::Halt);
-                                    if let Kont::If { then_branch: _, else_branch: _, next } = if_kont {
+                                    if let Kont::If {
+                                        then_branch: _,
+                                        else_branch: _,
+                                        next,
+                                    } = if_kont
+                                    {
                                         state.kont = *next;
                                     } else {
                                         // This should never happen, but if it does, put it back
@@ -599,7 +652,12 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                                     state.tail = true;
                                     // Extract continuation to avoid cloning
                                     let if_kont = std::mem::replace(&mut state.kont, Kont::Halt);
-                                    if let Kont::If { then_branch: _, else_branch: _, next } = if_kont {
+                                    if let Kont::If {
+                                        then_branch: _,
+                                        else_branch: _,
+                                        next,
+                                    } = if_kont
+                                    {
                                         state.kont = *next;
                                     } else {
                                         // This should never happen, but if it does, put it back
@@ -614,7 +672,12 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                                 state.tail = true;
                                 // Extract continuation to avoid cloning
                                 let if_kont = std::mem::replace(&mut state.kont, Kont::Halt);
-                                if let Kont::If { then_branch: _, else_branch: _, next } = if_kont {
+                                if let Kont::If {
+                                    then_branch: _,
+                                    else_branch: _,
+                                    next,
+                                } = if_kont
+                                {
                                     state.kont = *next;
                                 } else {
                                     // This should never happen, but if it does, put it back
@@ -629,7 +692,10 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
             }
             Kont::Cond { .. } => {
                 match std::mem::replace(&mut state.kont, Kont::Halt) {
-                    Kont::Cond { mut remaining, next } => {
+                    Kont::Cond {
+                        mut remaining,
+                        next,
+                    } => {
                         if let Some(clause) = remaining.pop() {
                             state.kont = Kont::Cond { remaining, next };
                             let test_expr = match &clause {
@@ -643,7 +709,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                             //    We grab the Cond frame we just installed by replacing state.kont with Halt (cheap).
                             let cond_frame = std::mem::replace(&mut state.kont, Kont::Halt);
                             state.kont = Kont::CondClause {
-                                clause,                  // move the owned clause here
+                                clause, // move the owned clause here
                                 next: Box::new(cond_frame),
                             };
                             Ok(())
@@ -681,16 +747,22 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                         if !is_false(test_value) {
                             if let Some(body_expr) = body {
                                 // Chain two nexts: CondClause.next -> Cond frame -> rest
-                                if let Kont::Cond { next: cond_next, .. } = *next_box {
-                                    state.kont = *cond_next;  // skip Cond frame
+                                if let Kont::Cond {
+                                    next: cond_next, ..
+                                } = *next_box
+                                {
+                                    state.kont = *cond_next; // skip Cond frame
                                     insert_eval(state, body_expr, true);
                                 } else {
                                     return Err("expected Cond frame after CondClause".to_string());
                                 }
                             } else {
                                 // No body: just return test_value
-                                if let Kont::Cond { next: cond_next, .. } = *next_box {
-                                    state.kont = *cond_next;  // skip Cond frame
+                                if let Kont::Cond {
+                                    next: cond_next, ..
+                                } = *next_box
+                                {
+                                    state.kont = *cond_next; // skip Cond frame
                                     state.control = Control::Value(test_value);
                                 } else {
                                     return Err("expected Cond frame after CondClause".to_string());
@@ -702,11 +774,17 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                         }
                     }
 
-                    CondClause::Arrow { test: _, arrow_proc } => {
+                    CondClause::Arrow {
+                        test: _,
+                        arrow_proc,
+                    } => {
                         if !is_false(test_value) {
                             // Chain two nexts: CondClause.next -> Cond frame -> rest
-                            let rest_kont = if let Kont::Cond { next: cond_next, .. } = *next_box {
-                                *cond_next  // skip Cond frame
+                            let rest_kont = if let Kont::Cond {
+                                next: cond_next, ..
+                            } = *next_box
+                            {
+                                *cond_next // skip Cond frame
                             } else {
                                 return Err("expected Cond frame after CondClause".to_string());
                             };
@@ -733,7 +811,7 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
 
                 state.control = Control::Expr(next_expr);
                 state.tail = false;
-                
+
                 // Determine if this is the last expression
                 if rest.is_empty() {
                     // Last expression: mark tail if needed and drop the Seq frame
@@ -746,11 +824,10 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
                 Ok(())
             }
             Kont::AndOr { kind, rest, next } => {
-
                 if let Control::Value(val) = &state.control {
                     let short_circuit = match kind {
-                        AndOrKind::And => is_false(*val),   // false ⇒ stop early
-                        AndOrKind::Or  => !is_false(*val),  // truthy ⇒ stop early
+                        AndOrKind::And => is_false(*val), // false ⇒ stop early
+                        AndOrKind::Or => !is_false(*val), // truthy ⇒ stop early
                     };
 
                     if short_circuit || rest.is_empty() {
@@ -774,7 +851,8 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
             // Other continuations do nothing here
             _ => {
                 eprintln!("Unhandled continuation in CEK step: {:?}", state.kont);
-                Ok(())}
+                Ok(())
+            }
         },
     }
 }
@@ -1025,7 +1103,11 @@ fn frame_debug_short(frame: &Kont) -> String {
                 next
             )
         }
-        Kont::Bind { symbol, next } => {
+        Kont::Bind {
+            symbol,
+            env: _,
+            next,
+        } => {
             format!(
                 "Bind{{symbol={}, next={:?}}}",
                 print_scheme_value(symbol),

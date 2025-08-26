@@ -234,7 +234,7 @@
             acc
             (f (- n 1) (* acc n)))))
     (f n 1)))
-test-equal 720 (fac-acc 6) "Factorial test with nested define and accumulator")
+(test-equal 720 (fac-acc 6) "Factorial test with nested define and accumulator")
 
 (display "          === Testing List Accessors ===")
 (newline)
