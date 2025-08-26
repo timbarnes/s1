@@ -350,9 +350,14 @@ pub fn let_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result
     Ok(())
 }
 
-fn expand_sf(expr: GcRef, ec: &mut EvalContext, _state: &mut CEKState) -> Result<(), String> {
+fn expand_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
     let m = car(&ec.heap, cdr(&ec.heap, expr)?)?;
-    expand_macro(&m, 0, ec)?;
+    match expand_macro(&m, 0, ec) {
+        Ok(expr) => {
+            insert_value(state, expr);
+        }
+        Err(err) => return Err(err),
+    }
     Ok(())
 }
 
