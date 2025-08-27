@@ -56,6 +56,9 @@ fn main() {
     // Execute startup commands as Scheme code
     let mut startup_commands = Vec::new();
 
+    if args.quit {
+        startup_commands.push(format!("(eval-string \"(exit))\"))"));
+    }
     // Load each file in order
     for filename in &args.file {
         startup_commands.push(format!("(push-port! (open-input-file \"{}\"))", filename));
@@ -84,10 +87,6 @@ fn main() {
     }
 
     *ec.trace = args.trace;
-
-    if args.quit {
-        return;
-    }
 
     // Drop into the REPL
     repl(&mut ec);
