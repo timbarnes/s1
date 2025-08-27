@@ -29,7 +29,6 @@ pub fn eval_main(expr: GcRef, ec: &mut EvalContext) -> Result<GcRef, String> {
 /// All the state information is contained in the CEKState struct, so no result is returned until the end.
 ///
 pub fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> GcRef {
-    dump(" run_cek", &state);
     loop {
         // Step the CEK machine; mutates state in place
         //eprintln!("Pre-step {}", frame_debug_short(&state.kont));
@@ -39,15 +38,10 @@ pub fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> GcRef {
         match &state.control {
             Control::Value(val) => match *state.kont {
                 Kont::Halt => return *val, // fully evaluated, exit
-                _ => {
-                    // Some continuation remains; continue loop
-                    continue;
-                }
+                _ => continue,             // Some continuation remains; continue loop
             },
-            Control::Expr(_) | Control::Halt => {
-                // Still evaluating an expression; continue loop
-                continue;
-            }
+            Control::Expr(_) => continue, // Still evaluating an expression; continue loop
+            Control::Halt => panic!("CEK evaluation error: Control::Halt"),
         }
     }
 }
@@ -94,19 +88,15 @@ fn dispatch_kont(
     kont: Kont,
 ) -> Result<(), String> {
     match kont {
-        Kont::AndOr { kind, rest, next } => {
-            handle_and_or(state, ec, kind.clone(), rest.clone(), next.clone())
-        }
+        Kont::AndOr { kind, rest, next } => handle_and_or(state, ec, kind, rest, next),
         Kont::ApplySpecial {
             proc,
             original_call,
             next,
-        } => handle_apply_special(state, ec, proc, original_call, next.clone()),
-        Kont::Bind { symbol, env, .. } => handle_bind(state, ec, symbol, env.clone()),
-        Kont::Cond { remaining, next } => handle_cond(state, ec, remaining.clone(), next.clone()),
-        Kont::CondClause { clause, next } => {
-            handle_cond_clause(state, ec, clause.clone(), next.clone())
-        }
+        } => handle_apply_special(state, ec, proc, original_call, next),
+        Kont::Bind { symbol, env, next } => handle_bind(state, ec, symbol, env, next),
+        Kont::Cond { remaining, next } => handle_cond(state, ec, remaining, next),
+        Kont::CondClause { clause, next } => handle_cond_clause(state, ec, clause, next),
         Kont::EvalArg {
             proc,
             remaining,
@@ -138,8 +128,8 @@ fn dispatch_kont(
             else_branch,
             next,
         } => handle_if(state, ec, then_branch, else_branch, next),
-        Kont::RestoreEnv { old_env, .. } => handle_restore_env(state, ec, old_env, val),
-        Kont::Seq { rest, next } => handle_seq(state, ec, rest.clone(), next.clone()),
+        Kont::RestoreEnv { old_env, next } => handle_restore_env(state, ec, old_env, val, next),
+        Kont::Seq { rest, next } => handle_seq(state, ec, rest, next),
         Kont::Halt => Ok(()),
         _ => Err("unexpected continuation".to_string()),
     }
@@ -184,7 +174,7 @@ fn handle_apply_special(
     let frame = Kont::ApplySpecial {
         proc,
         original_call,
-        next: next.clone(),
+        next,
     };
     state.tail = false;
     apply_special(state, ec, frame)?;
@@ -196,6 +186,7 @@ fn handle_bind(
     _ec: &mut EvalContext,
     symbol: GcRef,
     env: Option<EnvRef>,
+    next: KontRef,
 ) -> Result<(), String> {
     // borrow cont fields
     if let Control::Value(val) = state.control {
@@ -212,15 +203,7 @@ fn handle_bind(
             }
         }
         state.tail = false;
-
-        // Extract continuation to avoid cloning
-        let bind_kont = std::mem::replace(&mut state.kont, Rc::new(Kont::Halt));
-        if let Kont::Bind { next, .. } = bind_kont.as_ref() {
-            state.kont = next.clone();
-        } else {
-            state.kont = bind_kont; // shouldn't happen
-        }
-
+        state.kont = next;
         Ok(())
     } else {
         Err("Kont::Bind reached but control is not a Value".to_string())
@@ -386,7 +369,7 @@ fn handle_eval_arg(
                 let frame = Kont::ApplySpecial {
                     proc: val,
                     original_call,
-                    next: next.clone(),
+                    next,
                 };
                 apply_special(state, ec, frame)?;
                 return Ok(());
@@ -528,22 +511,15 @@ fn handle_restore_env(
     ec: &mut EvalContext,
     old_env: EnvRef,
     val: GcRef,
+    next: Rc<Kont>,
 ) -> Result<(), String> {
     // Restore environment
     ec.env.set_current_frame(old_env.clone());
-    state.env = old_env.clone();
-
+    state.env = old_env;
     // Propagate the value
     state.control = Control::Value(val);
-
     // Pop this frame unconditionally
-    let restoreenv_kont = Rc::clone(&state.kont);
-    if let Kont::RestoreEnv { old_env: _, next } = restoreenv_kont.as_ref() {
-        state.kont = Rc::clone(next);
-    } else {
-        state.kont = restoreenv_kont; // safety fallback
-    }
-
+    state.kont = next;
     // Reset tail because restoring the environment is not a tail position
     state.tail = false;
 
@@ -672,7 +648,7 @@ fn apply_special(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Res
                 let expanded = eval_macro(&params, *body, &env, &raw_args, ec)?;
                 state.control = Control::Expr(expanded);
                 state.tail = true;
-                state.kont = next.clone();
+                state.kont = next;
                 Ok(())
             }
             _ => Err("ApplySpecial: not a special form or macro".to_string()),
@@ -745,7 +721,7 @@ pub fn dump(loc: &str, state: &CEKState) {
         match &state.control {
             Control::Expr(obj) => {
                 eprintln!(
-                    "{loc:18} Control: Expr={:20}; Kont={}; Tail={}",
+                    "{loc:18} Control: Expr={}; Kont={}; Tail={}",
                     print_scheme_value(obj),
                     frame_debug_short(&state.kont),
                     state.tail

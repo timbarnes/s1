@@ -8,13 +8,13 @@
 
 ;; Test helper functions
 
-(define failed-tests '()) ; keep track of test failures
+(define **failed-tests** '()) ; keep track of test failures
 (define **counter** 0)
 (define **print-successes** #t)
 
 (define fails
   (lambda (message)
-      (set! failed-tests (cons (cons **counter** message) failed-tests))))
+      (set! **failed-tests** (cons (cons **counter** message) **failed-tests**))))
 
 (define success
   (lambda (message)
@@ -384,4 +384,4 @@
     (begin
         (displayln "Failing tests: ")
         (displayln "==============")
-        (map displayln failed-tests)))
+        (map displayln **failed-tests**)))
