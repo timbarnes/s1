@@ -16,7 +16,7 @@ mod tokenizer;
 //use crate::io::{Port, PortKind};
 use crate::cek::eval_main;
 use crate::eval::{Evaluator, eval_string, initialize_scheme_io_globals};
-use crate::printer::print_scheme_value;
+use crate::printer::print_value;
 use argh::FromArgs;
 use eval::EvalContext;
 use std::io as stdio;
@@ -36,6 +36,9 @@ struct Args {
     /// trace mode
     #[argh(switch, short = 't')]
     trace: i32,
+    /// run regression tests
+    #[argh(switch, short = 'r')]
+    regression: bool,
 }
 
 fn main() {
@@ -56,6 +59,13 @@ fn main() {
     // Load each file in order
     for filename in &args.file {
         startup_commands.push(format!("(push-port! (open-input-file \"{}\"))", filename));
+    }
+
+    // Run regression tests if --regression is specified
+    if args.regression {
+        startup_commands.push(format!(
+            "(push-port! (open-input-file \"scheme/regression.scm\"))"
+        ));
     }
 
     // Load core file unless --no-core
@@ -115,7 +125,7 @@ fn repl(ev: &mut EvalContext) {
                 Ok(result) => {
                     if interactive {
                         //let ec = eval::EvalContext::from_eval(ev);
-                        println!("=> {}", print_scheme_value(&result));
+                        println!("=> {}", print_value(&result));
                     }
                 }
                 Err(e) => println!("Evaluation error: {}", e),

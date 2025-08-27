@@ -1,6 +1,6 @@
 use crate::env::EnvRef;
 use crate::gc::GcRef;
-use crate::printer::print_scheme_value;
+use crate::printer::print_value;
 use std::rc::Rc;
 
 pub type KontRef = Rc<Kont>;
@@ -125,7 +125,7 @@ impl std::fmt::Debug for Kont {
                 write!(
                     f,
                     "Bind {{ symbol: {}, next: {:?} }}",
-                    print_scheme_value(symbol),
+                    print_value(symbol),
                     next
                 )
             }
@@ -137,8 +137,8 @@ impl std::fmt::Debug for Kont {
                 write!(
                     f,
                     "AfterTest {{ then: {}, else_: {}, next: {:?} }}",
-                    print_scheme_value(then_branch),
-                    print_scheme_value(else_branch),
+                    print_value(then_branch),
+                    print_value(else_branch),
                     next
                 )
             }
@@ -156,8 +156,8 @@ impl std::fmt::Debug for Kont {
                         write!(
                             f,
                             "CondClause {{ clause: Normal(test:{}, body:{}), next: {:?} }}",
-                            print_scheme_value(test),
-                            print_scheme_value(body),
+                            print_value(test),
+                            print_value(body),
                             next
                         )
                     }
@@ -165,7 +165,7 @@ impl std::fmt::Debug for Kont {
                         write!(
                             f,
                             "CondClause {{ clause: Normal(test:{}, body:None), next: {:?} }}",
-                            print_scheme_value(test),
+                            print_value(test),
                             next
                         )
                     }
@@ -174,8 +174,8 @@ impl std::fmt::Debug for Kont {
                     write!(
                         f,
                         "CondClause {{ clause: Arrow(test={}, proc={}), next: {:?} }}",
-                        print_scheme_value(test),
-                        print_scheme_value(arrow_proc),
+                        print_value(test),
+                        print_value(arrow_proc),
                         next
                     )
                 }
@@ -236,6 +236,14 @@ pub struct CEKState {
     pub env: EnvRef,      // Current environment (linked frame or hashmap)
     pub kont: KontRef,    // Continuation (enum)
     pub tail: bool,
+}
+
+impl CEKState {
+    /// Push an error into the existing CEKState.
+    pub fn post_error(self: &mut CEKState, error: String) {
+        self.control = Control::Error(error);
+        self.kont = Rc::new(Kont::Halt);
+    }
 }
 
 /// Install `expr` into the existing CEKState and return immediately.

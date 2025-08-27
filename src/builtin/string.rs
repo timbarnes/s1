@@ -3,7 +3,7 @@
 //
 use crate::eval::EvalContext;
 use crate::gc::{GcHeap, GcRef, get_integer, get_string, new_bool, new_char, new_int, new_string};
-use crate::printer::display_scheme_value;
+use crate::printer::display_value;
 use num_bigint::BigInt;
 
 /// (string char1 [char2 ..])
@@ -16,7 +16,7 @@ use num_bigint::BigInt;
 /// Convert a lisp object to a string
 fn to_string(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() == 1 {
-        let result = new_string(ec.heap, display_scheme_value(&args[0]).as_str());
+        let result = new_string(ec.heap, display_value(&args[0]).as_str());
         Ok(result)
     } else {
         Err("to-string expects exactly one argument".to_string())

@@ -8,7 +8,7 @@ use crate::gc_value;
 use crate::kont::{
     AndOrKind, CEKState, CondClause, Control, EvalPhase, Kont, KontRef, insert_eval,
 };
-use crate::printer::print_scheme_value;
+use crate::printer::print_value;
 use std::rc::Rc;
 
 /// CEK evaluator entry point from the repl (not used recursively)
@@ -256,7 +256,7 @@ fn handle_cond_clause(
         Control::Expr(e) => {
             return Err(format!(
                 "CondClause reached with unevaluated test: {}",
-                print_scheme_value(&e)
+                print_value(&e)
             ));
         }
         Control::Error(e) => return Err(e.clone()),
@@ -569,7 +569,7 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
             if let Some(val) = ctx.env.get_symbol(expr) {
                 state.control = Control::Value(val);
             } else {
-                state.control = Control::Error(format!("Unbound variable: {}", name));
+                state.post_error(format!("Unbound variable: {}", name));
             }
         }
 
@@ -610,10 +610,10 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
                 next: prev,
             });
         }
-        _ => panic!(
+        _ => state.post_error(format!(
             "Unsupported expression in eval_cek: {}",
-            print_scheme_value(&expr)
-        ),
+            print_value(&expr)
+        )),
     }
 }
 
@@ -729,7 +729,7 @@ pub fn dump(loc: &str, state: &CEKState) {
             Control::Expr(obj) => {
                 eprintln!(
                     "{loc:18} Control: Expr={}; Kont={}; Tail={}",
-                    print_scheme_value(obj),
+                    print_value(obj),
                     frame_debug_short(&state.kont),
                     state.tail
                 );
@@ -737,7 +737,7 @@ pub fn dump(loc: &str, state: &CEKState) {
             Control::Value(obj) => {
                 eprintln!(
                     "{loc:18} Control: Value={:20}; Kont={}",
-                    print_scheme_value(obj),
+                    print_value(obj),
                     frame_debug_short(&state.kont)
                 );
             }
@@ -793,8 +793,8 @@ fn frame_debug_short(frame: &Kont) -> String {
         } => {
             format!(
                 "ApplySpecial{{proc={}, orig={}, next={:?}}}",
-                print_scheme_value(proc),
-                print_scheme_value(original_call),
+                print_value(proc),
+                print_value(original_call),
                 next
             )
         }
@@ -805,8 +805,8 @@ fn frame_debug_short(frame: &Kont) -> String {
         } => {
             format!(
                 "If{{then={}, else={}, next={:?}}}",
-                print_scheme_value(then_branch),
-                print_scheme_value(else_branch),
+                print_value(then_branch),
+                print_value(else_branch),
                 next
             )
         }
@@ -815,11 +815,7 @@ fn frame_debug_short(frame: &Kont) -> String {
             env: _,
             next,
         } => {
-            format!(
-                "Bind{{symbol={}, next={:?}}}",
-                print_scheme_value(symbol),
-                next
-            )
+            format!("Bind{{symbol={}, next={:?}}}", print_value(symbol), next)
         }
         other => format!("{:?}", other),
     }

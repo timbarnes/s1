@@ -68,17 +68,14 @@ impl Evaluator {
         crate::special_forms::register_special_forms(&mut evaluator.heap, &mut evaluator.env);
         evaluator
     }
-
     /// Get a reference to the heap for allocation
     pub fn heap_mut(&mut self) -> &mut GcHeap {
         &mut self.heap
     }
-
     /// Get a reference to the environment (read-only)
     pub fn env(&self) -> &Environment {
         &self.env
     }
-
     /// Get a mutable reference to the environment (for eval_apply only)
     pub fn env_mut(&mut self) -> &mut Environment {
         &mut self.env

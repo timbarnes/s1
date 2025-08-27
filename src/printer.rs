@@ -3,16 +3,16 @@ use crate::gc::SchemeValue::*;
 use crate::gc::{Callable, GcRef};
 use crate::gc_value;
 
-pub fn display_scheme_value(obj: &GcRef) -> String {
+pub fn display_value(obj: &GcRef) -> String {
     let val = gc_value!(*obj);
     match val {
         Str(s) => s.clone(),
         Char(c) => format!("{c}"),
-        _ => print_scheme_value(obj),
+        _ => print_value(obj),
     }
 }
 
-pub fn print_scheme_value(obj: &GcRef) -> String {
+pub fn print_value(obj: &GcRef) -> String {
     let val = gc_value!(*obj);
     match val {
         Pair(_, _) => {
@@ -26,7 +26,7 @@ pub fn print_scheme_value(obj: &GcRef) -> String {
                         if !first {
                             s.push(' ');
                         }
-                        s.push_str(&print_scheme_value(car));
+                        s.push_str(&print_value(car));
                         current = *cdr;
                         first = false;
                     }
@@ -36,7 +36,7 @@ pub fn print_scheme_value(obj: &GcRef) -> String {
                     }
                     _ => {
                         s.push_str(" . ");
-                        s.push_str(&print_scheme_value(&current));
+                        s.push_str(&print_value(&current));
                         s.push(')');
                         break;
                     }
@@ -52,7 +52,7 @@ pub fn print_scheme_value(obj: &GcRef) -> String {
                 if !first {
                     s.push(' ');
                 }
-                s.push_str(print_scheme_value(&value).as_str());
+                s.push_str(print_value(&value).as_str());
                 first = false;
             }
             s.push(')');
@@ -77,7 +77,7 @@ pub fn print_scheme_value(obj: &GcRef) -> String {
             Callable::Macro { params, body, .. } => print_callable("Macro", params, *body),
         },
         Port(port) => format!("Port({:?})", port),
-        _ => format!("print_scheme_value: unprintable."),
+        _ => format!("print_value: unprintable."),
     }
 }
 
@@ -87,14 +87,14 @@ fn print_callable(callable_type: &str, params: &Vec<GcRef>, body: GcRef) -> Stri
         0 => s.push_str(" () "),
         1 => {
             s.push(' ');
-            s.push_str(print_scheme_value(&params[0]).as_str());
+            s.push_str(print_value(&params[0]).as_str());
             s.push(' ');
         }
         _ => {
             // two cases: list and dotted, depending on the value of params[0]
             s.push_str(" (");
             for arg in params[1..].iter() {
-                s.push_str(print_scheme_value(arg).as_str());
+                s.push_str(print_value(arg).as_str());
                 s.push(' ');
             }
             match &gc_value!(params[0]) {
@@ -110,6 +110,6 @@ fn print_callable(callable_type: &str, params: &Vec<GcRef>, body: GcRef) -> Stri
             s.push_str(") ");
         }
     }
-    s.push_str(print_scheme_value(&body).as_str());
+    s.push_str(print_value(&body).as_str());
     s
 }
