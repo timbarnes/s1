@@ -5,6 +5,7 @@ mod env;
 mod eval;
 mod gc;
 mod io;
+mod kont;
 mod macros;
 mod parser;
 mod printer;

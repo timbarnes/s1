@@ -29,10 +29,10 @@ macro_rules! gc_value {
     }};
 }
 
-use crate::cek::CEKState;
 use crate::env::EnvRef;
 use crate::eval::EvalContext;
 use crate::io::PortKind;
+use crate::kont::CEKState;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 use std::cell::RefCell;
@@ -75,8 +75,7 @@ pub enum SchemeValue {
     Nil,
     TailCallScheduled,
     Port(PortKind),
-    Env(EnvRef)
-    // Extend with more types as needed.
+    Env(EnvRef), // Extend with more types as needed.
 }
 
 /// Returns an iterator over a Scheme list in the heap.
