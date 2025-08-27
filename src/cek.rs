@@ -21,27 +21,28 @@ pub fn eval_main(expr: GcRef, ec: &mut EvalContext) -> Result<GcRef, String> {
         tail: false,
     };
     dump("***eval_main***", &state);
-    Ok(run_cek(state, ec))
+    run_cek(state, ec)
 }
 
 /// Run the CEK evaluator loop until a result is produced.
 ///
 /// All the state information is contained in the CEKState struct, so no result is returned until the end.
 ///
-pub fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> GcRef {
+pub fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> Result<GcRef, String> {
     loop {
         // Step the CEK machine; mutates state in place
         //eprintln!("Pre-step {}", frame_debug_short(&state.kont));
         if let Err(err) = step(&mut state, ctx) {
-            panic!("CEK evaluation error: {}", err);
+            return Err(format!("CEK evaluation error: {}", err));
         }
         match &state.control {
             Control::Value(val) => match *state.kont {
-                Kont::Halt => return *val, // fully evaluated, exit
-                _ => continue,             // Some continuation remains; continue loop
+                Kont::Halt => return Ok(*val), // fully evaluated, exit
+                _ => continue,                 // Some continuation remains; continue loop
             },
             Control::Expr(_) => continue, // Still evaluating an expression; continue loop
-            Control::Halt => panic!("CEK evaluation error: Control::Halt"),
+            Control::Error(msg) => return Err(msg.clone()),
+            Control::Empty => return Err("CEK evaluation error: Control::Empty".to_string()),
         }
     }
 }
@@ -54,7 +55,7 @@ pub fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> GcRef {
 
 pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
     dump("  step", &state);
-    let control = std::mem::replace(&mut state.control, Control::Halt);
+    let control = std::mem::replace(&mut state.control, Control::Empty);
     match control {
         Control::Expr(expr) => {
             eval_cek(expr, ec, state);
@@ -66,7 +67,8 @@ pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
             state.control = Control::Value(val);
             dispatch_kont(state, ec, val, kont)
         }
-        Control::Halt => Err("Unexpected Control::Halt in step()".to_string()),
+        Control::Error(e) => Err(e),
+        Control::Empty => Err("Unexpected Control::Halt in step()".to_string()),
     }
 }
 
@@ -248,11 +250,17 @@ fn handle_cond_clause(
     next: KontRef,
 ) -> Result<(), String> {
     // pull the test value
-    let test_value = match state.control {
-        Control::Value(v) => v,
-        Control::Expr(_) | Control::Halt => {
-            return Err("CondClause reached with unevaluated test".to_string());
+    let test_value;
+    match &state.control {
+        Control::Value(v) => test_value = v,
+        Control::Expr(e) => {
+            return Err(format!(
+                "CondClause reached with unevaluated test: {}",
+                print_scheme_value(&e)
+            ));
         }
+        Control::Error(e) => return Err(e.clone()),
+        Control::Empty => return Err("CondClause: Control::Empty".to_string()),
     };
     // helper to skip the Cond frame that wraps each clause
     let skip_cond = |k: &Rc<Kont>| -> Result<Rc<Kont>, String> {
@@ -262,19 +270,19 @@ fn handle_cond_clause(
         {
             Ok(Rc::clone(cond_next))
         } else {
-            Err("expected Cond frame after CondClause".to_string())
+            return Err("expected Cond frame after CondClause".to_string());
         }
     };
 
     match cond_clause {
         CondClause::Normal { body, .. } => {
-            if !is_false(test_value) {
+            if !is_false(*test_value) {
                 if let Some(body_expr) = body {
                     state.kont = skip_cond(&next)?; // drop Cond
                     insert_eval(state, body_expr, true);
                 } else {
                     state.kont = skip_cond(&next)?; // drop Cond
-                    state.control = Control::Value(test_value);
+                    state.control = Control::Value(*test_value);
                 }
             } else {
                 // keep Cond so it can try remaining clauses
@@ -283,11 +291,11 @@ fn handle_cond_clause(
         }
 
         CondClause::Arrow { arrow_proc, .. } => {
-            if !is_false(test_value) {
+            if !is_false(*test_value) {
                 state.kont = skip_cond(&next)?; // drop Cond
 
                 // build (arrow_proc test_value)
-                let mut call_expr = cons(test_value, ec.heap.nil_s(), ec.heap)?;
+                let mut call_expr = cons(*test_value, ec.heap.nil_s(), ec.heap)?;
                 call_expr = cons(arrow_proc, call_expr, ec.heap)?;
                 insert_eval(state, call_expr, true);
             } else {
@@ -295,7 +303,6 @@ fn handle_cond_clause(
             }
         }
     }
-
     Ok(())
 }
 
@@ -502,7 +509,7 @@ fn handle_if(
                 }
             }
         }
-        _ => panic!("Kont::AfterTest reached but control is not a value"),
+        _ => Err("Kont::AfterTest reached but control is not a value".to_string()),
     }
 }
 
@@ -562,7 +569,7 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
             if let Some(val) = ctx.env.get_symbol(expr) {
                 state.control = Control::Value(val);
             } else {
-                panic!("Unbound variable: {}", name);
+                state.control = Control::Error(format!("Unbound variable: {}", name));
             }
         }
 
@@ -734,7 +741,14 @@ pub fn dump(loc: &str, state: &CEKState) {
                     frame_debug_short(&state.kont)
                 );
             }
-            Control::Halt => {
+            Control::Error(e) => {
+                eprintln!(
+                    "{loc:18} Control: Error={}; Kont={}",
+                    e,
+                    frame_debug_short(&state.kont)
+                );
+            }
+            Control::Empty => {
                 eprintln!(
                     "{loc:18} Control: Halt; Kont={}",
                     frame_debug_short(&state.kont)

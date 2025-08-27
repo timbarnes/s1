@@ -379,7 +379,7 @@
 (newline)
 (display "          === All tests completed ===")
 (newline)
-(if (null? failed-tests)
+(if (null? **failed-tests**)
     (displayln "===  All" **counter** "tests passed!  ===")
     (begin
         (displayln "Failing tests: ")

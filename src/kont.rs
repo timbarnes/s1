@@ -227,7 +227,8 @@ pub enum AndOrKind {
 pub enum Control {
     Expr(GcRef),  // Unevaluated expression
     Value(GcRef), // Fully evaluated result
-    Halt,
+    Error(String),
+    Empty,
 }
 
 pub struct CEKState {
