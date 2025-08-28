@@ -18,6 +18,7 @@ use crate::kont::{
 use crate::macros::expand_macro;
 //use crate::printer::print_scheme_value;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::time::Instant;
 
 enum Ptype {
@@ -247,6 +248,15 @@ pub fn define_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Res
     // (define symbol expr)
     let args = expect_n_args(&ec.heap, expr, 3)?; // including 'define
     let sym = expect_symbol(&mut ec.heap, &args[1])?;
+
+    // let target_env = if Rc::ptr_eq(&state.env, &ec.global_env) {
+    //     // top-level define
+    //     Some(ec.global_env.clone())
+    // } else {
+    //     // interior define
+    //     None // insert_bind will default to current state.env
+    // };
+
     insert_bind(state, sym, None);
     insert_eval(state, args[2], false);
     Ok(())

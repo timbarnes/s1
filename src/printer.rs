@@ -71,12 +71,12 @@ pub fn print_value(obj: &GcRef) -> String {
         Char(c) => format!("#\\{}", c),
         Nil => "nil".to_string(),
         Callable(variant) => match variant {
-            Callable::Builtin { func, doc } => format!("Primitive@{:?} {}", func, doc),
-            Callable::SpecialForm { doc, .. } => format!("SpecialForm: {}", doc),
-            Callable::Closure { params, body, .. } => print_callable("Closure", params, *body),
-            Callable::Macro { params, body, .. } => print_callable("Macro", params, *body),
+            Callable::Builtin { func: _, doc } => format!("Primitive    {}", doc),
+            Callable::SpecialForm { doc, .. } => format!("SpecialForm  {}", doc),
+            Callable::Closure { params, body, .. } => print_callable("Closure     ", params, *body),
+            Callable::Macro { params, body, .. } => print_callable("Macro       ", params, *body),
         },
-        Port(port) => format!("Port({:?})", port),
+        Port(port) => format!("Port         ({:?})", port),
         _ => format!("print_value: unprintable."),
     }
 }

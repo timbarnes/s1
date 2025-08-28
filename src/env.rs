@@ -16,13 +16,13 @@ pub type EnvRef = Rc<RefCell<Frame>>;
 /// A single environment frame containing variable bindings
 #[derive(Debug)]
 pub struct Frame {
-    bindings: HashMap<GcRef, GcRef>,
-    parent: Option<Rc<RefCell<Frame>>>,
+    pub bindings: HashMap<GcRef, GcRef>,
+    pub parent: Option<Rc<RefCell<Frame>>>,
 }
 
 impl Frame {
     /// Create a new frame with an optional parent
-    fn new(parent: Option<Rc<RefCell<Frame>>>) -> Self {
+    pub fn new(parent: Option<Rc<RefCell<Frame>>>) -> Self {
         Self {
             bindings: HashMap::new(),
             parent,
@@ -47,7 +47,7 @@ impl Frame {
 
 /// The environment for variable bindings with frame-based lexical scoping
 pub struct Environment {
-    current_frame: Rc<RefCell<Frame>>,
+    pub current_frame: Rc<RefCell<Frame>>,
 }
 
 impl Environment {

@@ -7,6 +7,7 @@ pub mod predicate;
 pub mod string;
 pub mod vector;
 
+use crate::env::Environment;
 use crate::eval::EvalContext;
 use crate::gc::{GcHeap, GcRef, SchemeValue, new_string};
 
@@ -103,8 +104,8 @@ fn eval_string(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
 // }
 
 /// Register all builtin functions in the environment
-pub fn register_builtins(heap: &mut GcHeap, env: &mut crate::env::Environment) {
-    // Register builtins using the macro for cleaner syntax
+pub fn register_builtins(heap: &mut GcHeap, env: &mut Environment) {
+    debug::register_debug_builtins(heap, env);
     display::register_display_builtins(heap, env);
     list::register_list_builtins(heap, env);
     fileio::register_fileio_builtins(heap, env);

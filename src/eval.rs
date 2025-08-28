@@ -26,7 +26,7 @@ pub struct Evaluator {
 pub struct EvalContext<'a> {
     pub heap: &'a mut GcHeap,
     pub env: &'a mut Environment,
-    tail_call: Option<TailCall>,
+    pub tail_call: Option<TailCall>,
     pub port_stack: &'a mut Vec<PortKind>,
     pub trace: &'a mut i32,
     pub depth: &'a mut i32,
@@ -54,9 +54,10 @@ struct TailCall {
 
 impl Evaluator {
     pub fn new() -> Self {
+        let g_env = Environment::new();
         let mut evaluator = Self {
             heap: GcHeap::new(),
-            env: Environment::new(),
+            env: g_env,
             tail_call: None,
             port_stack: Vec::new(),
             trace: 0,

@@ -186,7 +186,7 @@ fn handle_apply_special(
 
 fn handle_bind(
     state: &mut CEKState,
-    _ec: &mut EvalContext,
+    ec: &mut EvalContext,
     symbol: GcRef,
     env: Option<EnvRef>,
     next: KontRef,
@@ -195,12 +195,12 @@ fn handle_bind(
     if let Control::Value(val) = state.control {
         match env {
             Some(frame) => {
-                // set! path: update existing frame directly
+                // global and set! path: update specific frame
                 frame.borrow_mut().set_local(symbol, val);
                 state.control = Control::Value(val);
             }
             None => {
-                // define path: bind in current frame
+                // local define path: bind in current frame
                 state.env.borrow_mut().set_local(symbol, val);
                 state.control = Control::Value(symbol);
             }

@@ -1,3 +1,4 @@
+use crate::env::Environment;
 /// Debugging utilities
 ///
 /// Trace logic: turn the trace function on or off
@@ -5,6 +6,7 @@
 ///
 use crate::eval::EvalContext;
 use crate::gc::{GcHeap, GcRef, SchemeValue};
+use crate::utilities::print_env;
 
 fn trace(evaluator: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     use num_traits::ToPrimitive;
@@ -24,6 +26,18 @@ fn trace(evaluator: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     }
 }
 
+/// (debug-env)
+/// Prints the environment up to the given depth, or all if.
+fn debug_env(evaluator: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
+    *evaluator.depth -= 1;
+    if args.len() != 0 {
+        return Err("debug-env: requires no arguments".to_string());
+    }
+    let env = evaluator.env.current_frame.clone();
+    print_env(Some(env));
+    Ok(evaluator.heap.true_s())
+}
+
 macro_rules! register_builtin_family {
     ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
         $(
@@ -34,8 +48,9 @@ macro_rules! register_builtin_family {
     };
 }
 
-pub fn register_list_builtins(heap: &mut GcHeap, env: &mut crate::env::Environment) {
+pub fn register_debug_builtins(heap: &mut GcHeap, env: &mut Environment) {
     register_builtin_family!(heap, env,
         "trace" => trace,
+        "debug-env" => debug_env,
     );
 }
