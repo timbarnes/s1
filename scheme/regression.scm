@@ -369,7 +369,6 @@
 (test-equal '(2 1) (let ((a 1) (b '(2))) (expand `(,@b ,a))) "expand macro expression")
 (test-equal '(1 2) (let ((a 1) (b '(2))) (expand `(,a ,@b))) "expand macro expression")
 
-;; Test 20: let
 (display "          === Testing let ===")
 (newline)
 
@@ -377,6 +376,20 @@
 (test-equal 9 (let ((x 3)) (* x x)) "Single binding let with single body expression")
 (test-equal 42 (let ((x 6)) (let ((y (+ x 1))) (* x y))) "Nested let expression")
 (newline)
+
+(display "          === Testing delay and force ===")
+(newline)
+(define **count** 0)
+(define p
+  (delay (begin (set! **count** (+ **count** 1))
+                (if (> **count** x)
+                    **count**
+                    (force p)))))
+(define x 5)
+(test-equal 6 (force p) "First force")
+(test-equal 6 (begin (set! **count** 10) (force p)) "Second force")
+(newline)
+
 (display "          === All tests completed ===")
 (newline)
 (if (null? **failed-tests**)

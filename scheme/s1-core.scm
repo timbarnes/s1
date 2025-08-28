@@ -172,3 +172,22 @@
     (if (symbol? sym)
         (>string sym)
         (error "symbol>string: not a symbol"))))
+
+;; (delay expr) and (force p)
+(define delay (macro (expr) `(make-promise (lambda () ,expr))))
+
+(define force (lambda (p) (p)))
+
+(define make-promise
+    (lambda (proc)
+        (let ((result-ready? #f)
+              (result #f))
+          (lambda ()
+            (if result-ready?
+                result
+                (let ((x (proc)))
+                  (if result-ready?
+                      result
+                      (begin (set! result-ready? #t)
+                             (set! result x)
+                             result))))))))
