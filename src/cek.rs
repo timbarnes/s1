@@ -75,7 +75,6 @@ fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
 
 #[inline]
 fn take_kont(state: &mut CEKState) -> Kont {
-    use std::rc::Rc;
     let old = std::mem::replace(&mut state.kont, Rc::new(Kont::Halt));
     match Rc::try_unwrap(old) {
         Ok(k) => k,                             // fast path: unique Rc → owned Kont
@@ -186,7 +185,7 @@ fn handle_apply_special(
 
 fn handle_bind(
     state: &mut CEKState,
-    ec: &mut EvalContext,
+    _ec: &mut EvalContext,
     symbol: GcRef,
     env: Option<EnvRef>,
     next: KontRef,
@@ -446,71 +445,21 @@ fn handle_if(
     _ec: &mut EvalContext,
     then_branch: GcRef,
     else_branch: GcRef,
-    _next: KontRef,
+    next: KontRef,
 ) -> Result<(), String> {
     dump_cek("handle_if", state);
     match &state.control {
         Control::Value(val) => {
-            match gc_value!(*val) {
-                Bool(v) => {
-                    if *v {
-                        state.control = Control::Expr(then_branch);
-                        state.tail = true;
-                        // Extract continuation to avoid cloning
-                        let if_kont = std::mem::replace(&mut state.kont, Rc::new(Kont::Halt));
-                        if let Kont::If {
-                            then_branch: _,
-                            else_branch: _,
-                            next,
-                        } = if_kont.as_ref()
-                        {
-                            state.kont = next.clone();
-                        } else {
-                            // This should never happen, but if it does, put it back
-                            state.kont = if_kont;
-                        }
-                        Ok(())
-                    } else {
-                        state.control = Control::Expr(else_branch);
-                        state.tail = true;
-                        // Extract continuation to avoid cloning
-                        let if_kont = std::mem::replace(&mut state.kont, Rc::new(Kont::Halt));
-                        if let Kont::If {
-                            then_branch: _,
-                            else_branch: _,
-                            next,
-                        } = if_kont.as_ref()
-                        {
-                            state.kont = next.clone();
-                        } else {
-                            // This should never happen, but if it does, put it back
-                            state.kont = if_kont;
-                        }
-                        Ok(())
-                    }
-                }
-                _ => {
-                    // All non-Bool values are treated as true
-                    state.control = Control::Expr(then_branch);
-                    state.tail = true;
-                    // Extract continuation to avoid cloning
-                    let if_kont = std::mem::replace(&mut state.kont, Rc::new(Kont::Halt));
-                    if let Kont::If {
-                        then_branch: _,
-                        else_branch: _,
-                        next,
-                    } = if_kont.as_ref()
-                    {
-                        state.kont = next.clone();
-                    } else {
-                        // This should never happen, but if it does, put it back
-                        state.kont = if_kont;
-                    }
-                    Ok(())
-                }
+            if is_false(*val) {
+                state.control = Control::Expr(else_branch);
+            } else {
+                state.control = Control::Expr(then_branch);
             }
+            state.tail = true;
+            state.kont = next;
+            Ok(())
         }
-        _ => Err("Kont::AfterTest reached but control is not a value".to_string()),
+        _ => Err("Kont::If reached but control is not a value".to_string()),
     }
 }
 

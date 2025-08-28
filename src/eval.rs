@@ -47,7 +47,7 @@ impl<'a> EvalContext<'a> {
 
 /// Represents a tail call that should be optimized
 #[derive(Clone)]
-struct TailCall {
+pub struct TailCall {
     pub func: GcRef,
     pub args: Vec<GcRef>,
 }

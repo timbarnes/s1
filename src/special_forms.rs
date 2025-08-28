@@ -10,15 +10,12 @@ use crate::gc::{
     GcHeap, GcRef, SchemeValue, car, cdr, cons, get_nil, list_from_vec, list_to_vec, matches_sym,
     new_float, new_macro, new_special_form,
 };
-//use crate::gc_value;
 use crate::kont::{
     AndOrKind, CEKState, CondClause, insert_and_or, insert_bind, insert_cond, insert_eval,
     insert_eval_eval, insert_if, insert_seq, insert_value,
 };
 use crate::macros::expand_macro;
-//use crate::printer::print_scheme_value;
 use std::collections::HashMap;
-use std::rc::Rc;
 use std::time::Instant;
 
 enum Ptype {
