@@ -101,7 +101,7 @@ fn repl(ev: &mut EvalContext) {
 
     let mut parser = Parser::new();
 
-    let mut interactive = true;
+    let mut interactive;
     println!("Welcome to the s1 Scheme REPL");
 
     loop {
