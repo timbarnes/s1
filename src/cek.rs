@@ -9,6 +9,7 @@ use crate::kont::{
     AndOrKind, CEKState, CondClause, Control, EvalPhase, Kont, KontRef, insert_eval,
 };
 use crate::printer::print_value;
+use crate::utilities::dump_cek;
 use std::rc::Rc;
 
 /// CEK evaluator entry point from the repl (not used recursively)
@@ -20,7 +21,7 @@ pub fn eval_main(expr: GcRef, ec: &mut EvalContext) -> Result<GcRef, String> {
         env: ec.env.current_frame(),
         tail: false,
     };
-    dump("***eval_main***", &state);
+    dump_cek("***eval_main***", &state);
     run_cek(state, ec)
 }
 
@@ -28,12 +29,12 @@ pub fn eval_main(expr: GcRef, ec: &mut EvalContext) -> Result<GcRef, String> {
 ///
 /// All the state information is contained in the CEKState struct, so no result is returned until the end.
 ///
-pub fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> Result<GcRef, String> {
+fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> Result<GcRef, String> {
     loop {
         // Step the CEK machine; mutates state in place
         //eprintln!("Pre-step {}", frame_debug_short(&state.kont));
         if let Err(err) = step(&mut state, ctx) {
-            return Err(format!("CEK evaluation error: {}", err));
+            return Err(err);
         }
         match &state.control {
             Control::Value(val) => match *state.kont {
@@ -42,7 +43,7 @@ pub fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> Result<GcRef, Stri
             },
             Control::Expr(_) => continue, // Still evaluating an expression; continue loop
             Control::Error(msg) => return Err(msg.clone()),
-            Control::Empty => return Err("CEK evaluation error: Control::Empty".to_string()),
+            Control::Empty => return Err("CEK: Control::Empty".to_string()),
         }
     }
 }
@@ -53,8 +54,8 @@ pub fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> Result<GcRef, Stri
 /// resolving symbols, starting applications, and handling continuations as needed.
 ///
 
-pub fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
-    dump("  step", &state);
+fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
+    dump_cek("  step", &state);
     let control = std::mem::replace(&mut state.control, Control::Empty);
     match control {
         Control::Expr(expr) => {
@@ -447,7 +448,7 @@ fn handle_if(
     else_branch: GcRef,
     _next: KontRef,
 ) -> Result<(), String> {
-    dump("handle_if", state);
+    dump_cek("handle_if", state);
     match &state.control {
         Control::Value(val) => {
             match gc_value!(*val) {
@@ -559,7 +560,7 @@ fn handle_seq(
 /// Capture the current environment and control state, then pass the CEKState to the CEK loop.
 ///
 pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
-    dump("   eval_cek", &state);
+    dump_cek("   eval_cek", &state);
     match &gc_value!(expr) {
         // Self-evaluating values
         Int(_) | Float(_) | Str(_) | Bool(_) | Vector(_) | Char(_) | Nil => {
@@ -668,7 +669,7 @@ fn apply_special(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Res
 /// Process Builtin and Closure applications. Arguments are already evaluated.
 ///
 fn apply_proc(state: &mut CEKState, ec: &mut EvalContext, frame: KontRef) -> Result<(), String> {
-    dump("     apply_proc", &state);
+    dump_cek("     apply_proc", &state);
 
     if let Kont::ApplyProc {
         proc,
@@ -712,111 +713,11 @@ fn apply_proc(state: &mut CEKState, ec: &mut EvalContext, frame: KontRef) -> Res
                         Ok(())
                     }
                 }
-                _ => Err("apply_proc: expected Builtin or Closure".to_string()),
+                _ => Err("apply_proc expected Builtin or Closure".to_string()),
             },
             _ => Err("Attempt to apply non-callable".to_string()),
         }
     } else {
         unreachable!()
-    }
-}
-
-/// Dump a summary of the CEK machine state
-///
-pub fn dump(loc: &str, state: &CEKState) {
-    if false {
-        match &state.control {
-            Control::Expr(obj) => {
-                eprintln!(
-                    "{loc:18} Control: Expr={}; Kont={}; Tail={}",
-                    print_value(obj),
-                    frame_debug_short(&state.kont),
-                    state.tail
-                );
-            }
-            Control::Value(obj) => {
-                eprintln!(
-                    "{loc:18} Control: Value={:20}; Kont={}",
-                    print_value(obj),
-                    frame_debug_short(&state.kont)
-                );
-            }
-            Control::Error(e) => {
-                eprintln!(
-                    "{loc:18} Control: Error={}; Kont={}",
-                    e,
-                    frame_debug_short(&state.kont)
-                );
-            }
-            Control::Empty => {
-                eprintln!(
-                    "{loc:18} Control: Halt; Kont={}",
-                    frame_debug_short(&state.kont)
-                );
-            }
-        }
-    }
-}
-
-fn frame_debug_short(frame: &Kont) -> String {
-    match frame {
-        Kont::EvalArg {
-            proc,
-            remaining,
-            evaluated,
-            original_call,
-            ..
-        } => {
-            format!(
-                "EvalArg{{proc={}, rem={}, eval={}, orig={:?}}}",
-                if proc.is_some() { "Some" } else { "None" },
-                remaining.len(),
-                evaluated.len(),
-                original_call
-            )
-        }
-        Kont::ApplyProc {
-            proc,
-            evaluated_args,
-            ..
-        } => {
-            format!(
-                "ApplyProc{{proc={:?}, args={}}}",
-                proc,
-                evaluated_args.len()
-            )
-        }
-        Kont::ApplySpecial {
-            proc,
-            original_call,
-            next,
-        } => {
-            format!(
-                "ApplySpecial{{proc={}, orig={}, next={:?}}}",
-                print_value(proc),
-                print_value(original_call),
-                next
-            )
-        }
-        Kont::If {
-            then_branch,
-            else_branch,
-            next,
-        } => {
-            format!(
-                "If{{then={}, else={}, next={:?}}}",
-                print_value(then_branch),
-                print_value(else_branch),
-                next
-            )
-        }
-        Kont::Bind {
-            symbol,
-            env: _,
-            next,
-        } => {
-            format!("Bind{{symbol={}, next={:?}}}", print_value(symbol), next)
-        }
-        other => format!("{:?}", other),
     }
 }

@@ -8,8 +8,33 @@ pub type KontRef = Rc<Kont>;
 #[derive(Clone)]
 pub enum Kont {
     Halt,
-    RestoreEnv {
-        old_env: EnvRef,
+    AndOr {
+        kind: AndOrKind,
+        rest: Vec<GcRef>, // remaining expressions in the sequence (head first)
+        next: KontRef,
+    },
+    ApplyProc {
+        proc: GcRef,
+        evaluated_args: Vec<GcRef>,
+        next: KontRef,
+    },
+    ApplySpecial {
+        proc: GcRef,          // Callable::SpecialForm or Callable::Macro
+        original_call: GcRef, // whole form: (op . args)
+        next: KontRef,
+    },
+    Bind {
+        symbol: GcRef, // body expression (or begin)
+        env: Option<EnvRef>,
+        next: KontRef,
+    },
+    Cond {
+        // processes cond
+        remaining: Vec<CondClause>,
+        next: KontRef,
+    },
+    CondClause {
+        clause: CondClause,
         next: KontRef,
     },
     Eval {
@@ -27,43 +52,18 @@ pub enum Kont {
         env: EnvRef,
         next: KontRef,
     },
-    ApplyProc {
-        proc: GcRef,
-        evaluated_args: Vec<GcRef>,
-        next: KontRef,
-    },
-    ApplySpecial {
-        proc: GcRef,          // Callable::SpecialForm or Callable::Macro
-        original_call: GcRef, // whole form: (op . args)
-        next: KontRef,
-    },
     If {
         // processes if
         then_branch: GcRef,
         else_branch: GcRef,
         next: KontRef,
     },
-    Cond {
-        // processes cond
-        remaining: Vec<CondClause>,
-        next: KontRef,
-    },
-    CondClause {
-        clause: CondClause,
+    RestoreEnv {
+        old_env: EnvRef,
         next: KontRef,
     },
     Seq {
         rest: Vec<GcRef>, // remaining expressions in the sequence (head first)
-        next: KontRef,
-    },
-    AndOr {
-        kind: AndOrKind,
-        rest: Vec<GcRef>, // remaining expressions in the sequence (head first)
-        next: KontRef,
-    },
-    Bind {
-        symbol: GcRef, // body expression (or begin)
-        env: Option<EnvRef>,
         next: KontRef,
     },
     // Exception handler frame - used later for raise/handler support
@@ -241,6 +241,7 @@ pub struct CEKState {
 impl CEKState {
     /// Push an error into the existing CEKState.
     pub fn post_error(self: &mut CEKState, error: String) {
+        crate::utilities::trace_kont(&self);
         self.control = Control::Error(error);
         self.kont = Rc::new(Kont::Halt);
     }
@@ -255,7 +256,7 @@ pub fn insert_eval(state: &mut CEKState, expr: GcRef, replace_next: bool) {
     // and set EvalArg.next = Box::new(Kont::Halt); otherwise leave state.kont as-is.
     state.tail = replace_next;
     state.control = Control::Expr(expr);
-    crate::cek::dump(" insert_eval", &state);
+    crate::utilities::dump_cek(" insert_eval", &state);
 }
 
 /// Return a value from a special form without evaluation.

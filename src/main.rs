@@ -11,6 +11,7 @@ mod parser;
 mod printer;
 mod special_forms;
 mod tokenizer;
+mod utilities;
 
 //use crate::parser::Parser;
 //use crate::io::{Port, PortKind};
@@ -127,7 +128,7 @@ fn repl(ev: &mut EvalContext) {
                         println!("=> {}", print_value(&result));
                     }
                 }
-                Err(e) => println!("Evaluation error: {}", e),
+                Err(e) => println!("Error: {}", e),
             },
             Err(crate::parser::ParseError::Eof) => {
                 // Pop the port stack on EOF
