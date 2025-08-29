@@ -191,3 +191,13 @@
                       (begin (set! result-ready? #t)
                              (set! result x)
                              result))))))))
+
+(define def (macro (sig . body)
+    (display (list sig body)) (newline)
+    (cond ((symbol? sig)
+        (display "normal")
+        `(define ,sig ,(car body)))
+        ((list? sig)
+            (display "list") (display sig)
+            `(define ,(car sig) (lambda ,(cdr sig) (begin ,@body))))
+        (else (error "define: bad syntax")))))

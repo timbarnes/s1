@@ -8,7 +8,6 @@ pub fn car_builtin(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String
     if args.len() != 1 {
         return Err("car: expects exactly 1 argument".to_string());
     }
-
     match &ec.heap.get_value(args[0]) {
         SchemeValue::Pair(car, _) => Ok(*car),
         _ => Err("car: argument must be a pair".to_string()),

@@ -68,7 +68,11 @@ fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
             state.control = Control::Value(val);
             dispatch_kont(state, ec, val, kont)
         }
-        Control::Error(e) => Err(e),
+        Control::Error(e) => {
+            let e1 = e.clone();
+            state.post_error(e);
+            return Err(e1);
+        }
         Control::Empty => Err("Unexpected Control::Halt in step()".to_string()),
     }
 }
@@ -629,10 +633,12 @@ fn apply_proc(state: &mut CEKState, ec: &mut EvalContext, frame: KontRef) -> Res
         match gc_value!(*proc) {
             Callable(callable) => match callable {
                 Callable::Builtin { func, .. } => {
-                    let result = func(ec, &evaluated_args)?;
-                    state.control = Control::Value(result);
+                    let result = func(ec, &evaluated_args);
+                    match result {
+                        Err(err) => state.post_error(err),
+                        Ok(result) => state.control = Control::Value(result),
+                    }
                     state.kont = Rc::clone(next);
-
                     Ok(())
                 }
                 Callable::Closure {

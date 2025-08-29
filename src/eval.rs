@@ -10,6 +10,7 @@ use crate::gc::SchemeValue::*;
 use crate::gc::{GcHeap, GcRef, SchemeValue, list_from_vec, list_to_vec};
 use crate::io::PortKind;
 use crate::macros::expand_macro;
+use crate::printer::print_value;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -136,9 +137,9 @@ pub fn eval_macro(
     let new_env = bind_params(params, args, env, evaluator.heap)?;
     let original_env = evaluator.env.current_frame();
     evaluator.env.set_current_frame(new_env.current_frame());
-    // println!("Unexpanded macro: {}", print_scheme_value(&body.value));
+    println!("Before expansion: {}", print_value(&body));
     let expanded = expand_macro(&body, 0, evaluator)?;
-    // println!("After expansion: {}", print_scheme_value(&expanded.value));
+    println!("After expansion: {}", print_value(&expanded));
     evaluator.env.set_current_frame(original_env);
     // Review for tail recursion
     Ok(expanded)

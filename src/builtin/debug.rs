@@ -14,11 +14,11 @@ fn trace(evaluator: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 1 {
         return Err("trace: requires integer argument".to_string());
     }
-    match &evaluator.heap.get_value(args[1]) {
+    match &evaluator.heap.get_value(args[0]) {
         SchemeValue::Int(v) => match v.to_i32() {
             Some(value) => {
                 *evaluator.trace = value;
-                return Ok(args[1]);
+                return Ok(args[0]);
             }
             None => return Err("trace: requires integer argument".to_string()),
         },
