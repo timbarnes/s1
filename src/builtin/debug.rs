@@ -6,7 +6,7 @@ use crate::env::Environment;
 ///
 use crate::eval::EvalContext;
 use crate::gc::{GcHeap, GcRef, SchemeValue};
-use crate::utilities::print_env;
+use crate::utilities::dump_env;
 
 fn trace(evaluator: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     use num_traits::ToPrimitive;
@@ -34,7 +34,7 @@ fn debug_env(evaluator: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, Strin
         return Err("debug-env: requires no arguments".to_string());
     }
     let env = evaluator.env.current_frame.clone();
-    print_env(Some(env));
+    dump_env(Some(env));
     Ok(evaluator.heap.true_s())
 }
 

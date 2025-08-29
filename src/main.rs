@@ -87,7 +87,7 @@ fn main() {
         }
     }
 
-    *ec.trace = args.trace;
+    *ec.trace = num_traits::abs(args.trace);
 
     // Drop into the REPL
     repl(&mut ec);

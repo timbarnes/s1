@@ -9,7 +9,7 @@ use crate::kont::{
     AndOrKind, CEKState, CondClause, Control, EvalPhase, Kont, KontRef, insert_eval,
 };
 use crate::printer::print_value;
-use crate::utilities::dump_cek;
+use crate::utilities::{debug_cek, dump_cek};
 use std::rc::Rc;
 
 /// CEK evaluator entry point from the repl (not used recursively)
@@ -56,6 +56,9 @@ fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> Result<GcRef, String> 
 
 fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
     dump_cek("  step", &state);
+    if *ec.trace > 0 && ec.depth <= ec.trace {
+        debug_cek(state, ec);
+    }
     let control = std::mem::replace(&mut state.control, Control::Empty);
     match control {
         Control::Expr(expr) => {

@@ -86,7 +86,6 @@ fn create_lambda_or_macro(
 ) -> Result<GcRef, String> {
     use crate::gc::new_closure;
     //eprintln!("Creating lambda or macro");
-    *ec.depth -= 1;
 
     let heap = &mut ec.heap;
     let mut args = Vec::new();
@@ -178,7 +177,6 @@ fn create_lambda_or_macro(
 }
 
 fn eval_eval_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
-    *ec.depth -= 1;
     let argvec = expect_n_args(&ec.heap, expr, 2)?;
     match argvec.len() {
         2 => insert_eval_eval(state, argvec[1], None, false),
@@ -189,7 +187,6 @@ fn eval_eval_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Resu
 }
 
 fn apply_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
-    *ec.depth -= 1;
     let func = car(&ec.heap, cdr(&ec.heap, expr)?)?;
     let unevaluated_args = car(&ec.heap, cdr(&ec.heap, cdr(&ec.heap, expr)?)?)?;
     let args = eval_main(unevaluated_args, ec)?;
@@ -201,7 +198,6 @@ fn apply_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(
 /// Quote logic: return first argument unevaluated
 fn quote_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
     // (quote x) => return x unevaluated
-    *ec.depth -= 1;
     match &ec.heap.get_value(expr) {
         SchemeValue::Pair(_, cdr) => match &ec.heap.get_value(*cdr) {
             SchemeValue::Pair(_, _) => {
@@ -224,7 +220,6 @@ fn quote_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(
 /// (begin form1 ..)
 fn begin_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
     // (begin expr1 expr2 ... exprN) => evaluate each in sequence, return last
-    *ec.depth -= 1;
     let mut argvec = expect_at_least_n_args(&ec.heap, expr, 2)?;
 
     match argvec.len() {
@@ -262,7 +257,6 @@ pub fn define_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Res
 /// (set! sym expr)
 /// sym must have been previously defined.
 pub fn set_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
-    *ec.depth -= 1;
     let args = expect_n_args(&ec.heap, expr, 3)?;
     //let sym = expect_symbol(&ec.heap, &args[1])?;
 
@@ -279,7 +273,6 @@ pub fn set_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result
 /// (if test consequent alternate)
 /// Requires three arguments.
 pub fn if_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
-    *evaluator.depth -= 1;
     let args = expect_at_least_n_args(&evaluator.heap, expr, 4)?;
     insert_if(state, args[2], args[3]);
     insert_eval(state, args[1], false);
@@ -288,7 +281,6 @@ pub fn if_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> 
 
 /// (cond (test1 expr) [(test 2...)] [(else expr)])
 pub fn cond_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
-    *ec.depth -= 1;
     let mut args = expect_at_least_n_args(&ec.heap, expr, 2)?;
     args = args.into_iter().skip(1).collect();
     args.reverse();
@@ -378,7 +370,6 @@ fn expand_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<
 /// (and expr1 expr2 ... exprN)
 /// Stops on first false value
 pub fn and_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
-    *ec.depth -= 1;
     // (and expr1 expr2 ... exprN)
     let mut argvec = expect_at_least_n_args(&ec.heap, expr, 1)?;
 
@@ -399,7 +390,6 @@ pub fn and_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result
 /// (or expr1 expr2 ... exprN)
 /// Stops on first true value
 pub fn or_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
-    *ec.depth -= 1;
     // (and expr1 expr2 ... exprN)
     let mut argvec = expect_at_least_n_args(&ec.heap, expr, 1)?;
 

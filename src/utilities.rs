@@ -1,10 +1,79 @@
 /// Internal utility functions
 ///
 use crate::env::Frame;
+use crate::eval::EvalContext;
 use crate::kont::{AndOrKind, CEKState, Control, Kont};
 use crate::printer::print_value;
 use std::cell::RefCell;
 use std::rc::Rc;
+
+/// Trace / debug function called from within the CEK machine and on error
+///
+pub fn debug_cek(state: &mut CEKState, ec: &mut EvalContext) {
+    // simple indentation
+    for _ in 0..*ec.depth {
+        print!(".");
+    }
+
+    println!("{}", dump_control(&state.control));
+
+    if *ec.step {
+        debug_interactive(state, ec);
+    }
+}
+
+fn debug_interactive(state: &CEKState, ec: &mut EvalContext) {
+    use std::io::{self, Write};
+
+    loop {
+        print!("(debug) ");
+        io::stdout().flush().unwrap();
+
+        let mut input = String::new();
+        if io::stdin().read_line(&mut input).is_err() {
+            println!("error reading input");
+            continue;
+        }
+        let cmd = input.trim();
+
+        match cmd {
+            "" | "n" | "next" => {
+                // step one more and come back
+                break;
+            }
+            "c" | "continue" => {
+                // run freely until next breakpoint / error
+                *ec.step = false;
+                break;
+            }
+            "e" | "env" => {
+                let frame = ec.env.current_frame.clone();
+                dump_env(Some(frame));
+            }
+            "l" | "locals" => {
+                dump_locals(&state.env);
+            }
+            "ctrl" => {
+                println!("control = {}", dump_control(&state.control));
+            }
+            "s" | "state" => {
+                dump_cek("", state);
+            }
+            _ => {
+                println!("commands: n(ext), c(ontinue), e(nv), l(ocals), ctrl, s(tate)");
+            }
+        }
+    }
+}
+
+fn dump_control(control: &Control) -> String {
+    match control {
+        Control::Expr(obj) => format!("Expr={}", print_value(obj)),
+        Control::Value(obj) => format!("Value={:20}", print_value(obj)),
+        Control::Error(e) => format!("Error={}", e),
+        Control::Empty => format!("Empty"),
+    }
+}
 
 // Dump a summary of the CEK machine state
 ///
@@ -106,7 +175,7 @@ fn frame_debug_short(frame: &Kont) -> String {
     }
 }
 
-pub fn trace_kont(state: &CEKState) {
+pub fn dump_kont(state: &CEKState) {
     println!(" CEK State:");
     match &state.control {
         Control::Expr(e) => print!("  Control::Expr: {:?} ", print_value(e)),
@@ -233,7 +302,16 @@ pub fn trace_kont(state: &CEKState) {
     }
 }
 
-pub fn print_env(env: Option<Rc<RefCell<Frame>>>) {
+pub fn dump_locals(env: &Rc<RefCell<Frame>>) {
+    let frame = env.borrow();
+    println!("Local env: ");
+    for (k, v) in frame.bindings.iter() {
+        // Replace with your actual printer for GcRef
+        println!("  {:20} => {}", print_value(&k), print_value(&v));
+    }
+}
+
+pub fn dump_env(env: Option<Rc<RefCell<Frame>>>) {
     let mut depth = 0;
     let mut current = env;
     while let Some(frame_rc) = current {

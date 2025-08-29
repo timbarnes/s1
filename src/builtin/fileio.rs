@@ -70,7 +70,6 @@ pub fn load_builtin_evaluator(
 /// ```
 pub fn push_port(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     // (push-port! port)
-    *ec.depth -= 1;
     if args.len() != 1 {
         return Err("push_port!: expected exactly 1 argument".to_string());
     }
@@ -81,7 +80,6 @@ pub fn push_port(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> 
 
 pub fn pop_port(ec: &mut EvalContext, _args: &[GcRef]) -> Result<GcRef, String> {
     // (pop-port!)
-    *ec.depth -= 1;
     let port_kind = ec.port_stack.pop();
     match port_kind {
         Some(port_kind) => {

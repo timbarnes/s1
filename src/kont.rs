@@ -241,7 +241,7 @@ pub struct CEKState {
 impl CEKState {
     /// Push an error into the existing CEKState.
     pub fn post_error(self: &mut CEKState, error: String) {
-        crate::utilities::trace_kont(&self);
+        crate::utilities::dump_kont(&self);
         self.control = Control::Error(error);
         self.kont = Rc::new(Kont::Halt);
     }

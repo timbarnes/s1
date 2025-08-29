@@ -22,6 +22,7 @@ pub struct Evaluator {
     pub port_stack: Vec<PortKind>, // Stack of ports for input/output operations         // Indicates a new port has been pushed on the stack
     pub trace: i32,                // Indicates tracing is enabled to a given depth
     pub depth: i32,                // Evaluation nesting depth (used by trace)
+    pub step: bool,
 }
 
 pub struct EvalContext<'a> {
@@ -31,6 +32,7 @@ pub struct EvalContext<'a> {
     pub port_stack: &'a mut Vec<PortKind>,
     pub trace: &'a mut i32,
     pub depth: &'a mut i32,
+    pub step: &'a mut bool,
 }
 
 impl<'a> EvalContext<'a> {
@@ -42,6 +44,7 @@ impl<'a> EvalContext<'a> {
             port_stack: &mut eval.port_stack,
             trace: &mut eval.trace,
             depth: &mut eval.depth,
+            step: &mut eval.step,
         }
     }
 }
@@ -63,6 +66,7 @@ impl Evaluator {
             port_stack: Vec::new(),
             trace: 0,
             depth: 0,
+            step: false,
         };
 
         // Register built-ins in the evaluator's heap and environment
