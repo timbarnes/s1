@@ -9,7 +9,7 @@ use crate::kont::{
     AndOrKind, CEKState, CondClause, Control, EvalPhase, Kont, KontRef, insert_eval,
 };
 use crate::printer::print_value;
-use crate::utilities::{debug_cek, dump_cek};
+use crate::utilities::{debug_cek, dump_cek, post_error};
 use std::rc::Rc;
 
 /// CEK evaluator entry point from the repl (not used recursively)
@@ -62,18 +62,20 @@ fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
     let control = std::mem::replace(&mut state.control, Control::Empty);
     match control {
         Control::Expr(expr) => {
+            *ec.depth += 1;
             eval_cek(expr, ec, state);
             Ok(())
         }
 
         Control::Value(val) => {
+            *ec.depth -= 1;
             let kont = take_kont(state);
             state.control = Control::Value(val);
             dispatch_kont(state, ec, val, kont)
         }
         Control::Error(e) => {
             let e1 = e.clone();
-            state.post_error(e);
+            post_error(state, ec, e);
             return Err(e1);
         }
         Control::Empty => Err("Unexpected Control::Halt in step()".to_string()),
@@ -526,7 +528,7 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
             if let Some(val) = ctx.env.get_symbol(expr) {
                 state.control = Control::Value(val);
             } else {
-                state.post_error(format!("Unbound variable: {}", name));
+                post_error(state, ctx, format!("Unbound variable: {}", name));
             }
         }
 
@@ -567,10 +569,11 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
                 next: prev,
             });
         }
-        _ => state.post_error(format!(
-            "Unsupported expression in eval_cek: {}",
-            print_value(&expr)
-        )),
+        _ => post_error(
+            state,
+            ctx,
+            format!("Unsupported expression in eval_cek: {}", print_value(&expr)),
+        ),
     }
 }
 
@@ -638,7 +641,7 @@ fn apply_proc(state: &mut CEKState, ec: &mut EvalContext, frame: KontRef) -> Res
                 Callable::Builtin { func, .. } => {
                     let result = func(ec, &evaluated_args);
                     match result {
-                        Err(err) => state.post_error(err),
+                        Err(err) => post_error(state, ec, err),
                         Ok(result) => state.control = Control::Value(result),
                     }
                     state.kont = Rc::clone(next);

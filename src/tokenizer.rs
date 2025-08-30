@@ -76,36 +76,11 @@ impl<'a> Tokenizer<'a> {
 
     /// Read the next character from the input stream.
     fn read_char(&mut self) -> Option<char> {
+        // Check the unread buffer first
         if let Some(c) = self.buffer.pop() {
             Some(c)
         } else {
-            match &mut self.port_kind {
-                PortKind::StringPortInput { .. } => {
-                    // Use safe accessors from io.rs
-                    let current_pos = crate::io::get_string_port_pos(self.port_kind)?;
-                    let content = if let PortKind::StringPortInput { content, .. } = &self.port_kind
-                    {
-                        content
-                    } else {
-                        unreachable!()
-                    };
-                    if current_pos < content.len() {
-                        let ch = content.chars().nth(current_pos).unwrap();
-                        crate::io::update_string_port_pos(self.port_kind, current_pos + 1);
-                        Some(ch)
-                    } else {
-                        None
-                    }
-                }
-                PortKind::Stdin => {
-                    let mut buf = [0u8; 1];
-                    match std::io::stdin().read_exact(&mut buf) {
-                        Ok(_) => Some(buf[0] as char),
-                        Err(_) => None,
-                    }
-                }
-                _ => None, // Only support string ports and stdin for now
-            }
+            self.port_kind.next_char_utf8()
         }
     }
 

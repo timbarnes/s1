@@ -238,15 +238,6 @@ pub struct CEKState {
     pub tail: bool,
 }
 
-impl CEKState {
-    /// Push an error into the existing CEKState.
-    pub fn post_error(self: &mut CEKState, error: String) {
-        crate::utilities::dump_kont(&self);
-        self.control = Control::Error(error);
-        self.kont = Rc::new(Kont::Halt);
-    }
-}
-
 /// Install `expr` into the existing CEKState and return immediately.
 /// If `replace_next` is true, the installed EvalArg (if any) will have `next = Halt`
 /// (i.e., it will replace the current continuation); otherwise the existing kont chain is preserved.

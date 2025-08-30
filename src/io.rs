@@ -28,7 +28,7 @@ use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 // use std::io::BufReader as StdBufReader;
 use crate::eval::EvalContext;
 use crate::gc::GcRef;
-use std::cell::UnsafeCell;
+use std::cell::Cell;
 
 /// The different types of ports supported by the I/O system.
 ///
@@ -49,12 +49,11 @@ pub enum PortKind {
         name: String,
         write: bool,
         file_id: Option<usize>,
+        buf: Vec<u8>,
+        pos: Cell<usize>,
     },
     /// In-memory string port for input with content and current position
-    StringPortInput {
-        content: String,
-        pos: UnsafeCell<usize>,
-    },
+    StringPortInput { content: String, pos: Cell<usize> },
     /// In-memory string port for output with accumulating content
     StringPortOutput { content: String },
 }
@@ -69,14 +68,18 @@ impl Clone for PortKind {
                 name,
                 write,
                 file_id,
+                buf,
+                pos,
             } => PortKind::File {
                 name: name.clone(),
                 write: *write,
                 file_id: *file_id,
+                buf: buf.clone(),
+                pos: Cell::new(pos.get()),
             },
             PortKind::StringPortInput { content, pos } => PortKind::StringPortInput {
                 content: content.clone(),
-                pos: UnsafeCell::new(unsafe { *pos.get() }),
+                pos: Cell::new(pos.get()),
             },
             PortKind::StringPortOutput { content } => PortKind::StringPortOutput {
                 content: content.clone(),
@@ -96,13 +99,17 @@ impl PartialEq for PortKind {
                     name: n1,
                     write: w1,
                     file_id: f1,
+                    buf: b1,
+                    pos: p1,
                 },
                 PortKind::File {
                     name: n2,
                     write: w2,
                     file_id: f2,
+                    buf: b2,
+                    pos: p2,
                 },
-            ) => n1 == n2 && w1 == w2 && f1 == f2,
+            ) => n1 == n2 && w1 == w2 && f1 == f2 && b1 == b2 && p1.get() == p2.get(),
             (
                 PortKind::StringPortInput {
                     content: c1,
@@ -112,13 +119,65 @@ impl PartialEq for PortKind {
                     content: c2,
                     pos: p2,
                 },
-            ) => c1 == c2 && unsafe { *p1.get() == *p2.get() },
+            ) => c1 == c2 && p1.get() == p2.get(),
             (
                 PortKind::StringPortOutput { content: c1 },
                 PortKind::StringPortOutput { content: c2 },
             ) => c1 == c2,
             _ => false,
         }
+    }
+}
+
+impl PortKind {
+    pub fn next_char_utf8(&mut self) -> Option<char> {
+        match self {
+            PortKind::StringPortInput { content, pos } => {
+                let mut p = pos.get();
+                if p >= content.len() {
+                    return None;
+                }
+                let rest = &content[p..];
+                let mut iter = rest.chars();
+                let ch = iter.next()?;
+                p += ch.len_utf8();
+                pos.set(p);
+                Some(ch)
+            }
+            PortKind::Stdin => {
+                let stdin = io::stdin();
+                let mut handle = stdin.lock();
+                let mut buf = [0u8; 4]; // max size of UTF-8 char
+                let mut first = [0u8; 1];
+                if handle.read_exact(&mut first).is_err() {
+                    return None;
+                }
+
+                let needed = utf8_char_width(first[0]);
+                buf[0] = first[0];
+                if needed > 1 {
+                    if handle.read_exact(&mut buf[1..needed]).is_err() {
+                        return None;
+                    }
+                }
+
+                std::str::from_utf8(&buf[..needed])
+                    .ok()
+                    .and_then(|s| s.chars().next())
+            }
+            _ => todo!("next_char_utf8 PortKind types"),
+        }
+    }
+}
+
+/// UTF-8 width helper
+fn utf8_char_width(first: u8) -> usize {
+    match first {
+        0x00..=0x7F => 1,
+        0xC0..=0xDF => 2,
+        0xE0..=0xEF => 3,
+        0xF0..=0xF7 => 4,
+        _ => 1,
     }
 }
 
@@ -304,7 +363,7 @@ fn read_line_from_string_port(port_kind: &PortKind) -> Option<(String, PortKind)
             let new_pos = current_pos + 1;
             let new_port = PortKind::StringPortInput {
                 content: content.clone(),
-                pos: UnsafeCell::new(new_pos),
+                pos: Cell::new(new_pos),
             };
             Some((line.to_string() + "\n", new_port))
         } else {
@@ -576,7 +635,7 @@ pub fn write_char(port_kind: &PortKind, file_table: &mut FileTable, ch: char) ->
 pub fn new_string_port(s: &str) -> PortKind {
     PortKind::StringPortInput {
         content: s.to_string(),
-        pos: UnsafeCell::new(0),
+        pos: Cell::new(0),
     }
 }
 
@@ -644,7 +703,7 @@ pub fn get_output_string(port_kind: &PortKind) -> String {
 /// This function should be called through the GC heap accessor.
 pub fn get_string_port_pos(port_kind: &PortKind) -> Option<usize> {
     match &port_kind {
-        PortKind::StringPortInput { pos, .. } => Some(unsafe { *pos.get() }),
+        PortKind::StringPortInput { pos, .. } => Some(pos.get()),
         _ => None,
     }
 }
@@ -654,9 +713,7 @@ pub fn get_string_port_pos(port_kind: &PortKind) -> Option<usize> {
 pub fn update_string_port_pos(port_kind: &PortKind, new_pos: usize) -> bool {
     match &port_kind {
         PortKind::StringPortInput { pos, .. } => {
-            unsafe {
-                *pos.get() = new_pos;
-            }
+            pos.set(new_pos);
             true
         }
         _ => false,
@@ -667,7 +724,7 @@ pub fn update_string_port_pos(port_kind: &PortKind, new_pos: usize) -> bool {
 pub fn new_string_port_input(content: &str) -> PortKind {
     PortKind::StringPortInput {
         content: content.to_string(),
-        pos: UnsafeCell::new(0),
+        pos: Cell::new(0),
     }
 }
 

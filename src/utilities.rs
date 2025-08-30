@@ -7,6 +7,11 @@ use crate::printer::print_value;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+/// Push an error into the existing CEKState.
+pub fn post_error(state: &mut CEKState, ec: &mut EvalContext, error: String) {
+    eprintln!("PostError: {}", error);
+    crate::utilities::debug_cek(state, ec);
+}
 /// Trace / debug function called from within the CEK machine and on error
 ///
 pub fn debug_cek(state: &mut CEKState, ec: &mut EvalContext) {
@@ -15,14 +20,14 @@ pub fn debug_cek(state: &mut CEKState, ec: &mut EvalContext) {
         print!(".");
     }
 
-    println!("{}", dump_control(&state.control));
+    //println!("{}", dump_control(&state.control));
 
-    if *ec.step {
-        debug_interactive(state, ec);
-    }
+    //if *ec.step {
+    debug_interactive(state, ec);
+    //}
 }
 
-fn debug_interactive(state: &CEKState, ec: &mut EvalContext) {
+fn debug_interactive(state: &mut CEKState, ec: &mut EvalContext) {
     use std::io::{self, Write};
 
     loop {
@@ -35,7 +40,7 @@ fn debug_interactive(state: &CEKState, ec: &mut EvalContext) {
             continue;
         }
         let cmd = input.trim();
-
+        println!("Command: {}", cmd);
         match cmd {
             "" | "n" | "next" => {
                 // step one more and come back
@@ -57,7 +62,12 @@ fn debug_interactive(state: &CEKState, ec: &mut EvalContext) {
                 println!("control = {}", dump_control(&state.control));
             }
             "s" | "state" => {
-                dump_cek("", state);
+                dump_cek("", &state);
+            }
+            "q" | "quit" => {
+                println!("Exiting...");
+                state.control = Control::Empty;
+                state.kont = Rc::new(Kont::Halt);
             }
             _ => {
                 println!("commands: n(ext), c(ontinue), e(nv), l(ocals), ctrl, s(tate)");
@@ -68,9 +78,9 @@ fn debug_interactive(state: &CEKState, ec: &mut EvalContext) {
 
 fn dump_control(control: &Control) -> String {
     match control {
-        Control::Expr(obj) => format!("Expr={}", print_value(obj)),
-        Control::Value(obj) => format!("Value={:20}", print_value(obj)),
-        Control::Error(e) => format!("Error={}", e),
+        Control::Expr(obj) => format!("Expr  = {}", print_value(obj)),
+        Control::Value(obj) => format!("Value = {}", print_value(obj)),
+        Control::Error(e) => format!("Error = {}", e),
         Control::Empty => format!("Empty"),
     }
 }

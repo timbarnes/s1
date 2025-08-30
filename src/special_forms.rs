@@ -15,6 +15,7 @@ use crate::kont::{
     insert_eval_eval, insert_if, insert_seq, insert_value,
 };
 use crate::macros::expand_macro;
+use crate::utilities::post_error;
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -206,12 +207,12 @@ fn quote_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(
                 Ok(())
             }
             _ => {
-                state.post_error("Malformed quote: missing argument".to_string());
+                post_error(state, ec, "Malformed quote: missing argument".to_string());
                 Ok(())
             }
         },
         _ => {
-            state.post_error("Malformed quote: not a pair".to_string());
+            post_error(state, ec, "Malformed quote: not a pair".to_string());
             Ok(())
         }
     }
