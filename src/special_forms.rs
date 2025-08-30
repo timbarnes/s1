@@ -74,9 +74,14 @@ pub fn register_special_forms(heap: &mut GcHeap, env: &mut crate::env::Environme
 fn create_callable(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
     let form = expect_at_least_n_args(&ec.heap, expr, 3)?;
     let (params, ptype) = params_to_vec(&mut ec.heap, form[1]);
-    let closure = create_lambda_or_macro(&form, &params, ptype, ec).unwrap();
-    insert_value(state, closure);
-    Ok(())
+    let closure = create_lambda_or_macro(&form, &params, ptype, ec);
+    match closure {
+        Ok(closure) => {
+            insert_value(state, closure);
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
 }
 
 fn create_lambda_or_macro(
@@ -178,12 +183,16 @@ fn create_lambda_or_macro(
 }
 
 fn eval_eval_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
-    let argvec = expect_n_args(&ec.heap, expr, 2)?;
-    match argvec.len() {
-        2 => insert_eval_eval(state, argvec[1], None, false),
-        3 => insert_eval_eval(state, argvec[1], Some(argvec[2]), false),
-        _ => return Err("eval: requires 1 or 2 arguments".to_string()),
+    let argvec = expect_at_least_n_args(&ec.heap, expr, 2);
+    match argvec {
+        Ok(args) => match args.len() {
+            2 => insert_eval_eval(state, args[1], None, false),
+            3 => insert_eval_eval(state, args[1], Some(args[2]), false),
+            _ => return Err("eval: requires 1 or 2 arguments".to_string()),
+        },
+        Err(err) => return Err(err),
     }
+
     Ok(())
 }
 
@@ -274,10 +283,15 @@ pub fn set_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result
 /// (if test consequent alternate)
 /// Requires three arguments.
 pub fn if_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
-    let args = expect_at_least_n_args(&evaluator.heap, expr, 4)?;
-    insert_if(state, args[2], args[3]);
-    insert_eval(state, args[1], false);
-    Ok(())
+    let args = expect_at_least_n_args(&evaluator.heap, expr, 4);
+    match args {
+        Ok(a) => {
+            insert_if(state, a[2], a[3]);
+            insert_eval(state, a[1], false);
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// (cond (test1 expr) [(test 2...)] [(else expr)])

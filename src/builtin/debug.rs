@@ -26,6 +26,23 @@ fn trace(evaluator: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     }
 }
 
+fn stepper(evaluator: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
+    *evaluator.depth -= 1;
+    if args.len() != 1 {
+        return Err("step: requires boolean argument".to_string());
+    }
+    match &evaluator.heap.get_value(args[0]) {
+        SchemeValue::Bool(v) => {
+            *evaluator.step = *v;
+            if *evaluator.trace == 0 {
+                *evaluator.trace = 10;
+            }
+        }
+        _ => return Err("step: requires boolean argument".to_string()),
+    }
+    Ok(args[0])
+}
+
 /// (debug-env)
 /// Prints the environment up to the given depth, or all if.
 fn debug_env(evaluator: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
@@ -52,5 +69,6 @@ pub fn register_debug_builtins(heap: &mut GcHeap, env: &mut Environment) {
     register_builtin_family!(heap, env,
         "trace" => trace,
         "debug-env" => debug_env,
+        "step" => stepper,
     );
 }

@@ -82,6 +82,9 @@ fn expand_list_pair(
                 }
             }
             "unquote" => {
+                if depth == 0 {
+                    return Err("Unquote must be nested within a quasiquote".to_string());
+                }
                 let body = list_ref(evaluator, expr, 1)?;
                 if depth == 1 {
                     let val = eval_main(body, evaluator)?;
@@ -92,6 +95,9 @@ fn expand_list_pair(
                 }
             }
             "unquote-splicing" => {
+                if depth == 0 {
+                    return Err("Unquote-splicing must be nested within a quasiquote".to_string());
+                }
                 let body = list_ref(evaluator, expr, 1)?;
                 if depth == 1 {
                     let val = eval_main(body, evaluator)?;

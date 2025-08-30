@@ -1,6 +1,7 @@
 ;; s1-core.scm: Scheme-level core predicates and utilities
 
-(define error (lambda (msg) (displayln "Error:"msg)))
+(define error (lambda msg
+    (apply displayln msg)))
 ;; Type predicates using type-of function
 (define number? (lambda (x) (or (eq? (type-of x) 'integer) (eq? (type-of x) 'float))))
 (define integer? (lambda (x) (eq? (type-of x) 'integer)))
@@ -129,7 +130,7 @@
                 (_min acc (cdr l))))))
     (_min (car x) (cdr x))))
 
-(define number>string (lambda (n)
+(define number->string (lambda (n)
     (if (number? n)
         (>string n)
         (error "number>string: not a string"))))
@@ -139,6 +140,9 @@
 (define top (lambda (s) (if (empty? s) #f (car s))))
 (define push! (macro (val var) `(set! ,var (cons ,val ,var))))
 (define pop! (macro (var) `(let ((result (car ,var))) (set! ,var (cdr ,var)) result)))
+
+(define length (lambda (lst)
+    (if (null? lst) 0 (+ 1 (length (cdr lst))))))
 
 ; (define map (lambda (f . lists)
 ;     (display "Fn:") (displayln f)
@@ -168,7 +172,7 @@
             (b form (- count 1) (+ sum (with-timer (eval form)))))))
     (b form count 0.0)))
 
-(define symbol>string (lambda (sym)
+(define symbol->string (lambda (sym)
     (if (symbol? sym)
         (>string sym)
         (error "symbol>string: not a symbol"))))
@@ -192,12 +196,24 @@
                              (set! result x)
                              result))))))))
 
-(define def (macro (sig . body)
-    (display (list sig body)) (newline)
-    (cond ((symbol? sig)
-        (display "normal")
-        `(define ,sig ,(car body)))
-        ((list? sig)
-            (display "list") (display sig)
-            `(define ,(car sig) (lambda ,(cdr sig) (begin ,@body))))
-        (else (error "define: bad syntax")))))
+
+(define def
+  (macro (sig . body)
+      `(cond
+          ((pair? ,sig) (def-fn ,sig ,body))
+          ((symbol? ,sig) (def-var ,sig ,body))
+          (else (error "define: bad syntax" ,sig ',body)))))
+
+(define def-fn
+  (macro (s . b)
+    `(define ,(car s)
+       (lambda ,(cdr s)
+         (begin ,@b)))))
+
+(define def-var
+  (macro (s . b)
+    `(cond
+      ((and (pair? b) (null? ,(cdr b)))
+       (define ,s ,(car b)))
+      (else
+       (error "define: expected exactly one value expression")))))

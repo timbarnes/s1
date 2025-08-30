@@ -9,29 +9,33 @@ use std::rc::Rc;
 
 /// Push an error into the existing CEKState.
 pub fn post_error(state: &mut CEKState, ec: &mut EvalContext, error: String) {
-    eprintln!("PostError: {}", error);
+    eprintln!("Error: {}", error);
     crate::utilities::debug_cek(state, ec);
 }
 /// Trace / debug function called from within the CEK machine and on error
 ///
 pub fn debug_cek(state: &mut CEKState, ec: &mut EvalContext) {
     // simple indentation
-    for _ in 0..*ec.depth {
-        print!(".");
+    for i in 0..*ec.depth {
+        if i % 10 == 0 {
+            print!("{}", i / 10);
+        } else {
+            print!(".");
+        }
     }
 
-    //println!("{}", dump_control(&state.control));
+    println!("{}", dump_control(&state.control));
 
-    //if *ec.step {
-    debug_interactive(state, ec);
-    //}
+    if *ec.step {
+        debug_interactive(state, ec);
+    }
 }
 
 fn debug_interactive(state: &mut CEKState, ec: &mut EvalContext) {
     use std::io::{self, Write};
 
     loop {
-        print!("(debug) ");
+        print!("debug> ");
         io::stdout().flush().unwrap();
 
         let mut input = String::new();
