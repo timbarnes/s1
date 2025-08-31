@@ -545,7 +545,11 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
                     if matches!(gc_value!(op), Callable(Callable::SpecialForm { .. })) {
                         // Call the special-form handler in-place.
                         state.control = Control::Expr(*car); // or set Value/Expr as your handler expects
-                        apply_special_direct(expr, ctx, state).unwrap();
+                        let result = apply_special_direct(expr, ctx, state);
+                        match result {
+                            Ok(_) => {}
+                            Err(err) => post_error(state, ctx, err),
+                        }
                         return; // let run_cek loop continue
                     }
                 }
@@ -603,7 +607,11 @@ fn apply_special(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Res
     {
         match gc_value!(proc) {
             Callable(Callable::SpecialForm { func, .. }) => {
-                func(original_call, ec, state)?;
+                let result = func(original_call, ec, state);
+                match result {
+                    Err(err) => post_error(state, ec, err),
+                    Ok(_) => {}
+                }
                 Ok(())
             }
             Callable(Callable::Macro { params, body, env }) => {
@@ -612,8 +620,11 @@ fn apply_special(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Res
                     _ => return Err("macro: not a proper call".to_string()),
                 };
                 let raw_args = list_to_vec(ec.heap, cdr)?;
-                let expanded = eval_macro(&params, *body, &env, &raw_args, ec)?;
-                state.control = Control::Expr(expanded);
+                let expanded = eval_macro(&params, *body, &env, &raw_args, ec);
+                match expanded {
+                    Ok(exp) => state.control = Control::Expr(exp),
+                    Err(err) => post_error(state, ec, err),
+                }
                 state.tail = true;
                 state.kont = next;
                 Ok(())

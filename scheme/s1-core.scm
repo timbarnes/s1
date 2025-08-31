@@ -199,21 +199,21 @@
 
 (define def
   (macro (sig . body)
-      `(cond
-          ((pair? ,sig) (def-fn ,sig ,body))
-          ((symbol? ,sig) (def-var ,sig ,body))
-          (else (error "define: bad syntax" ,sig ',body)))))
+      (cond
+          ((pair? sig) `(def-fn ,sig ,body))
+          ((symbol? sig) `(def-var ,sig ,body))
+          (else (error "define: bad syntax" sig body)))))
 
 (define def-fn
   (macro (s . b)
-    `(define ,(car s)
+     '(define ,(car s)
        (lambda ,(cdr s)
          (begin ,@b)))))
 
 (define def-var
   (macro (s . b)
-    `(cond
-      ((and (pair? b) (null? ,(cdr b)))
-       (define ,s ,(car b)))
+    (cond
+      ((and (pair? b) (null? (cdr b)))
+       `(define ,s ,(car b)))
       (else
        (error "define: expected exactly one value expression")))))

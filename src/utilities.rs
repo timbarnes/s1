@@ -10,7 +10,7 @@ use std::rc::Rc;
 /// Push an error into the existing CEKState.
 pub fn post_error(state: &mut CEKState, ec: &mut EvalContext, error: String) {
     eprintln!("Error: {}", error);
-    crate::utilities::debug_cek(state, ec);
+    debug_cek(state, ec);
 }
 /// Trace / debug function called from within the CEK machine and on error
 ///
