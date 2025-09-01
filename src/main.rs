@@ -95,11 +95,9 @@ fn main() {
 
 fn repl(ev: &mut EvalContext) {
     use crate::io::PortKind;
-    use crate::parser::Parser;
+    use crate::parser::parse;
     use std::io as stdio;
     use stdio::Write;
-
-    let mut parser = Parser::new();
 
     let mut interactive;
     println!("Welcome to the s1 Scheme REPL");
@@ -119,7 +117,7 @@ fn repl(ev: &mut EvalContext) {
             print!("s1> ");
             stdio::stdout().flush().unwrap();
         }
-        let expr = parser.parse(ev.heap, current_port_val);
+        let expr = parse(ev.heap, current_port_val);
         match expr {
             Ok(expr) => match eval_main(expr, ev) {
                 Ok(result) => {

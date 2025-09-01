@@ -10,6 +10,7 @@ use crate::gc::SchemeValue::*;
 use crate::gc::{GcHeap, GcRef, SchemeValue, list_from_vec, list_to_vec};
 use crate::io::PortKind;
 use crate::macros::expand_macro;
+use crate::parser::parse;
 use crate::printer::print_value;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -111,14 +112,13 @@ pub fn initialize_scheme_io_globals(ec: &mut EvalContext) -> Result<(), String> 
 
 /// Evaluate a string of Scheme code (all expressions, return last result)
 pub fn eval_string(ec: &mut EvalContext, code: &str) -> Result<GcRef, String> {
-    use crate::parser::{ParseError, Parser};
+    use crate::parser::ParseError;
     //use crate::io::{Port, PortKind};
 
     let mut port_kind = crate::io::new_string_port_input(code);
-    let mut parser = Parser::new();
     let mut last_result = ec.heap.nil_s();
     loop {
-        match parser.parse(&mut ec.heap, &mut port_kind) {
+        match parse(&mut ec.heap, &mut port_kind) {
             Err(ParseError::Syntax(e)) => return Err(e),
             Err(ParseError::Eof) => return Ok(last_result),
             Ok(expr) => {

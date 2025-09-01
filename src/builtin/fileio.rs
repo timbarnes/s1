@@ -1,6 +1,39 @@
 use crate::eval::EvalContext;
 use crate::gc::{GcHeap, GcRef, SchemeValue, new_port};
-use crate::io::port_kind_from_scheme_port;
+use crate::io::{PortKind, port_kind_from_scheme_port};
+use crate::parser::{ParseError, parse};
+
+/// (read [port])
+/// Reads an s-expression from a port. Port defaults to the current input port (normally stdin).
+fn read_builtin(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() > 1 {
+        return Err("read: expected at most 1 argument".to_string());
+    }
+    let mut port_kind = ec.port_stack.last_mut().unwrap().clone();
+    if args.len() == 1 {
+        match args.get(0) {
+            Some(port) => port_kind = port_kind_from_scheme_port(ec, *port),
+            None => {
+                return Err("read: invalid port argument".to_string());
+            }
+        }
+    }
+
+    match port_kind {
+        PortKind::Stdin | PortKind::StringPortInput { .. } | PortKind::File { .. } => {
+            let result = parse(ec.heap, &mut port_kind);
+            match result {
+                Ok(expr) => Ok(expr),
+                Err(err) => match err {
+                    ParseError::Eof => Err("End of file".to_string()),
+                    ParseError::Syntax(err) => Err(format!("read: syntax error:{}", err)),
+                    ParseError::Other(err) => Err(format!("read: other error:{}", err)),
+                },
+            }
+        }
+        _ => Err("read: port must be a string port or file port".to_string()),
+    }
+}
 
 /// (open-input-file filename) -> port
 pub fn open_input_file_builtin(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
@@ -154,6 +187,7 @@ macro_rules! register_builtin_family {
 
 pub fn register_fileio_builtins(heap: &mut GcHeap, env: &mut crate::env::Environment) {
     register_builtin_family!(heap, env,
+        "read" => read_builtin,
         "open-input-file" => open_input_file_builtin,
         "push-port!" => push_port,
         "pop-port!" => pop_port,

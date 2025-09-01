@@ -377,6 +377,17 @@
 (test-equal 42 (let ((x 6)) (let ((y (+ x 1))) (* x y))) "Nested let expression")
 (newline)
 
+(display "          === Testing read ===")
+(newline)
+(test-equal '(list a 2 3) (read) "Reading a list")
+(list a 2 3)
+(test-equal 22 (read) "Reading an integer")
+22
+(test-equal [1 2 3] (read) "Reading a vector")
+[1 2 3]
+(test-equal "a string" (read) "Reading a string")
+"a string"
+
 (display "          === Testing delay and force ===")
 (newline)
 (define **count** 0)
