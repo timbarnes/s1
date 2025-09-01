@@ -7,7 +7,7 @@
 use crate::cek::eval_main;
 use crate::eval::{EvalContext, expect_at_least_n_args, expect_n_args, expect_symbol};
 use crate::gc::{
-    GcHeap, GcRef, SchemeValue, car, cdr, cons, get_nil, list_from_vec, list_to_vec, matches_sym,
+    GcHeap, GcRef, SchemeValue, car, cdr, cons, get_nil, list_from_slice, list_to_vec, matches_sym,
     new_float, new_macro, new_special_form,
 };
 use crate::kont::{
@@ -44,8 +44,6 @@ macro_rules! register_special_form {
 
 pub fn register_special_forms(heap: &mut GcHeap, env: &mut crate::env::Environment) {
     register_special_form!(heap, env,
-        "eval" => eval_eval_sf,
-        "apply" => apply_sf,
         "quote" => quote_sf,
         "define" => define_sf,
         "set!" => set_sf,
@@ -182,36 +180,13 @@ fn create_lambda_or_macro(
     }
 }
 
-fn eval_eval_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
-    let argvec = expect_at_least_n_args(&ec.heap, expr, 2);
-    match argvec {
-        Ok(args) => match args.len() {
-            2 => insert_eval_eval(state, args[1], None, false),
-            3 => insert_eval_eval(state, args[1], Some(args[2]), false),
-            _ => return Err("eval: requires 1 or 2 arguments".to_string()),
-        },
-        Err(err) => return Err(err),
-    }
-
-    Ok(())
-}
-
-fn apply_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
-    let func = car(&ec.heap, cdr(&ec.heap, expr)?)?;
-    let unevaluated_args = car(&ec.heap, cdr(&ec.heap, cdr(&ec.heap, expr)?)?)?;
-    let args = eval_main(unevaluated_args, ec)?;
-    let apply_expr = cons(func, args, &mut ec.heap)?;
-    insert_eval(state, apply_expr, true);
-    Ok(())
-}
-
 /// Quote logic: return first argument unevaluated
 fn quote_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
     // (quote x) => return x unevaluated
     match &ec.heap.get_value(expr) {
         SchemeValue::Pair(_, cdr) => match &ec.heap.get_value(*cdr) {
             SchemeValue::Pair(_, _) => {
-                let arg = car(ec.heap, *cdr)?;
+                let arg = car(*cdr)?;
                 insert_value(state, arg);
                 Ok(())
             }
@@ -352,7 +327,7 @@ pub fn let_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result
         match &ec.heap.get_value(binding) {
             SchemeValue::Pair(var, binding_expr) => {
                 let var_sym = expect_symbol(&ec.heap, &var)?;
-                let binding_expr = car(&ec.heap, *binding_expr)?;
+                let binding_expr = car(*binding_expr)?;
                 vars = cons(var_sym, vars, ec.heap)?;
                 exprs = cons(binding_expr, exprs, ec.heap)?;
             }
@@ -372,7 +347,7 @@ pub fn let_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result
 }
 
 fn expand_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
-    let m = car(&ec.heap, cdr(&ec.heap, expr)?)?;
+    let m = car(cdr(expr)?)?;
     match expand_macro(&m, 0, ec) {
         Ok(expr) => {
             insert_value(state, expr);
@@ -442,7 +417,7 @@ pub fn wrap_body_in_begin(body_exprs: Vec<GcRef>, heap: &mut GcHeap) -> GcRef {
         let begin_sym = heap.intern_symbol("begin");
         let mut exprs = body_exprs;
         exprs.insert(0, begin_sym);
-        list_from_vec(exprs, heap)
+        list_from_slice(&exprs[..], heap)
     }
 }
 

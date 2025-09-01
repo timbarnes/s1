@@ -41,19 +41,28 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 pub enum Callable {
+    // Standard library / core functions
     Builtin {
         func: fn(&mut EvalContext, &[GcRef]) -> Result<GcRef, String>,
         doc: String,
     },
+    // Privileged system procedures with access to the evaluator
+    SysBuiltin {
+        func: fn(&mut EvalContext, &[GcRef], &mut CEKState) -> Result<(), String>,
+        doc: String,
+    },
+    // Syntax procedures called with unevaluated arguments
     SpecialForm {
         func: fn(GcRef, &mut EvalContext, &mut CEKState) -> Result<(), String>,
         doc: String,
     },
+    // Scheme-implemented procedures
     Closure {
         params: Vec<GcRef>,
         body: GcRef,
         env: Rc<RefCell<crate::env::Frame>>,
     },
+    // Scheme-implemented macros
     Macro {
         params: Vec<GcRef>,
         body: GcRef,
@@ -676,6 +685,20 @@ pub fn new_primitive(
     };
     heap.alloc(obj)
 }
+
+pub fn new_sys_builtin(
+    heap: &mut GcHeap,
+    f: fn(&mut EvalContext, &[GcRef], &mut CEKState) -> Result<(), String>,
+    doc: String,
+) -> GcRef {
+    let primitive = SchemeValue::Callable(Callable::SysBuiltin { func: f, doc });
+    let obj = GcObject {
+        value: primitive,
+        marked: false,
+    };
+    heap.alloc(obj)
+}
+
 /// Create a new special form.
 pub fn new_special_form(
     heap: &mut GcHeap,
@@ -746,15 +769,15 @@ pub fn is_nil(heap: &GcHeap, expr: GcRef) -> bool {
     }
 }
 
-pub fn car(heap: &GcHeap, list: GcRef) -> Result<GcRef, String> {
-    match &heap.get_value(list) {
+pub fn car(list: GcRef) -> Result<GcRef, String> {
+    match gc_value!(list) {
         SchemeValue::Pair(car, _) => Ok(*car),
         _ => Err("car: not a pair".to_string()),
     }
 }
 
-pub fn cdr(heap: &GcHeap, list: GcRef) -> Result<GcRef, String> {
-    match &heap.get_value(list) {
+pub fn cdr(list: GcRef) -> Result<GcRef, String> {
+    match gc_value!(list) {
         SchemeValue::Pair(_, cdr) => Ok(*cdr),
         _ => Err("cdr: not a pair".to_string()),
     }
@@ -807,7 +830,7 @@ pub fn list_ref(heap: &mut GcHeap, mut list: GcRef, index: usize) -> Result<GcRe
     }
 }
 
-pub fn list_from_vec(exprs: Vec<GcRef>, heap: &mut GcHeap) -> GcRef {
+pub fn list_from_slice(exprs: &[GcRef], heap: &mut GcHeap) -> GcRef {
     let mut list = crate::gc::get_nil(heap);
     for element in exprs.iter().rev() {
         list = crate::gc::new_pair(heap, *element, list);

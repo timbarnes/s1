@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 mod builtin;
 mod cek;
 mod env;
@@ -10,6 +9,7 @@ mod macros;
 mod parser;
 mod printer;
 mod special_forms;
+mod sys_builtins;
 mod tokenizer;
 mod utilities;
 

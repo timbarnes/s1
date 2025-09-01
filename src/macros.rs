@@ -2,7 +2,7 @@ use crate::cek::eval_main;
 use crate::eval::EvalContext;
 /// Modular macro expansion engine for Scheme
 use crate::gc::{
-    GcRef, SchemeValue, car, cdr, get_nil, heap_list_iter, list_from_vec, list_to_vec, new_pair,
+    GcRef, SchemeValue, car, cdr, get_nil, heap_list_iter, list_from_slice, list_to_vec, new_pair,
 };
 
 #[derive(Debug)]
@@ -29,7 +29,7 @@ pub fn expand_macro(
             } else if filtered.len() == 1 {
                 Ok(filtered.remove(0))
             } else {
-                Ok(list_from_vec(filtered, &mut evaluator.heap))
+                Ok(list_from_slice(&filtered[..], &mut evaluator.heap))
             }
         }
     }
@@ -51,7 +51,7 @@ fn expand_macro_internal(
         match expanded {
             Expanded::Single(_) => Ok(expanded),
             Expanded::Splice(vec) => {
-                let list = list_from_vec(vec, &mut evaluator.heap);
+                let list = list_from_slice(&vec[..], &mut evaluator.heap);
                 Ok(Expanded::Single(list))
             }
         }
@@ -118,8 +118,8 @@ fn expand_list_pair(
 
     // Generic list case (not special form)
     // Extract car and cdr from heap first (produces GcRef, not references)
-    let car = car(&evaluator.heap, *expr)?;
-    let cdr = cdr(&evaluator.heap, *expr)?;
+    let car = car(*expr)?;
+    let cdr = cdr(*expr)?;
 
     // Then safely call into mutating code
     let car_expanded = expand_macro_internal(&car, depth, evaluator)?;
@@ -152,7 +152,10 @@ fn expand_list_pair(
                 (Expanded::Single(h), Expanded::Splice(ts)) => {
                     let mut vec = vec![h];
                     vec.extend(ts);
-                    Ok(Expanded::Single(list_from_vec(vec, &mut evaluator.heap)))
+                    Ok(Expanded::Single(list_from_slice(
+                        &vec[..],
+                        &mut evaluator.heap,
+                    )))
                 }
                 (Expanded::Splice(mut hs), Expanded::Single(t)) => {
                     if !matches!(evaluator.heap.get_value(t), SchemeValue::Nil) {
@@ -162,7 +165,10 @@ fn expand_list_pair(
                 }
                 (Expanded::Splice(mut hs), Expanded::Splice(mut ts)) => {
                     hs.append(&mut ts);
-                    Ok(Expanded::Single(list_from_vec(hs, &mut evaluator.heap)))
+                    Ok(Expanded::Single(list_from_slice(
+                        &hs[..],
+                        &mut evaluator.heap,
+                    )))
                 }
             }
         }
@@ -172,14 +178,17 @@ fn expand_list_pair(
 fn wrap(tag: &str, body: Expanded, evaluator: &mut EvalContext) -> Result<Expanded, String> {
     let tag_sym = evaluator.heap.intern_symbol(tag);
     match body {
-        Expanded::Single(val) => Ok(Expanded::Single(list_from_vec(
-            vec![tag_sym, val],
+        Expanded::Single(val) => Ok(Expanded::Single(list_from_slice(
+            &[tag_sym, val],
             &mut evaluator.heap,
         ))),
         Expanded::Splice(vals) => {
             let mut list = vec![tag_sym];
             list.extend(vals);
-            Ok(Expanded::Single(list_from_vec(list, &mut evaluator.heap)))
+            Ok(Expanded::Single(list_from_slice(
+                &list[..],
+                &mut evaluator.heap,
+            )))
         }
     }
 }

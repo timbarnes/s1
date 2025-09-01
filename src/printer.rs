@@ -78,6 +78,7 @@ pub fn print_value(obj: &GcRef) -> String {
             Callable::SpecialForm { doc, .. } => format!("SpecialForm  {}", doc),
             Callable::Closure { params, body, .. } => print_callable("Closure     ", params, *body),
             Callable::Macro { params, body, .. } => print_callable("Macro       ", params, *body),
+            Callable::SysBuiltin { func: _, doc } => format!("SysBuiltin   {}", doc),
         },
         Port(port) => format!("Port         ({:?})", port),
         _ => format!("print_value: unprintable."),

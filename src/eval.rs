@@ -7,7 +7,7 @@
 use crate::cek::eval_main;
 use crate::env::{Environment, Frame};
 use crate::gc::SchemeValue::*;
-use crate::gc::{GcHeap, GcRef, SchemeValue, list_from_vec, list_to_vec};
+use crate::gc::{GcHeap, GcRef, SchemeValue, list_from_slice, list_to_vec};
 use crate::io::PortKind;
 use crate::macros::expand_macro;
 use crate::parser::parse;
@@ -17,9 +17,9 @@ use std::rc::Rc;
 
 /// Evaluator that owns both heap and environment
 pub struct Evaluator {
-    pub heap: GcHeap,              // The global heap for scheme data
-    env: Environment,              // The current state of the environment
-    tail_call: Option<TailCall>,   // Tail call optimization state
+    pub heap: GcHeap, // The global heap for scheme data
+    env: Environment, // The current state of the environment
+    //tail_call: Option<TailCall>,   // Tail call optimization state
     pub port_stack: Vec<PortKind>, // Stack of ports for input/output operations         // Indicates a new port has been pushed on the stack
     pub trace: i32,                // Indicates tracing is enabled to a given depth
     pub depth: i32,                // Evaluation nesting depth (used by trace)
@@ -29,7 +29,7 @@ pub struct Evaluator {
 pub struct EvalContext<'a> {
     pub heap: &'a mut GcHeap,
     pub env: &'a mut Environment,
-    pub tail_call: Option<TailCall>,
+    //pub tail_call: Option<TailCall>,
     pub port_stack: &'a mut Vec<PortKind>,
     pub trace: &'a mut i32,
     pub depth: &'a mut i32,
@@ -41,7 +41,7 @@ impl<'a> EvalContext<'a> {
         EvalContext {
             heap: &mut eval.heap,
             env: &mut eval.env,
-            tail_call: None,
+            //tail_call: None,
             port_stack: &mut eval.port_stack,
             trace: &mut eval.trace,
             depth: &mut eval.depth,
@@ -63,7 +63,7 @@ impl Evaluator {
         let mut evaluator = Self {
             heap: GcHeap::new(),
             env: g_env,
-            tail_call: None,
+            //tail_call: None,
             port_stack: Vec::new(),
             trace: 0,
             depth: 0,
@@ -72,6 +72,7 @@ impl Evaluator {
 
         // Register built-ins in the evaluator's heap and environment
         crate::builtin::register_builtins(&mut evaluator.heap, &mut evaluator.env);
+        crate::sys_builtins::register_sys_builtins(&mut evaluator.heap, &mut evaluator.env);
         crate::special_forms::register_special_forms(&mut evaluator.heap, &mut evaluator.env);
         evaluator
     }
@@ -164,7 +165,7 @@ pub fn bind_params(
     match params.len() {
         0 => (),
         1 => {
-            let arglist = list_from_vec(args.to_vec(), heap);
+            let arglist = list_from_slice(args, heap);
             new_env.set_symbol(params[0], arglist);
         }
         _ => {
@@ -175,7 +176,7 @@ pub fn bind_params(
             if delta > 0 {
                 if let SchemeValue::Symbol(_) = &heap.get_value(params[0]) {
                     let rest_args = &args[(params.len() - 1)..];
-                    let arglist = list_from_vec(rest_args.to_vec(), heap);
+                    let arglist = list_from_slice(rest_args, heap);
                     new_env.set_symbol(params[0], arglist);
                 }
             }
@@ -959,25 +960,6 @@ mod tests {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "6"),
             _ => panic!("Expected integer result"),
         }
-    }
-
-    #[test]
-    fn test_tail_call_infrastructure() {
-        let mut evaluator = Evaluator::new();
-
-        // Test that tail call infrastructure is in place
-        assert!(evaluator.tail_call.is_none());
-
-        // Test that is_tail_call is conservative (returns false)
-        let test_expr = new_int(evaluator.heap_mut(), num_bigint::BigInt::from(42));
-        //assert!(!is_tail_call(test_expr, &mut evaluator).unwrap());
-
-        // Test that we can set a tail call (even though it's not used)
-        evaluator.tail_call = Some(TailCall {
-            func: test_expr,
-            args: vec![],
-        });
-        assert!(evaluator.tail_call.is_some());
     }
 
     #[test]

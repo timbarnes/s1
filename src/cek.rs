@@ -586,7 +586,7 @@ fn apply_special_direct(
     ec: &mut EvalContext,
     state: &mut CEKState,
 ) -> Result<(), String> {
-    let op_sym = crate::gc::car(ec.heap, expr)?;
+    let op_sym = crate::gc::car(expr)?;
     let op_val = ec.env.get_symbol(op_sym).ok_or("unbound special form")?;
     //println!("op_val: {}", print_scheme_value(&op_val));
     if let Callable(Callable::SpecialForm { func, .. }) = gc_value!(op_val) {
@@ -654,6 +654,15 @@ fn apply_proc(state: &mut CEKState, ec: &mut EvalContext, frame: KontRef) -> Res
                     match result {
                         Err(err) => post_error(state, ec, err),
                         Ok(result) => state.control = Control::Value(result),
+                    }
+                    state.kont = Rc::clone(next);
+                    Ok(())
+                }
+                Callable::SysBuiltin { func, .. } => {
+                    let result = func(ec, &evaluated_args, state);
+                    match result {
+                        Err(err) => post_error(state, ec, err),
+                        Ok(_) => {}
                     }
                     state.kont = Rc::clone(next);
                     Ok(())
