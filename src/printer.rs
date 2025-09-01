@@ -70,6 +70,9 @@ pub fn print_value(obj: &GcRef) -> String {
         Bool(false) => "#f".to_string(),
         Char(c) => format!("#\\{}", c),
         Nil => "nil".to_string(),
+        Void => "#<void>".to_string(),
+        Undefined => "#<undefined>".to_string(),
+        Eof => "#<eof>".to_string(),
         Callable(variant) => match variant {
             Callable::Builtin { func: _, doc } => format!("Primitive    {}", doc),
             Callable::SpecialForm { doc, .. } => format!("SpecialForm  {}", doc),

@@ -21,7 +21,6 @@
 //! ```
 
 use crate::io::PortKind;
-use std::io::Read;
 
 /// Represents a lexical token in Scheme source code.
 #[derive(Debug, Clone, PartialEq)]

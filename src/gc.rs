@@ -75,7 +75,10 @@ pub enum SchemeValue {
     Nil,
     TailCallScheduled,
     Port(PortKind),
-    Env(EnvRef), // Extend with more types as needed.
+    Env(EnvRef),
+    Eof,
+    Void,
+    Undefined,
 }
 
 /// Returns an iterator over a Scheme list in the heap.
@@ -106,6 +109,9 @@ pub fn eq(heap: &GcHeap, a: GcRef, b: GcRef) -> bool {
             (SchemeValue::Char(a), SchemeValue::Char(b)) => a == b,
             (SchemeValue::Port(a), SchemeValue::Port(b)) => a == b,
             (SchemeValue::Nil, SchemeValue::Nil) => true,
+            (SchemeValue::Eof, SchemeValue::Eof) => true,
+            (SchemeValue::Void, SchemeValue::Void) => true,
+            (SchemeValue::Undefined, SchemeValue::Undefined) => true,
             _ => false,
         }
     }
@@ -324,10 +330,13 @@ pub fn is_proper_list(heap: &GcHeap, mut val: GcRef) -> bool {
 /// The garbage-collected heap that manages all Scheme objects.
 pub struct GcHeap {
     // Singleton values for SchemeValueSimple
-    nil_obj: Option<GcRef>,
-    true_obj: Option<GcRef>,
-    false_obj: Option<GcRef>,
-    tail_call_obj: Option<GcRef>,
+    pub nil_obj: Option<GcRef>,
+    pub true_obj: Option<GcRef>,
+    pub false_obj: Option<GcRef>,
+    pub tail_call_obj: Option<GcRef>,
+    pub eof_obj: Option<GcRef>,
+    pub undefined_obj: Option<GcRef>,
+    pub void_obj: Option<GcRef>,
     // Free list for GcRef objects
     free_list: Vec<GcObject>,
     // All allocated GcRef objects (for potential future GC)
@@ -344,6 +353,9 @@ impl GcHeap {
             true_obj: None,
             false_obj: None,
             tail_call_obj: None,
+            eof_obj: None,
+            undefined_obj: None,
+            void_obj: None,
             free_list: Vec::new(),
             objects: Vec::new(),
             symbol_table: HashMap::new(),
@@ -377,6 +389,26 @@ impl GcHeap {
             marked: false,
         };
         self.false_obj = Some(self.alloc(false_obj));
+
+        let void_obj = GcObject {
+            value: SchemeValue::Void,
+            marked: false,
+        };
+        self.void_obj = Some(self.alloc(void_obj));
+
+        // Allocate true
+        let eof_obj = GcObject {
+            value: SchemeValue::Eof,
+            marked: false,
+        };
+        self.eof_obj = Some(self.alloc(eof_obj));
+
+        // Allocate false
+        let undefined_obj = GcObject {
+            value: SchemeValue::Undefined,
+            marked: false,
+        };
+        self.undefined_obj = Some(self.alloc(undefined_obj));
 
         // Allocate tail_call
         let tail_call_obj = GcObject {
@@ -425,6 +457,20 @@ impl GcHeap {
     /// Get the singleton false value.
     pub fn false_s(&self) -> GcRef {
         self.false_obj.unwrap()
+    }
+    /// Get the singleton void value.
+    pub fn void(&self) -> GcRef {
+        self.void_obj.unwrap()
+    }
+
+    /// Get the singleton undefined value.
+    pub fn unspecified(&self) -> GcRef {
+        self.undefined_obj.unwrap()
+    }
+
+    /// Get the singleton eof value.
+    pub fn eof(&self) -> GcRef {
+        self.eof_obj.unwrap()
     }
 
     /// Get the tail call object.

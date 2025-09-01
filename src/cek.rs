@@ -194,7 +194,7 @@ fn handle_apply_special(
 
 fn handle_bind(
     state: &mut CEKState,
-    _ec: &mut EvalContext,
+    ec: &mut EvalContext,
     symbol: GcRef,
     env: Option<EnvRef>,
     next: KontRef,
@@ -205,7 +205,7 @@ fn handle_bind(
             Some(frame) => {
                 // global and set! path: update specific frame
                 frame.borrow_mut().set_local(symbol, val);
-                state.control = Control::Value(val);
+                state.control = Control::Value(ec.heap.unspecified());
             }
             None => {
                 // local define path: bind in current frame

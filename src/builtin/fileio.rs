@@ -25,7 +25,7 @@ fn read_builtin(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
             match result {
                 Ok(expr) => Ok(expr),
                 Err(err) => match err {
-                    ParseError::Eof => Err("End of file".to_string()),
+                    ParseError::Eof => Ok(ec.heap.eof()),
                     ParseError::Syntax(err) => Err(format!("read: syntax error:{}", err)),
                     ParseError::Other(err) => Err(format!("read: other error:{}", err)),
                 },
@@ -35,8 +35,23 @@ fn read_builtin(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     }
 }
 
+/// (eof-object? obj) -> #t or #f
+/// Tests the result of a read operation to determine if it reached the end of the file.
+fn eof_object(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 1 {
+        return Err("eof-object: expected exactly 0 arguments".to_string());
+    }
+    let result;
+    if crate::gc::eq(&ec.heap, ec.heap.eof(), args[0]) {
+        result = ec.heap.true_s();
+    } else {
+        result = ec.heap.false_s();
+    }
+    Ok(result)
+}
+
 /// (open-input-file filename) -> port
-pub fn open_input_file_builtin(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
+fn open_input_file(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 1 {
         return Err("open-input-file: expected exactly 1 argument".to_string());
     }
@@ -140,7 +155,7 @@ mod tests {
         write!(tmpfile, "hello world").unwrap();
         let path = tmpfile.path().to_str().unwrap().to_string();
         let filename = new_string(&mut ec.heap, &path);
-        let result = open_input_file_builtin(&mut ec, &[filename]);
+        let result = open_input_file(&mut ec, &[filename]);
         assert!(result.is_ok());
         let port = result.unwrap();
         match &ec.heap.get_value(port) {
@@ -159,7 +174,7 @@ mod tests {
         let mut ev = Evaluator::new();
         let mut ec = crate::eval::EvalContext::from_eval(&mut ev);
         let filename = new_string(&mut ec.heap, "/no/such/file/hopefully.txt");
-        let result = open_input_file_builtin(&mut ec, &[filename]);
+        let result = open_input_file(&mut ec, &[filename]);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("could not open file"));
     }
@@ -169,7 +184,7 @@ mod tests {
         let mut ev = Evaluator::new();
         let mut ec = crate::eval::EvalContext::from_eval(&mut ev);
         let not_a_string = new_int(&mut ec.heap, 42.into());
-        let result = open_input_file_builtin(&mut ec, &[not_a_string]);
+        let result = open_input_file(&mut ec, &[not_a_string]);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("argument must be a string"));
     }
@@ -188,8 +203,9 @@ macro_rules! register_builtin_family {
 pub fn register_fileio_builtins(heap: &mut GcHeap, env: &mut crate::env::Environment) {
     register_builtin_family!(heap, env,
         "read" => read_builtin,
-        "open-input-file" => open_input_file_builtin,
+        "open-input-file" => open_input_file,
         "push-port!" => push_port,
         "pop-port!" => pop_port,
+        "eof-object?" => eof_object,
     );
 }

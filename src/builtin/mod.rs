@@ -31,11 +31,21 @@ macro_rules! register_builtin_family {
 // BUILTIN FUNCTIONS
 // ============================================================================
 
+/// (void)
+/// Returns the void value.
+fn void(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
+    if !args.is_empty() {
+        return Err("void: expected 0 arguments".to_string());
+    }
+
+    Ok(ec.heap.void())
+}
+
 /// Builtin function: (exit)
 ///
 /// Exits the Scheme interpreter with exit code 0.
 /// This works in both programs and the REPL.
-pub fn exit(_ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
+fn exit(_ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     if !args.is_empty() {
         return Err("exit: expected 0 arguments".to_string());
     }
@@ -45,7 +55,7 @@ pub fn exit(_ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
 }
 
 // (help 'symbol): returns the doc string for the given symbol as a Scheme string
-pub fn help(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
+fn help(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     if let Some(arg) = args.get(0) {
         if let SchemeValue::Symbol(sym) = &ec.heap.get_value(*arg) {
             // In a real implementation, you would have access to the environment here.
@@ -117,5 +127,6 @@ pub fn register_builtins(heap: &mut GcHeap, env: &mut Environment) {
         "help" => help,
         "exit" => exit,
         "eval-string" => eval_string,
+        "void" => void,
     );
 }
