@@ -74,19 +74,19 @@ impl Environment {
     }
 
     /// Add a binding to the current frame using a symbol key (for builtin registration)
-    pub fn add_binding(&mut self, symbol: GcRef, value: GcRef) {
-        self.set_symbol(symbol, value);
-    }
+    // pub fn add_binding(&mut self, symbol: GcRef, value: GcRef) {
+    //     self.set_symbol(symbol, value);
+    // }
 
     /// Check if a binding exists in the current frame only (not parent frames)
-    pub fn has_local(&self, symbol: GcRef) -> bool {
-        self.current_frame.borrow().has_local(symbol)
-    }
+    // pub fn has_local(&self, symbol: GcRef) -> bool {
+    //     self.current_frame.borrow().has_local(symbol)
+    // }
 
     /// Check if a binding exists anywhere in the frame chain
-    pub fn has(&self, symbol: GcRef) -> bool {
-        self.get_symbol(symbol).is_some()
-    }
+    // pub fn has(&self, symbol: GcRef) -> bool {
+    //     self.get_symbol(symbol).is_some()
+    // }
 
     /// Get the current frame (for closure creation)
     pub fn current_frame(&self) -> Rc<RefCell<Frame>> {
@@ -169,9 +169,9 @@ impl Environment {
     }
 
     /// Check if a binding exists in the current frame only (not parent frames) using a symbol key
-    pub fn has_local_symbol(&self, symbol: GcRef) -> bool {
-        self.current_frame.borrow().has_local(symbol)
-    }
+    // pub fn has_local_symbol(&self, symbol: GcRef) -> bool {
+    //     self.current_frame.borrow().has_local(symbol)
+    // }
 
     /// Check if a binding exists anywhere in the frame chain using a symbol key
     pub fn has_symbol(&self, symbol: GcRef) -> bool {
