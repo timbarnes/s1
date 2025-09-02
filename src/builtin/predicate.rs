@@ -315,6 +315,26 @@ mod tests {
 
     #[test]
     fn test_type_of() {
+        fn as_type(ec: &mut EvalContext, val: &GcRef) -> &'static str {
+            match &ec.heap.get_value(*val) {
+                SchemeValue::Symbol(s) => match s.as_str() {
+                    "integer" => "integer",
+                    "float" => "float",
+                    "symbol" => "symbol",
+                    "pair" => "pair",
+                    "string" => "string",
+                    "vector" => "vector",
+                    "boolean" => "boolean",
+                    "char" => "char",
+                    "primitive" => "primitive",
+                    "closure" => "closure",
+                    "null" => "null",
+                    _ => panic!("unexpected symbol from type_of: {}", s),
+                },
+                _ => panic!("type_of did not return a symbol"),
+            }
+        }
+
         let mut ev = crate::eval::Evaluator::new();
         let mut ec = crate::eval::EvalContext::from_eval(&mut ev);
 
@@ -379,25 +399,5 @@ mod tests {
         let result = type_of(&mut ec, &[]);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("expected 1 argument"));
-    }
-
-    fn as_type(ec: &mut EvalContext, val: &GcRef) -> &'static str {
-        match &ec.heap.get_value(*val) {
-            SchemeValue::Symbol(s) => match s.as_str() {
-                "integer" => "integer",
-                "float" => "float",
-                "symbol" => "symbol",
-                "pair" => "pair",
-                "string" => "string",
-                "vector" => "vector",
-                "boolean" => "boolean",
-                "char" => "char",
-                "primitive" => "primitive",
-                "closure" => "closure",
-                "null" => "null",
-                _ => panic!("unexpected symbol from type_of: {}", s),
-            },
-            _ => panic!("type_of did not return a symbol"),
-        }
     }
 }
