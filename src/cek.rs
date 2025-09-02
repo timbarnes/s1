@@ -638,7 +638,11 @@ fn apply_special(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Res
 
 /// Process Builtin and Closure applications. Arguments are already evaluated.
 ///
-fn apply_proc(state: &mut CEKState, ec: &mut EvalContext, frame: KontRef) -> Result<(), String> {
+pub fn apply_proc(
+    state: &mut CEKState,
+    ec: &mut EvalContext,
+    frame: KontRef,
+) -> Result<(), String> {
     dump_cek("     apply_proc", &state);
 
     if let Kont::ApplyProc {

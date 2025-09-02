@@ -1,7 +1,10 @@
+use crate::cek::apply_proc;
 use crate::eval::EvalContext;
-use crate::gc::{GcHeap, GcRef, cons, list_from_slice, new_sys_builtin};
-use crate::kont::{CEKState, insert_eval, insert_eval_eval};
+use crate::gc::{Callable, GcHeap, GcRef, SchemeValue, list_to_vec, new_sys_builtin};
+use crate::gc_value;
+use crate::kont::{CEKState, Kont, insert_eval_eval};
 use crate::utilities::dump_cek;
+use std::rc::Rc;
 
 /// System Builtin Functions
 ///
@@ -46,15 +49,28 @@ fn apply_sp(ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Resul
     if args.len() < 2 {
         return Err("apply: requires at least 2 arguments".to_string());
     }
-    let func = args[0];
-    let arglist = list_from_slice(&args[1..], ec.heap);
-    let apply_expr = cons(func, arglist, &mut ec.heap)?;
-    eprintln!(
-        "Applying function {}",
-        crate::printer::print_value(&apply_expr)
-    );
-    insert_eval(state, apply_expr, true);
-    Ok(())
+    let func = gc_value!(args[0]);
+    match func {
+        SchemeValue::Callable(func) => match func {
+            Callable::Builtin { func, .. } => {
+                let args = list_to_vec(ec.heap, args[1])?;
+                let result = func(ec, &args[..])?;
+                state.control = crate::kont::Control::Value(result);
+                return Ok(());
+            }
+            Callable::Closure { params, body, env } => {
+                let frame = Rc::new(Kont::ApplyProc {
+                    proc: args[0],
+                    evaluated_args: list_to_vec(ec.heap, args[1])?,
+                    next: state.kont.clone(),
+                });
+                apply_proc(state, ec, frame)?;
+                return Ok(());
+            }
+            _ => return Err("apply: first argument must be a function".to_string()),
+        },
+        _ => return Err("apply: first argument must be a function".to_string()),
+    }
 }
 
 /// (debug-stack)

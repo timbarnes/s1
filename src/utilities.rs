@@ -12,6 +12,7 @@ pub fn post_error(state: &mut CEKState, ec: &mut EvalContext, error: String) {
     eprintln!("Error: {}", error);
     debug_cek(state, ec);
 }
+
 /// Trace / debug function called from within the CEK machine and on error
 ///
 pub fn debug_cek(state: &mut CEKState, ec: &mut EvalContext) {
