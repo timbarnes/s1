@@ -1,8 +1,12 @@
 use crate::cek::apply_proc;
 use crate::eval::EvalContext;
-use crate::gc::{Callable, GcHeap, GcRef, SchemeValue, list_to_vec, new_sys_builtin};
+use crate::gc::{
+    Callable, GcHeap, GcRef, SchemeValue, cons, get_symbol, list_to_vec, new_closure,
+    new_continuation, new_sys_builtin,
+};
 use crate::gc_value;
 use crate::kont::{CEKState, Kont, insert_eval_eval};
+use crate::printer::print_value;
 use crate::utilities::dump_cek;
 use std::rc::Rc;
 
@@ -30,6 +34,7 @@ pub fn register_sys_builtins(heap: &mut GcHeap, env: &mut crate::env::Environmen
         "debug-stack" => debug_stack_sp,
         "call/cc" => call_cc_sp,
         "call-with-current-continuation" => call_cc_sp,
+        "escape" => escape_sp,
     );
 }
 
@@ -58,7 +63,7 @@ fn apply_sp(ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Resul
                 state.control = crate::kont::Control::Value(result);
                 return Ok(());
             }
-            Callable::Closure { params, body, env } => {
+            Callable::Closure { .. } => {
                 let frame = Rc::new(Kont::ApplyProc {
                     proc: args[0],
                     evaluated_args: list_to_vec(ec.heap, args[1])?,
@@ -85,11 +90,46 @@ fn debug_stack_sp(
     Ok(())
 }
 
-/// (debug-stack)
-/// Prints the stack at the time of calling
-fn call_cc_sp(_ec: &mut EvalContext, args: &[GcRef], _state: &mut CEKState) -> Result<(), String> {
+/// (call/cc func)
+/// Creates and returns an escape procedure that resets the continuation to the current state
+/// at the time call/cc was invoked.
+fn call_cc_sp(ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
     if args.len() != 1 {
         return Err("call/cc: requires a single function argument".to_string());
     }
+    let kont = new_continuation(ec.heap, state.kont.clone());
+    // Build the escape function
+    // (lambda (v) (escape kont v))
+    let mut params = Vec::new();
+    let plist = cons(get_symbol(ec.heap, "v"), ec.heap.nil_s(), ec.heap)?;
+    params.push(plist);
+    let mut body = cons(args[0], ec.heap.nil_s(), ec.heap)?;
+    body = cons(kont, body, ec.heap)?;
+    body = cons(get_symbol(ec.heap, "escape"), body, ec.heap)?;
+    eprintln!("escape fn: {}", print_value(&body));
+    let escape_fn = new_closure(ec.heap, params, body, ec.env.current_frame());
+    eprintln!("escape closure: {}", print_value(&escape_fn));
+    state.control = crate::kont::Control::Value(escape_fn);
     Ok(())
+}
+
+/// (escape continuation arg)
+/// This is the internal mechanism for call/cc. It is bound by a lambda to the escape continuation,
+/// and when called, it resets the continuation and returns the provided arg.
+fn escape_sp(_ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+    if args.len() != 2 {
+        return Err("escape: requires two arguments".to_string());
+    }
+    let kont = args[0];
+    match gc_value!(kont) {
+        SchemeValue::Continuation(kont) => {
+            // Assign to the new continuation
+            state.kont = kont.clone();
+            let arg = args[1];
+            // Return the second argument
+            state.control = crate::kont::Control::Value(arg);
+            Ok(())
+        }
+        _ => return Err("escape: first argument must be a function".to_string()),
+    }
 }

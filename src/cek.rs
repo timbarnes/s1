@@ -521,7 +521,7 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
     dump_cek("   eval_cek", &state);
     match &gc_value!(expr) {
         // Self-evaluating values
-        Int(_) | Float(_) | Str(_) | Bool(_) | Vector(_) | Char(_) | Nil => {
+        Int(_) | Float(_) | Str(_) | Bool(_) | Vector(_) | Char(_) | Nil | Continuation(_) => {
             state.control = Control::Value(expr);
         }
         Symbol(name) => {
