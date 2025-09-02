@@ -32,7 +32,7 @@ macro_rules! gc_value {
 use crate::env::EnvRef;
 use crate::eval::EvalContext;
 use crate::io::PortKind;
-use crate::kont::CEKState;
+use crate::kont::{CEKState, KontRef};
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 use std::cell::RefCell;
@@ -85,6 +85,7 @@ pub enum SchemeValue {
     TailCallScheduled,
     Port(PortKind),
     Env(EnvRef),
+    Continuation(KontRef),
     Eof,
     Void,
     Undefined,
@@ -667,6 +668,15 @@ pub fn new_pair(heap: &mut GcHeap, car: GcRef, cdr: GcRef) -> GcRef {
 pub fn new_vector(heap: &mut GcHeap, elements: Vec<GcRef>) -> GcRef {
     let obj = GcObject {
         value: SchemeValue::Vector(elements),
+        marked: false,
+    };
+    heap.alloc(obj)
+}
+
+/// Create a new continuation.
+pub fn new_continuation(heap: &mut GcHeap, kont: KontRef) -> GcRef {
+    let obj = GcObject {
+        value: SchemeValue::Continuation(kont),
         marked: false,
     };
     heap.alloc(obj)

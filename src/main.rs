@@ -13,8 +13,6 @@ mod sys_builtins;
 mod tokenizer;
 mod utilities;
 
-//use crate::parser::Parser;
-//use crate::io::{Port, PortKind};
 use crate::cek::eval_main;
 use crate::eval::{Evaluator, eval_string, initialize_scheme_io_globals};
 use crate::printer::print_value;
@@ -140,11 +138,10 @@ fn repl(ev: &mut EvalContext) {
             Err(crate::parser::ParseError::Syntax(e)) => {
                 println!("Parse error: {}", e);
                 continue;
-            }
-            Err(crate::parser::ParseError::Other(e)) => {
-                println!("Other error: {}", e);
-                continue;
-            }
+            } // Err(crate::parser::ParseError::Other(e)) => {
+              //     println!("Other error: {}", e);
+              //     continue;
+              // }
         }
     }
 }

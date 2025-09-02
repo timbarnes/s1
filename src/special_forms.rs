@@ -12,7 +12,7 @@ use crate::gc::{
 };
 use crate::kont::{
     AndOrKind, CEKState, CondClause, insert_and_or, insert_bind, insert_cond, insert_eval,
-    insert_eval_eval, insert_if, insert_seq, insert_value,
+    insert_if, insert_seq, insert_value,
 };
 use crate::macros::expand_macro;
 use crate::utilities::post_error;
