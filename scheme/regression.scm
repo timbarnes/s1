@@ -313,6 +313,8 @@
 (test-true (eq? (eval '(+ 1 2)) 3) "eval")
 (test-true (eq? (apply + '(1 2)) 3) "apply")
 (test-true (eq? (eval '(+ 1 2)) (apply + '(1 2))) "eval and apply")
+(define square (lambda (x) (* x x)))
+(test-equal 144 (apply square '(12)) "Apply with closure")
 
 (display "          === Testing Recursion ===")
 (define fact

@@ -15,6 +15,11 @@
 (define boolean? (lambda (x) (eq? (type-of x) 'boolean)))
 (define char? (lambda (x) (eq? (type-of x) 'char)))
 (define primitive? (lambda (x) (eq? (type-of x) 'primitive)))
+(define procedure? (lambda (x)
+    (let ((type (type-of x)))
+        (or (eq? type 'builtin)
+            (eq? type 'closure)
+            (eq? type 'sys-builtin)))))
 (define env-frame? (lambda (x) (eq? (type-of x) 'env-frame)))
 (define null? (lambda (x) (eq? x '())))
 
@@ -142,7 +147,9 @@
 (define pop! (macro (var) `(let ((result (car ,var))) (set! ,var (cdr ,var)) result)))
 
 (define length (lambda (lst)
-    (if (null? lst) 0 (+ 1 (length (cdr lst))))))
+    (cond ((null? lst) 0)
+       ((not (pair? lst)) (error "length: not a well-formed list"))
+       (else (+ 1 (length (cdr lst)))))))
 
 ; (define map (lambda (f . lists)
 ;     (display "Fn:") (displayln f)
