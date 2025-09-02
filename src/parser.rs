@@ -30,7 +30,6 @@ use num_bigint::BigInt;
 pub enum ParseError {
     Eof,
     Syntax(String),
-    Other(String),
 }
 
 /// Parser for Scheme s-expressions using the reference-based GC system.

@@ -27,7 +27,7 @@ fn read_builtin(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
                 Err(err) => match err {
                     ParseError::Eof => Ok(ec.heap.eof()),
                     ParseError::Syntax(err) => Err(format!("read: syntax error:{}", err)),
-                    ParseError::Other(err) => Err(format!("read: other error:{}", err)),
+                    //ParseError::Other(err) => Err(format!("read: other error:{}", err)),
                 },
             }
         }
@@ -85,26 +85,6 @@ fn open_input_file(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String
 /// Builtin function: (load filename) - evaluator-aware version
 ///
 /// Loads and evaluates a Scheme file using the evaluator's port stack.
-pub fn load_builtin_evaluator(
-    ec: &mut crate::eval::EvalContext,
-    args: &[GcRef],
-) -> Result<GcRef, String> {
-    if args.len() != 1 {
-        return Err("load: expected exactly 1 argument".to_string());
-    }
-
-    let filename = match &ec.heap.get_value(args[0]) {
-        crate::gc::SchemeValue::Str(filename) => filename.clone(),
-        _ => return Err("load: argument must be a string".to_string()),
-    };
-
-    // For now, just return a success message
-    // TODO: Implement actual file loading with proper port stack integration
-    Ok(crate::gc::new_string(
-        ec.heap,
-        &format!("Loaded file: {}", filename),
-    ))
-}
 
 /// (push-port! port)
 /// Pushes a port onto the port stack, causing the evaluator to load scheme code from it.
