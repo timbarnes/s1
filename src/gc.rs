@@ -801,6 +801,29 @@ pub fn cons(car: GcRef, cdr: GcRef, heap: &mut GcHeap) -> Result<GcRef, String> 
     Ok(heap.alloc(obj))
 }
 
+pub fn list(car: GcRef, heap: &mut GcHeap) -> Result<GcRef, String> {
+    let obj = GcObject {
+        value: SchemeValue::Pair(car, heap.nil_s()),
+        marked: false,
+    };
+    Ok(heap.alloc(obj))
+}
+
+pub fn list2(first: GcRef, second: GcRef, heap: &mut GcHeap) -> Result<GcRef, String> {
+    let obj = cons(first, list(second, heap)?, heap)?;
+    Ok(obj)
+}
+
+pub fn list3(
+    first: GcRef,
+    second: GcRef,
+    third: GcRef,
+    heap: &mut GcHeap,
+) -> Result<GcRef, String> {
+    let obj = cons(first, cons(second, list(third, heap)?, heap)?, heap)?;
+    Ok(obj)
+}
+
 pub fn set_car(pair_ref: GcRef, new_car: GcRef) -> Result<(), String> {
     unsafe {
         match &mut (*pair_ref).value {
@@ -859,6 +882,7 @@ pub fn list_to_vec(heap: &GcHeap, list: GcRef) -> Result<Vec<GcRef>, String> {
                 result.push(*car);
                 l = *cdr;
             }
+            //_ => panic!("expected proper list"),
             _ => break Err("expected proper list".to_string()),
         }
     }
