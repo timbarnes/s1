@@ -42,8 +42,8 @@ fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> Result<GcRef, String> 
                 _ => continue,                 // Some continuation remains; continue loop
             },
             Control::Expr(_) => continue, // Still evaluating an expression; continue loop
-            Control::Error(msg) => return Err(msg.clone()),
             Control::Empty => return Err("CEK: Control::Empty".to_string()),
+            Control::Escape(val, _) => return Ok(*val),
         }
     }
 }
@@ -66,17 +66,17 @@ fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
             eval_cek(expr, ec, state);
             Ok(())
         }
-
         Control::Value(val) => {
             *ec.depth -= 1;
             let kont = take_kont(state);
             state.control = Control::Value(val);
             dispatch_kont(state, ec, val, kont)
         }
-        Control::Error(e) => {
-            let e1 = e.clone();
-            post_error(state, ec, e);
-            return Err(e1);
+        Control::Escape(val, kont) => {
+            *ec.depth -= 1;
+            state.control = Control::Value(val);
+            state.kont = kont;
+            Ok(())
         }
         Control::Empty => Err("Unexpected Control::Halt in step()".to_string()),
     }
@@ -238,7 +238,8 @@ fn handle_cond(
         state.tail = false;
         // Push a CondClause frame whose `next` points to the Cond we just installed.
         //    We grab the Cond frame we just installed by replacing state.kont with Halt (cheap).
-        let cond_frame = std::mem::replace(&mut state.kont, Rc::new(Kont::Halt));
+        //let cond_frame = std::mem::replace(&mut state.kont, Rc::new(Kont::Halt));
+        let cond_frame = Rc::clone(&state.kont);
         state.kont = Rc::new(Kont::CondClause {
             clause, // move the owned clause here
             next: cond_frame,
@@ -268,8 +269,8 @@ fn handle_cond_clause(
                 print_value(&e)
             ));
         }
-        Control::Error(e) => return Err(e.clone()),
         Control::Empty => return Err("CondClause: Control::Empty".to_string()),
+        _ => return Err("CondClause: Unexpected control state".to_string()),
     };
     // helper to skip the Cond frame that wraps each clause
     let skip_cond = |k: &Rc<Kont>| -> Result<Rc<Kont>, String> {
@@ -559,7 +560,8 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
                 .map_err(|_| "invalid argument list".to_string())
                 .unwrap();
 
-            let prev = std::mem::replace(&mut state.kont, Rc::new(Kont::Halt));
+            //let prev = std::mem::replace(&mut state.kont, Rc::new(Kont::Halt));
+            let prev = Rc::clone(&state.kont);
 
             state.control = Control::Expr(*car);
             state.tail = false; // reset after using it

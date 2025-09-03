@@ -126,7 +126,6 @@ pub fn eval_string(ec: &mut EvalContext, code: &str) -> Result<GcRef, String> {
                 //let expr = crate::eval::deduplicate_symbols(expr, &mut self.heap);
                 last_result = eval_main(expr, ec)?;
             }
-            _ => {}
         }
     }
 }

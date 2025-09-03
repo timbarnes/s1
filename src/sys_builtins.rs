@@ -1,12 +1,13 @@
 use crate::cek::apply_proc;
 use crate::eval::EvalContext;
 use crate::gc::{
-    Callable, GcHeap, GcRef, SchemeValue, cons, get_symbol, list_to_vec, new_closure,
-    new_continuation, new_sys_builtin,
+    Callable, GcHeap, GcRef, SchemeValue, get_symbol, list, list_to_vec, list3, new_continuation,
+    new_sys_builtin,
 };
 use crate::gc_value;
-use crate::kont::{CEKState, Kont, insert_eval_eval};
-use crate::printer::print_value;
+use crate::kont::{CEKState, Control, Kont, insert_eval_eval};
+//use crate::printer::print_value;
+use crate::special_forms::create_callable;
 use crate::utilities::dump_cek;
 use std::rc::Rc;
 
@@ -54,6 +55,8 @@ fn apply_sp(ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Resul
     if args.len() < 2 {
         return Err("apply: requires at least 2 arguments".to_string());
     }
+    // eprintln!("apply_sp func: {}", print_value(&args[0]));
+    // eprintln!("apply_sp args: {}", print_value(&args[1]));
     let func = gc_value!(args[0]);
     match func {
         SchemeValue::Callable(func) => match func {
@@ -94,22 +97,43 @@ fn debug_stack_sp(
 /// Creates and returns an escape procedure that resets the continuation to the current state
 /// at the time call/cc was invoked.
 fn call_cc_sp(ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+    // 1. Check arguments
     if args.len() != 1 {
         return Err("call/cc: requires a single function argument".to_string());
     }
-    let kont = new_continuation(ec.heap, state.kont.clone());
-    // Build the escape function
-    // (lambda (v) (escape kont v))
-    let mut params = Vec::new();
-    let plist = cons(get_symbol(ec.heap, "v"), ec.heap.nil_s(), ec.heap)?;
-    params.push(plist);
-    let mut body = cons(args[0], ec.heap.nil_s(), ec.heap)?;
-    body = cons(kont, body, ec.heap)?;
-    body = cons(get_symbol(ec.heap, "escape"), body, ec.heap)?;
-    eprintln!("escape fn: {}", print_value(&body));
-    let escape_fn = new_closure(ec.heap, params, body, ec.env.current_frame());
-    eprintln!("escape closure: {}", print_value(&escape_fn));
-    state.control = crate::kont::Control::Value(escape_fn);
+    let func = gc_value!(args[0]);
+    match &func {
+        SchemeValue::Callable(func) => match *func {
+            Callable::Closure { .. } | Callable::Builtin { .. } | Callable::SysBuiltin { .. } => {}
+            _ => return Err("call/cc: argument must be a function".to_string()),
+        },
+        _ => return Err("call/cc: argument must be a function".to_string()),
+    }
+    // 2. Capture the current continuation
+    let kont = new_continuation(ec.heap, Rc::clone(&state.kont));
+    crate::utilities::dump_kont(&state);
+    // 3. Build the escape call
+    let sym_val = get_symbol(ec.heap, "val");
+    let sym_lambda = get_symbol(ec.heap, "lambda");
+    let sym_escape = get_symbol(ec.heap, "escape");
+
+    let params = list(sym_val, ec.heap)?; // (val)
+    let body = list3(sym_escape, kont, sym_val, ec.heap)?;
+    let lambda = list3(sym_lambda, params, body, ec.heap)?;
+    create_callable(lambda, ec, state)?;
+    let closure;
+    match &state.control {
+        Control::Value(cl) => {
+            closure = cl;
+        }
+        _ => return Err("call/cc: unexpected return value".to_string()),
+    }
+    //eprintln!("escape closure: {}", print_value(&closure));
+    let mut call = Vec::<GcRef>::new();
+    call.push(args[0]);
+    call.push(list(*closure, ec.heap)?);
+    // 4. Call func with the escape closure as an argument
+    apply_sp(ec, &call[..], state)?;
     Ok(())
 }
 
@@ -120,16 +144,16 @@ fn escape_sp(_ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Res
     if args.len() != 2 {
         return Err("escape: requires two arguments".to_string());
     }
-    let kont = args[0];
-    match gc_value!(kont) {
-        SchemeValue::Continuation(kont) => {
+    match gc_value!(args[0]) {
+        SchemeValue::Continuation(new_kont) => {
             // Assign to the new continuation
-            state.kont = kont.clone();
-            let arg = args[1];
+            state.kont = Rc::clone(new_kont);
+            //eprintln!("escape: new continuation: {}", print_value(&args[0]));
+            let result = args[1];
             // Return the second argument
-            state.control = crate::kont::Control::Value(arg);
+            state.control = crate::kont::Control::Escape(result, Rc::clone(new_kont));
             Ok(())
         }
-        _ => return Err("escape: first argument must be a function".to_string()),
+        _ => return Err("escape: first argument must be a continuation".to_string()),
     }
 }

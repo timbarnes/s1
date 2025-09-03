@@ -69,7 +69,11 @@ pub fn register_special_forms(heap: &mut GcHeap, env: &mut crate::env::Environme
 ///     - a vec with multiple entries following a nil first entry, meaning named arguments
 ///     - a vec with variadic arguments bound as a list and named arguments
 ///
-fn create_callable(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
+pub fn create_callable(
+    expr: GcRef,
+    ec: &mut EvalContext,
+    state: &mut CEKState,
+) -> Result<(), String> {
     let form = expect_at_least_n_args(&ec.heap, expr, 3)?;
     let (params, ptype) = params_to_vec(&mut ec.heap, form[1]);
     let closure = create_lambda_or_macro(&form, &params, ptype, ec);
@@ -225,14 +229,6 @@ pub fn define_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Res
     // (define symbol expr)
     let args = expect_n_args(&ec.heap, expr, 3)?; // including 'define
     let sym = expect_symbol(&mut ec.heap, &args[1])?;
-
-    // let target_env = if Rc::ptr_eq(&state.env, &ec.global_env) {
-    //     // top-level define
-    //     Some(ec.global_env.clone())
-    // } else {
-    //     // interior define
-    //     None // insert_bind will default to current state.env
-    // };
 
     insert_bind(state, sym, None);
     insert_eval(state, args[2], false);

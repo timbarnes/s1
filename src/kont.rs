@@ -67,11 +67,11 @@ pub enum Kont {
         next: KontRef,
     },
     // Exception handler frame - used later for raise/handler support
-    Handler {
-        handler_expr: GcRef,
-        handler_env: EnvRef,
-        next: KontRef,
-    },
+    // Handler {
+    //     handler_expr: GcRef,
+    //     handler_env: EnvRef,
+    //     next: KontRef,
+    // },
 }
 
 impl std::fmt::Debug for Kont {
@@ -213,12 +213,6 @@ pub enum CondClause {
 }
 
 #[derive(Clone)]
-pub enum BindKind {
-    Define,
-    Set,
-}
-
-#[derive(Clone)]
 pub enum AndOrKind {
     And,
     Or,
@@ -227,7 +221,7 @@ pub enum AndOrKind {
 pub enum Control {
     Expr(GcRef),  // Unevaluated expression
     Value(GcRef), // Fully evaluated result
-    Error(String),
+    Escape(GcRef, KontRef),
     Empty,
 }
 
@@ -284,20 +278,20 @@ pub fn insert_eval_eval(state: &mut CEKState, expr: GcRef, env: Option<GcRef>, t
     }
 }
 
-pub fn insert_apply(
-    state: &mut CEKState,
-    _env: Option<GcRef>,
-    proc: GcRef,
-    evaluated_args: Vec<GcRef>,
-) {
-    let prev = Rc::clone(&state.kont);
-    state.kont = Rc::new(Kont::ApplyProc {
-        proc,
-        evaluated_args,
-        next: prev,
-    });
-    state.tail = true;
-}
+// pub fn insert_apply(
+//     state: &mut CEKState,
+//     _env: Option<GcRef>,
+//     proc: GcRef,
+//     evaluated_args: Vec<GcRef>,
+// ) {
+//     let prev = Rc::clone(&state.kont);
+//     state.kont = Rc::new(Kont::ApplyProc {
+//         proc,
+//         evaluated_args,
+//         next: prev,
+//     });
+//     state.tail = true;
+// }
 
 /// Bind a symbol to a value. This is installed before evaluation of the right hand side.
 /// The bind operation takes the value returned by the previous continuation.
