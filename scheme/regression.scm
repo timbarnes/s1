@@ -403,6 +403,18 @@
 (test-equal 6 (begin (set! **count** 10) (force p)) "Second force")
 (newline)
 
+(display "          === Testing call/cc ===")
+(newline)
+(define cont1 (call/cc (lambda (k) (k 5))))
+(test-equal 5  cont1 "Return a value")
+(test-equal 10 (call/cc (lambda (k) (+ 1 (k 10) 3))) "Break out of add")
+(define saved #f)
+(define result
+    (call/cc (lambda (k) (set! saved k) 'ok)))
+(test-equal 'ok result "Capture and re-use continuation")
+(test-equal 99 (saved 99) "Reuse previous continuation")
+(newline)
+
 (display "          === All tests completed ===")
 (newline)
 (if (null? **failed-tests**)
