@@ -60,6 +60,9 @@ fn debug_interactive(state: &mut CEKState, ec: &mut EvalContext) {
                 let frame = ec.env.current_frame.clone();
                 dump_env(Some(frame));
             }
+            "k" | "kont" => {
+                dump_kont(&state);
+            }
             "l" | "locals" => {
                 dump_locals(&state.env);
             }
@@ -75,7 +78,7 @@ fn debug_interactive(state: &mut CEKState, ec: &mut EvalContext) {
                 state.kont = Rc::new(Kont::Halt);
             }
             _ => {
-                println!("commands: n(ext), c(ontinue), e(nv), l(ocals), ctrl, s(tate)");
+                println!("commands: n(ext), c(ontinue), e(nv), k(ont), l(ocals), ctrl, s(tate)");
             }
         }
     }
@@ -85,7 +88,7 @@ fn dump_control(control: &Control) -> String {
     match control {
         Control::Expr(obj) => format!("Expr  = {}", print_value(obj)),
         Control::Value(obj) => format!("Value = {}", print_value(obj)),
-        Control::Error(e) => format!("Error = {}", e),
+        Control::Escape(val, k) => format!("Escape = {}, {:?}", print_value(val), k),
         Control::Empty => format!("Empty"),
     }
 }
@@ -110,11 +113,11 @@ pub fn dump_cek(loc: &str, state: &CEKState) {
                     frame_debug_short(&state.kont)
                 );
             }
-            Control::Error(e) => {
+            Control::Escape(val, kont) => {
                 eprintln!(
-                    "{loc:18} Control: Error={}; Kont={}",
-                    e,
-                    frame_debug_short(&state.kont)
+                    "{loc:18} Control: Escape; Val = {}; Kont={}",
+                    print_value(val),
+                    frame_debug_short(&kont)
                 );
             }
             Control::Empty => {
@@ -195,8 +198,10 @@ pub fn dump_kont(state: &CEKState) {
     match &state.control {
         Control::Expr(e) => print!("  Control::Expr: {:?} ", print_value(e)),
         Control::Value(v) => print!("  Control::Value: {:?} ", print_value(v)),
-        Control::Error(e) => print!("  Control::Error: {} ", e),
         Control::Empty => print!("  Control::Empty "),
+        Control::Escape(val, kont) => {
+            print!(" Control::Escape: {}; {:?}", print_value(val), kont);
+        }
     }
     println!("tail={}", &state.tail);
     println!("  Stack:");
@@ -285,14 +290,14 @@ pub fn dump_kont(state: &CEKState) {
                 );
                 kont = next.clone();
             }
-            Kont::Handler {
-                handler_expr,
-                handler_env: _,
-                next,
-            } => {
-                println!("    Handler {{expr={}}}", print_value(&handler_expr),);
-                kont = next.clone();
-            }
+            // Kont::Handler {
+            //     handler_expr,
+            //     handler_env: _,
+            //     next,
+            // } => {
+            //     println!("    Handler {{expr={}}}", print_value(&handler_expr),);
+            //     kont = next.clone();
+            // }
             Kont::If {
                 then_branch,
                 else_branch,

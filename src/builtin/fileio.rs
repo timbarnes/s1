@@ -20,7 +20,7 @@ fn read_builtin(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     }
 
     match port_kind {
-        PortKind::Stdin | PortKind::StringPortInput { .. } | PortKind::File { .. } => {
+        PortKind::Stdin | PortKind::StringPortInput { .. } /* | PortKind::File { .. } */ => {
             let result = parse(ec.heap, &mut port_kind);
             match result {
                 Ok(expr) => Ok(expr),
