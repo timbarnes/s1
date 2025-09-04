@@ -307,7 +307,7 @@ mod tests {
 
     #[test]
     fn test_eval_logic_nested_call() {
-        use crate::builtin::number::{plus_builtin, times_builtin};
+        use crate::builtin::number::{plus_b, times_b};
         let mut evaluator = Evaluator::new();
         let mut ec = crate::eval::EvalContext::from_eval(&mut evaluator);
         let plus;
@@ -322,8 +322,8 @@ mod tests {
         let star_sym;
         let star_args;
         let expr;
-        plus = new_primitive(ec.heap, plus_builtin, "plus".to_string());
-        times = new_primitive(ec.heap, times_builtin, "times".to_string());
+        plus = new_primitive(ec.heap, plus_b, "plus".to_string());
+        times = new_primitive(ec.heap, times_b, "times".to_string());
         two = new_int(ec.heap, num_bigint::BigInt::from(2));
         three = new_int(ec.heap, num_bigint::BigInt::from(3));
         four = new_int(ec.heap, num_bigint::BigInt::from(4));
@@ -384,7 +384,7 @@ mod tests {
 
     #[test]
     fn test_eval_logic_simple_nested_call() {
-        use crate::builtin::number::{plus_builtin, times_builtin};
+        use crate::builtin::number::{plus_b, times_b};
         let mut evaluator = Evaluator::new();
         let mut ec = crate::eval::EvalContext::from_eval(&mut evaluator);
         let times;
@@ -398,8 +398,8 @@ mod tests {
         let star_sym;
         let star_args;
         let expr;
-        times = new_primitive(ec.heap, times_builtin, "times".to_string());
-        plus = new_primitive(ec.heap, plus_builtin, "plus".to_string());
+        times = new_primitive(ec.heap, times_b, "times".to_string());
+        plus = new_primitive(ec.heap, plus_b, "plus".to_string());
         two = new_int(ec.heap, num_bigint::BigInt::from(2));
         two2 = new_int(ec.heap, num_bigint::BigInt::from(2));
         three = new_int(ec.heap, num_bigint::BigInt::from(3));
@@ -424,7 +424,7 @@ mod tests {
 
     #[test]
     fn test_eval_logic_nested_mixed_call() {
-        use crate::builtin::number::{minus_builtin, plus_builtin, times_builtin};
+        use crate::builtin::number::{minus_b, plus_b, times_b};
         let mut evaluator = Evaluator::new();
         let mut ec = crate::eval::EvalContext::from_eval(&mut evaluator);
         let plus;
@@ -443,9 +443,9 @@ mod tests {
         let plus_sym;
         let plus_args;
         let expr;
-        plus = new_primitive(ec.heap, plus_builtin, "plus".to_string());
-        times = new_primitive(ec.heap, times_builtin, "times".to_string());
-        minus = new_primitive(ec.heap, minus_builtin, "minus".to_string());
+        plus = new_primitive(ec.heap, plus_b, "plus".to_string());
+        times = new_primitive(ec.heap, times_b, "times".to_string());
+        minus = new_primitive(ec.heap, minus_b, "minus".to_string());
         two = new_int(ec.heap, num_bigint::BigInt::from(2));
         three = new_int(ec.heap, num_bigint::BigInt::from(3));
         four = new_int(ec.heap, num_bigint::BigInt::from(4));
@@ -513,7 +513,7 @@ mod tests {
 
     #[test]
     fn test_eval_logic_begin() {
-        use crate::builtin::number::plus_builtin;
+        use crate::builtin::number::plus_b;
         let mut evaluator = Evaluator::new();
         let mut ec = crate::eval::EvalContext::from_eval(&mut evaluator);
         let plus;
@@ -526,7 +526,7 @@ mod tests {
         let begin_sym;
         let begin_args;
         let expr;
-        plus = new_primitive(ec.heap, plus_builtin, "plus".to_string());
+        plus = new_primitive(ec.heap, plus_b, "plus".to_string());
         a = new_int(ec.heap, num_bigint::BigInt::from(1));
         b = new_int(ec.heap, num_bigint::BigInt::from(2));
         c = new_int(ec.heap, num_bigint::BigInt::from(3));
@@ -736,11 +736,7 @@ mod tests {
         let mut ec = crate::eval::EvalContext::from_eval(&mut evaluator);
 
         // Set up the + function in the environment
-        let plus = new_primitive(
-            ec.heap,
-            crate::builtin::number::plus_builtin,
-            "plus".to_string(),
-        );
+        let plus = new_primitive(ec.heap, crate::builtin::number::plus_b, "plus".to_string());
         let plus_sym = ec.heap.intern_symbol("+");
         ec.env.set_symbol(plus_sym, plus);
         let lambda_expr;
@@ -818,11 +814,7 @@ mod tests {
         let mut ec = crate::eval::EvalContext::from_eval(&mut evaluator);
 
         // Set up the + function in the environment
-        let plus = new_primitive(
-            ec.heap,
-            crate::builtin::number::plus_builtin,
-            "plus".to_string(),
-        );
+        let plus = new_primitive(ec.heap, crate::builtin::number::plus_b, "plus".to_string());
         let plus_sym = ec.heap.intern_symbol("+");
         ec.env.set_symbol(plus_sym, plus);
 
@@ -915,11 +907,7 @@ mod tests {
 
         // Create a symbol and bind it to the environment
         let plus_sym = ec.heap.intern_symbol("+");
-        let plus_func = new_primitive(
-            ec.heap,
-            crate::builtin::number::plus_builtin,
-            "plus".to_string(),
-        );
+        let plus_func = new_primitive(ec.heap, crate::builtin::number::plus_b, "plus".to_string());
         ec.env.set_symbol(plus_sym, plus_func);
 
         // Now create a lambda that uses the + symbol

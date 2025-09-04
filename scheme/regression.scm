@@ -110,6 +110,60 @@
 (test-false (exact? 3.14) "exact? with float")
 (test-true (exact? 42) "exact? with integer")
 (test-false (exact? 3.14) "exact? with float")
+(test-equal 1 (modulo 7 3) "modulo basic")
+(test-equal 2 (modulo 8 3) "modulo with remainder")
+(test-equal 0 (modulo 9 3) "modulo exact division")
+;; Comparison tests
+(test-true (= 5 5) "equality same numbers")
+(test-true (= 5 5.0) "equality int and float")
+(test-false (= 5 6) "equality different numbers")
+(test-true (= 1 1 1) "equality multiple same")
+(test-false (= 1 1 2) "equality multiple different")
+
+(test-true (< 1 2) "less than basic")
+(test-true (< 1 2 3) "less than multiple")
+(test-false (< 1 2 2) "less than not strict")
+(test-false (< 3 2 1) "less than decreasing")
+
+(test-true (> 3 2) "greater than basic")
+(test-true (> 5 4 3) "greater than multiple")
+(test-false (> 5 4 4) "greater than not strict")
+(test-false (> 1 2 3) "greater than increasing")
+;; New R5RS numeric functions
+(test-equal 3 (quotient 10 3) "quotient basic")
+(test-equal -3 (quotient -10 3) "quotient negative dividend")
+(test-equal 1 (remainder 10 3) "remainder basic")
+(test-equal -1 (remainder -10 3) "remainder negative dividend")
+
+(test-equal 5 (numerator 5) "numerator integer")
+(test-equal 1 (denominator 5) "denominator integer")
+(test-equal 5 (numerator 5.0) "numerator exact float")
+(test-equal 1 (denominator 5.0) "denominator exact float")
+
+(test-equal 3 (floor 3.7) "floor positive")
+(test-equal -4 (floor -3.2) "floor negative")
+(test-equal 5 (floor 5) "floor integer")
+
+(test-equal 4 (ceiling 3.2) "ceiling positive")
+(test-equal -3 (ceiling -3.7) "ceiling negative")
+(test-equal 5 (ceiling 5) "ceiling integer")
+
+(test-equal 3 (truncate 3.7) "truncate positive")
+(test-equal -3 (truncate -3.7) "truncate negative")
+(test-equal 5 (truncate 5) "truncate integer")
+
+(test-equal 4 (round 3.7) "round up")
+(test-equal 3 (round 3.2) "round down")
+(test-equal 4 (round 3.5) "round half")
+(test-equal 5 (round 5) "round integer")
+
+(test-equal 3.0 (sqrt 9) "sqrt perfect square")
+(test-equal 2.0 (sqrt 4.0) "sqrt float")
+
+(test-equal 8 (expt 2 3) "expt integer base and exp")
+(test-equal 8 (expt 2.0 3) "expt float base")
+(test-equal 0.25 (expt 2 -2) "expt negative exp")
+(test-equal 1 (expt 5 0) "expt zero exp")
 
 (display "          === Testing Type Predicates ===")
 (newline)
