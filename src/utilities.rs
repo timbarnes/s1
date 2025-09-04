@@ -20,12 +20,14 @@ pub fn debug_cek(state: &mut CEKState, ec: &mut EvalContext) {
     for i in 0..*ec.depth {
         if i % 10 == 0 {
             print!("{}", i / 10);
-        } else {
+        } else if i % 2 == 0 {
             print!(".");
+        } else {
+            print!(" ");
         }
     }
 
-    println!("{}", dump_control(&state.control));
+    println!(" {}", dump_control(&state.control));
 
     if *ec.step {
         debug_interactive(state, ec);

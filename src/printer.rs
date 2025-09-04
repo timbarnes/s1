@@ -74,14 +74,14 @@ pub fn print_value(obj: &GcRef) -> String {
         Undefined => "#<undefined>".to_string(),
         Eof => "#<eof>".to_string(),
         Callable(variant) => match variant {
-            Callable::Builtin { func: _, doc } => format!("Primitive    {}", doc),
-            Callable::SpecialForm { doc, .. } => format!("SpecialForm  {}", doc),
-            Callable::Closure { params, body, .. } => print_callable("Closure     ", params, *body),
-            Callable::Macro { params, body, .. } => print_callable("Macro       ", params, *body),
-            Callable::SysBuiltin { func: _, doc } => format!("SysBuiltin   {}", doc),
+            Callable::Builtin { func: _, doc } => format!("Primitive {} ", doc),
+            Callable::SpecialForm { doc, .. } => format!("SpecialForm {} ", doc),
+            Callable::Closure { params, body, .. } => print_callable("Closure", params, *body),
+            Callable::Macro { params, body, .. } => print_callable("Macro", params, *body),
+            Callable::SysBuiltin { func: _, doc } => format!("SysBuiltin {}", doc),
         },
-        Port(port) => format!("Port         ({:?})", port),
-        Continuation(kont) => format!("Continuation <{:?}>", kont),
+        Port(port) => format!("Port<{:?}>", port),
+        Continuation(kont) => format!("Continuation<{:?}>", kont),
         _ => format!("print_value: unprintable."),
     }
 }
