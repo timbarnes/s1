@@ -254,10 +254,15 @@ pub fn set_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result
 /// (if test consequent alternate)
 /// Requires three arguments.
 pub fn if_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
-    let args = expect_at_least_n_args(&evaluator.heap, expr, 4);
+    let args = expect_at_least_n_args(&evaluator.heap, expr, 3);
     match args {
         Ok(a) => {
-            insert_if(state, a[2], a[3]);
+            let else_clause = if a.len() == 4 {
+                a[3]
+            } else {
+                evaluator.heap.unspecified()
+            };
+            insert_if(state, a[2], else_clause);
             insert_eval(state, a[1], false);
             Ok(())
         }
