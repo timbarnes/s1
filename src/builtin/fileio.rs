@@ -37,7 +37,7 @@ fn read_builtin(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
 
 /// (eof-object? obj) -> #t or #f
 /// Tests the result of a read operation to determine if it reached the end of the file.
-fn eof_object(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
+fn eof_object_q(ec: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 1 {
         return Err("eof-object: expected exactly 0 arguments".to_string());
     }
@@ -186,6 +186,6 @@ pub fn register_fileio_builtins(heap: &mut GcHeap, env: &mut crate::env::Environ
         "open-input-file" => open_input_file,
         "push-port!" => push_port,
         "pop-port!" => pop_port,
-        "eof-object?" => eof_object,
+        "eof-object?" => eof_object_q,
     );
 }

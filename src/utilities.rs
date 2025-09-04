@@ -2,7 +2,7 @@
 ///
 use crate::env::Frame;
 use crate::eval::EvalContext;
-use crate::kont::{AndOrKind, CEKState, Control, Kont};
+use crate::kont::{AndOrKind, CEKState, Control, Kont, KontRef};
 use crate::printer::print_value;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -61,7 +61,7 @@ fn debug_interactive(state: &mut CEKState, ec: &mut EvalContext) {
                 dump_env(Some(frame));
             }
             "k" | "kont" => {
-                dump_kont(&state);
+                dump_kont(Rc::clone(&state.kont));
             }
             "l" | "locals" => {
                 dump_locals(&state.env);
@@ -193,21 +193,11 @@ fn frame_debug_short(frame: &Kont) -> String {
     }
 }
 
-pub fn dump_kont(state: &CEKState) {
-    println!(" CEK State:");
-    match &state.control {
-        Control::Expr(e) => print!("  Control::Expr: {:?} ", print_value(e)),
-        Control::Value(v) => print!("  Control::Value: {:?} ", print_value(v)),
-        Control::Empty => print!("  Control::Empty "),
-        Control::Escape(val, kont) => {
-            print!(" Control::Escape: {}; {:?}", print_value(val), kont);
-        }
-    }
-    println!("tail={}", &state.tail);
+pub fn dump_kont(kont: KontRef) {
     println!("  Stack:");
-    let mut kont = state.kont.clone();
+    let mut kr = Rc::clone(&kont);
     loop {
-        match &*kont {
+        match &*kr {
             Kont::Halt => {
                 println!("    Halt");
                 return;
@@ -221,7 +211,7 @@ pub fn dump_kont(state: &CEKState) {
                     AndOrKind::And => println!("    AndOr {{kind=And}}"),
                     AndOrKind::Or => println!("    AndOr {{kind=Or}}"),
                 }
-                kont = next.clone();
+                kr = Rc::clone(next);
             }
             Kont::ApplyProc {
                 proc,
@@ -233,7 +223,7 @@ pub fn dump_kont(state: &CEKState) {
                     proc,
                     evaluated_args.len()
                 );
-                kont = next.clone();
+                kr = Rc::clone(next);
             }
             Kont::ApplySpecial {
                 proc,
@@ -245,7 +235,7 @@ pub fn dump_kont(state: &CEKState) {
                     print_value(&proc),
                     print_value(&original_call),
                 );
-                kont = next.clone();
+                kr = Rc::clone(next);
             }
             Kont::Bind {
                 symbol,
@@ -253,15 +243,15 @@ pub fn dump_kont(state: &CEKState) {
                 next,
             } => {
                 println!("    Bind {{symbol={}}}", print_value(&symbol),);
-                kont = next.clone();
+                kr = Rc::clone(next);
             } // other => format!("{:?}", other),
             Kont::Cond { remaining, next } => {
                 println!("    Cond {{remaining={}}}", remaining.len());
-                kont = next.clone();
+                kr = Rc::clone(next);
             }
             Kont::CondClause { clause: _, next } => {
                 println!("    CondClause");
-                kont = next.clone();
+                kr = Rc::clone(next);
             }
             Kont::Eval {
                 expr,
@@ -270,7 +260,7 @@ pub fn dump_kont(state: &CEKState) {
                 next,
             } => {
                 println!("    Eval {{expr={}}}", print_value(&expr));
-                kont = next.clone();
+                kr = Rc::clone(next);
             }
             Kont::EvalArg {
                 proc,
@@ -288,7 +278,7 @@ pub fn dump_kont(state: &CEKState) {
                     evaluated.len(),
                     original_call,
                 );
-                kont = next.clone();
+                kr = Rc::clone(next);
             }
             // Kont::Handler {
             //     handler_expr,
@@ -308,15 +298,15 @@ pub fn dump_kont(state: &CEKState) {
                     print_value(&then_branch),
                     print_value(&else_branch),
                 );
-                kont = next.clone();
+                kr = Rc::clone(next);
             }
             Kont::RestoreEnv { old_env: _, next } => {
                 println!("    RestoreEnv");
-                kont = next.clone();
+                kr = Rc::clone(next);
             }
             Kont::Seq { rest, next } => {
                 println!("    Seq {{rest={}}}", rest.len());
-                kont = next.clone();
+                kr = Rc::clone(next);
             }
         }
     }

@@ -5,7 +5,7 @@ use crate::gc::{
     new_sys_builtin,
 };
 use crate::gc_value;
-use crate::kont::{CEKState, Control, Kont, insert_eval_eval};
+use crate::kont::{CEKState, Control, Kont, KontRef, insert_eval_eval};
 //use crate::printer::print_value;
 use crate::special_forms::create_callable;
 use crate::utilities::dump_cek;
@@ -110,8 +110,9 @@ fn call_cc_sp(ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Res
         _ => return Err("call/cc: argument must be a function".to_string()),
     }
     // 2. Capture the current continuation
-    let kont = new_continuation(ec.heap, Rc::clone(&state.kont));
-    crate::utilities::dump_kont(&state);
+    // eprintln!("Entering with continuation:");
+    // crate::utilities::dump_kont(&state);
+    let kont = new_continuation(ec.heap, capture_call_site_kont(&state.kont));
     // 3. Build the escape call
     let sym_val = get_symbol(ec.heap, "val");
     let sym_lambda = get_symbol(ec.heap, "lambda");
@@ -147,13 +148,22 @@ fn escape_sp(_ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Res
     match gc_value!(args[0]) {
         SchemeValue::Continuation(new_kont) => {
             // Assign to the new continuation
-            state.kont = Rc::clone(new_kont);
-            //eprintln!("escape: new continuation: {}", print_value(&args[0]));
+            //state.kont = Rc::clone(new_kont);
             let result = args[1];
             // Return the second argument
+            //state.control = crate::kont::Control::Escape(result, Rc::clone(new_kont));
             state.control = crate::kont::Control::Escape(result, Rc::clone(new_kont));
+            eprintln!("Escaping to continuation:");
+            crate::utilities::dump_kont(Rc::clone(new_kont));
             Ok(())
         }
         _ => return Err("escape: first argument must be a continuation".to_string()),
+    }
+}
+
+fn capture_call_site_kont(k: &KontRef) -> KontRef {
+    match &**k {
+        Kont::EvalArg { next, .. } | Kont::ApplyProc { next, .. } => capture_call_site_kont(next),
+        _ => Rc::clone(k),
     }
 }

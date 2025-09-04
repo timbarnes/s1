@@ -68,7 +68,8 @@ fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
         }
         Control::Value(val) => {
             *ec.depth -= 1;
-            let kont = take_kont(state);
+            //let kont = take_kont(state);
+            let kont = state.kont.as_ref().clone();
             state.control = Control::Value(val);
             dispatch_kont(state, ec, val, kont)
         }
@@ -82,14 +83,14 @@ fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
     }
 }
 
-#[inline]
-fn take_kont(state: &mut CEKState) -> Kont {
-    let old = std::mem::replace(&mut state.kont, Rc::new(Kont::Halt));
-    match Rc::try_unwrap(old) {
-        Ok(k) => k,                             // fast path: unique Rc → owned Kont
-        Err(shared) => shared.as_ref().clone(), // fallback: shallow clone
-    }
-}
+// #[inline]
+// fn take_kont(state: &mut CEKState) -> Kont {
+//     let old = std::mem::replace(&mut state.kont, Rc::new(Kont::Halt));
+//     match Rc::try_unwrap(old) {
+//         Ok(k) => k,                             // fast path: unique Rc → owned Kont
+//         Err(shared) => shared.as_ref().clone(), // fallback: shallow clone
+//     }
+// }
 
 #[inline]
 fn dispatch_kont(
@@ -237,8 +238,6 @@ fn handle_cond(
         state.control = Control::Expr(*test_expr);
         state.tail = false;
         // Push a CondClause frame whose `next` points to the Cond we just installed.
-        //    We grab the Cond frame we just installed by replacing state.kont with Halt (cheap).
-        //let cond_frame = std::mem::replace(&mut state.kont, Rc::new(Kont::Halt));
         let cond_frame = Rc::clone(&state.kont);
         state.kont = Rc::new(Kont::CondClause {
             clause, // move the owned clause here
@@ -560,7 +559,6 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
                 .map_err(|_| "invalid argument list".to_string())
                 .unwrap();
 
-            //let prev = std::mem::replace(&mut state.kont, Rc::new(Kont::Halt));
             let prev = Rc::clone(&state.kont);
 
             state.control = Control::Expr(*car);
