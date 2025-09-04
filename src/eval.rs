@@ -141,9 +141,9 @@ pub fn eval_macro(
     let new_env = bind_params(params, args, env, evaluator.heap)?;
     let original_env = evaluator.env.current_frame();
     evaluator.env.set_current_frame(new_env.current_frame());
-    println!("Before expansion: {}", print_value(&body));
+    //println!("Before expansion: {}", print_value(&body));
     let expanded = expand_macro(&body, 0, evaluator)?;
-    println!("After expansion: {}", print_value(&expanded));
+    //println!("After expansion: {}", print_value(&expanded));
     evaluator.env.set_current_frame(original_env);
     // Review for tail recursion
     Ok(expanded)

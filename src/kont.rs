@@ -199,7 +199,7 @@ impl std::fmt::Debug for Kont {
     }
 }
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 pub enum EvalPhase {
     EvalEnv,
     EvalExpr,
@@ -212,7 +212,7 @@ pub enum CondClause {
     Arrow { test: GcRef, arrow_proc: GcRef },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum AndOrKind {
     And,
     Or,

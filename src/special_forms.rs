@@ -330,10 +330,7 @@ pub fn let_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result
             _ => return Err("Invalid binding in let".to_string()),
         }
     }
-    // println!("let vars: {}", print_scheme_value(&vars.value));
-    // println!("let exprs: {}", print_scheme_value(&exprs.value));
     let (params, ptype) = params_to_vec(&mut ec.heap, vars);
-    // println!("let params: {:?}", params);
     let lambda_expr = create_lambda_or_macro(&formvec, &params, ptype, ec)?;
     // cons the lambda to the list of values
     let call = cons(lambda_expr, exprs, ec.heap)?;

@@ -68,16 +68,14 @@ fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
         }
         Control::Value(val) => {
             *ec.depth -= 1;
-            //let kont = take_kont(state);
-            let kont = state.kont.as_ref().clone();
             state.control = Control::Value(val);
-            dispatch_kont(state, ec, val, kont)
+            dispatch_kont(state, ec, val, Rc::clone(&state.kont))
         }
         Control::Escape(val, kont) => {
             *ec.depth -= 1;
             state.control = Control::Value(val);
-            state.kont = kont;
-            Ok(())
+            state.kont = Rc::clone(&kont);
+            dispatch_kont(state, ec, val, kont)
         }
         Control::Empty => Err("Unexpected Control::Halt in step()".to_string()),
     }
@@ -97,18 +95,26 @@ fn dispatch_kont(
     state: &mut CEKState,
     ec: &mut EvalContext,
     val: GcRef,
-    kont: Kont,
+    kont: KontRef,
 ) -> Result<(), String> {
-    match kont {
-        Kont::AndOr { kind, rest, next } => handle_and_or(state, ec, kind, rest, next),
+    match &*kont {
+        Kont::AndOr { kind, rest, next } => {
+            handle_and_or(state, ec, *kind, rest.clone(), Rc::clone(next))
+        }
         Kont::ApplySpecial {
             proc,
             original_call,
             next,
-        } => handle_apply_special(state, ec, proc, original_call, next),
-        Kont::Bind { symbol, env, next } => handle_bind(state, ec, symbol, env, next),
-        Kont::Cond { remaining, next } => handle_cond(state, ec, remaining, next),
-        Kont::CondClause { clause, next } => handle_cond_clause(state, ec, clause, next),
+        } => handle_apply_special(state, ec, *proc, *original_call, Rc::clone(next)),
+        Kont::Bind { symbol, env, next } => {
+            handle_bind(state, ec, *symbol, env.clone(), Rc::clone(next))
+        }
+        Kont::Cond { remaining, next } => {
+            handle_cond(state, ec, remaining.clone(), Rc::clone(next))
+        }
+        Kont::CondClause { clause, next } => {
+            handle_cond_clause(state, ec, clause.clone(), Rc::clone(next))
+        }
         Kont::EvalArg {
             proc,
             remaining,
@@ -121,27 +127,29 @@ fn dispatch_kont(
             state,
             ec,
             val,
-            proc,
-            remaining,
-            evaluated,
-            original_call,
-            tail,
-            env,
-            next,
+            *proc,
+            remaining.clone(),
+            evaluated.clone(),
+            *original_call,
+            *tail,
+            env.clone(),
+            Rc::clone(next),
         ),
         Kont::Eval {
             expr,
             env,
             phase,
             next,
-        } => handle_eval(state, ec, expr, env, phase, next),
+        } => handle_eval(state, ec, *expr, *env, *phase, Rc::clone(next)),
         Kont::If {
             then_branch,
             else_branch,
             next,
-        } => handle_if(state, ec, then_branch, else_branch, next),
-        Kont::RestoreEnv { old_env, next } => handle_restore_env(state, ec, old_env, val, next),
-        Kont::Seq { rest, next } => handle_seq(state, ec, rest, next),
+        } => handle_if(state, ec, *then_branch, *else_branch, Rc::clone(next)),
+        Kont::RestoreEnv { old_env, next } => {
+            handle_restore_env(state, ec, old_env.clone(), val, Rc::clone(next))
+        }
+        Kont::Seq { rest, next } => handle_seq(state, ec, rest.clone(), Rc::clone(next)),
         Kont::Halt => Ok(()),
         _ => Err("unexpected continuation".to_string()),
     }
@@ -152,7 +160,7 @@ fn handle_and_or(
     _ec: &mut EvalContext,
     kind: AndOrKind,
     mut rest: Vec<GcRef>,
-    next: Rc<Kont>,
+    next: KontRef,
 ) -> Result<(), String> {
     if let Control::Value(val) = &state.control {
         let short_circuit = match kind {
