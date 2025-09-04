@@ -219,8 +219,9 @@ pub enum AndOrKind {
 }
 
 pub enum Control {
-    Expr(GcRef),  // Unevaluated expression
-    Value(GcRef), // Fully evaluated result
+    Expr(GcRef),        // Unevaluated expression
+    Value(GcRef),       // Fully evaluated result
+    Values(Vec<GcRef>), // For multiple value return
     Escape(GcRef, KontRef),
     Empty,
 }

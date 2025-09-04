@@ -112,12 +112,12 @@ pub fn initialize_scheme_io_globals(ec: &mut EvalContext) -> Result<(), String> 
 }
 
 /// Evaluate a string of Scheme code (all expressions, return last result)
-pub fn eval_string(ec: &mut EvalContext, code: &str) -> Result<GcRef, String> {
+pub fn eval_string(ec: &mut EvalContext, code: &str) -> Result<Vec<GcRef>, String> {
     use crate::parser::ParseError;
     //use crate::io::{Port, PortKind};
 
     let mut port_kind = crate::io::new_string_port_input(code);
-    let mut last_result = ec.heap.nil_s();
+    let mut last_result = Vec::new();
     loop {
         match parse(&mut ec.heap, &mut port_kind) {
             Err(ParseError::Syntax(e)) => return Err(e),
@@ -247,7 +247,7 @@ mod tests {
         let int_val;
         int_val = new_int(ec.heap, num_bigint::BigInt::from(42));
         let result = eval_main(int_val, &mut ec).unwrap();
-        assert!(equal(&evaluator.heap, result, int_val));
+        assert!(equal(&evaluator.heap, result[0], int_val));
     }
 
     #[test]
@@ -261,7 +261,7 @@ mod tests {
         symbol = get_symbol(ec.heap, "x");
         ec.env.set_symbol(symbol, value);
         let result = eval_main(symbol, &mut ec).unwrap();
-        assert!(equal(&evaluator.heap, result, value));
+        assert!(equal(&evaluator.heap, result[0], value));
     }
 
     #[test]
@@ -299,7 +299,7 @@ mod tests {
         expr = new_pair(ec.heap, plus_sym, args);
         ec.env.set_symbol(plus_sym, plus);
         let result = eval_main(expr, &mut ec).unwrap();
-        match &ec.heap.get_value(result) {
+        match &ec.heap.get_value(result[0]) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "5"),
             _ => panic!("Expected integer result"),
         }
@@ -342,7 +342,7 @@ mod tests {
         ec.env.set_symbol(plus_sym, plus);
         ec.env.set_symbol(star_sym, times);
         let result = eval_main(expr, &mut ec).unwrap();
-        match &evaluator.heap.get_value(result) {
+        match &evaluator.heap.get_value(result[0]) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "54"),
             _ => panic!("Expected integer result"),
         }
@@ -416,7 +416,7 @@ mod tests {
         ec.env.set_symbol(star_sym, times);
         ec.env.set_symbol(plus_sym, plus);
         let result = eval_main(expr, &mut ec).unwrap();
-        match &ec.heap.get_value(result) {
+        match &ec.heap.get_value(result[0]) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "10"),
             _ => panic!("Expected integer result"),
         }
@@ -469,7 +469,7 @@ mod tests {
         ec.env.set_symbol(times_sym, times);
         ec.env.set_symbol(minus_sym, minus);
         let result = eval_main(expr, &mut ec).unwrap();
-        match &ec.heap.get_value(result) {
+        match &ec.heap.get_value(result[0]) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "-1"),
             _ => panic!("Expected integer result"),
         }
@@ -488,7 +488,7 @@ mod tests {
         expr = new_pair(ec.heap, quote_sym, sym_list);
         // quoted = sym;
         let result = eval_main(expr, &mut ec).unwrap();
-        match &ec.heap.get_value(result) {
+        match &ec.heap.get_value(result[0]) {
             SchemeValue::Symbol(s) => assert_eq!(s, "foo"),
             _ => panic!("Expected quoted symbol"),
         }
@@ -505,7 +505,7 @@ mod tests {
         expr2 = new_pair(ec.heap, quote_sym, foo_bar_list_pair);
         // let quoted_list = foo_bar_list;
         let result2 = eval_main(expr2, &mut ec).unwrap();
-        match &ec.heap.get_value(result2) {
+        match &ec.heap.get_value(result2[0]) {
             SchemeValue::Pair(_, _) => (),
             _ => panic!("Expected quoted list"),
         }
@@ -542,7 +542,7 @@ mod tests {
         expr = new_pair(ec.heap, begin_sym, begin_args);
         ec.env.set_symbol(plus_sym, plus);
         let result = eval_main(expr, &mut ec).unwrap();
-        match &ec.heap.get_value(result) {
+        match &ec.heap.get_value(result[0]) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "3"),
             _ => panic!("Expected integer result from begin"),
         }
@@ -562,7 +562,7 @@ mod tests {
         let define_sym = get_symbol(ec.heap, "define");
         expr = new_pair(ec.heap, define_sym, args);
         let result = eval_main(expr, &mut ec).unwrap();
-        match &ec.heap.get_value(result) {
+        match &ec.heap.get_value(result[0]) {
             SchemeValue::Symbol(s) => assert_eq!(s.to_string(), "y"),
             _ => panic!("Expected symbol result"),
         }
@@ -597,12 +597,12 @@ mod tests {
         let f_pair = new_pair(ec.heap, f, one_pair2);
         expr_false = new_pair(ec.heap, if_sym, f_pair);
         let result_true = eval_main(expr_true, &mut ec).unwrap();
-        match &ec.heap.get_value(result_true) {
+        match &ec.heap.get_value(result_true[0]) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
             _ => panic!("Expected integer result for true branch"),
         }
         let result_false = eval_main(expr_false, &mut ec).unwrap();
-        match &ec.heap.get_value(result_false) {
+        match &ec.heap.get_value(result_false[0]) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
             _ => panic!("Expected integer result for false branch"),
         }
@@ -619,7 +619,7 @@ mod tests {
             let and_empty = new_pair(ec.heap, and_sym, nil);
             let result = eval_main(and_empty, &mut ec).unwrap();
             assert!(matches!(
-                &ec.heap.get_value(result),
+                &ec.heap.get_value(result[0]),
                 SchemeValue::Bool(true)
             ));
         }
@@ -637,7 +637,7 @@ mod tests {
             let t_pair = new_pair(ec.heap, t, one_pair);
             let and_expr = new_pair(ec.heap, and_sym, t_pair);
             let result = eval_main(and_expr, &mut ec).unwrap();
-            match &ec.heap.get_value(result) {
+            match &ec.heap.get_value(result[0]) {
                 SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
                 _ => panic!("Expected integer result for and"),
             }
@@ -657,7 +657,7 @@ mod tests {
             let and_expr2 = new_pair(ec.heap, and_sym, t_pair2);
             let result = eval_main(and_expr2, &mut ec).unwrap();
             assert!(matches!(
-                &ec.heap.get_value(result),
+                &ec.heap.get_value(result[0]),
                 SchemeValue::Bool(false)
             ));
         }
@@ -670,7 +670,7 @@ mod tests {
             let or_empty = new_pair(ec.heap, or_sym, nil);
             let result = eval_main(or_empty, &mut ec).unwrap();
             assert!(matches!(
-                &evaluator.heap.get_value(result),
+                &evaluator.heap.get_value(result[0]),
                 SchemeValue::Bool(false)
             ));
         }
@@ -688,7 +688,7 @@ mod tests {
             let f_pair = new_pair(ec.heap, f, one_pair);
             let or_expr = new_pair(ec.heap, or_sym, f_pair);
             let result = eval_main(or_expr, &mut ec).unwrap();
-            match &ec.heap.get_value(result) {
+            match &ec.heap.get_value(result[0]) {
                 SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
                 _ => panic!("Expected integer result for or"),
             }
@@ -706,7 +706,7 @@ mod tests {
             let f_pair3 = new_pair(ec.heap, f, f_pair2);
             let or_expr2 = new_pair(ec.heap, or_sym, f_pair3);
             let result = eval_main(or_expr2, &mut ec).unwrap();
-            match &ec.heap.get_value(result) {
+            match &ec.heap.get_value(result[0]) {
                 SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
                 _ => panic!("Expected integer result for or"),
             }
@@ -724,7 +724,7 @@ mod tests {
             let or_expr3 = new_pair(ec.heap, or_sym, f_pair3);
             let result = eval_main(or_expr3, &mut ec).unwrap();
             assert!(matches!(
-                &evaluator.heap.get_value(result),
+                &evaluator.heap.get_value(result[0]),
                 SchemeValue::Bool(false)
             ));
         }
@@ -764,7 +764,7 @@ mod tests {
 
         // Verify it's a closure
         use crate::gc::Callable;
-        match &ec.heap.get_value(add1) {
+        match &ec.heap.get_value(add1[0]) {
             SchemeValue::Callable(callable) => {
                 match callable {
                     Callable::Closure { params, body, .. } => {
@@ -797,12 +797,12 @@ mod tests {
         // Build (add1 5)
         let nil = ec.heap.nil_s();
         let five_pair = new_pair(ec.heap, five, nil);
-        apply_expr = new_pair(ec.heap, add1, five_pair);
+        apply_expr = new_pair(ec.heap, add1[0], five_pair);
         // Evaluate the application
         result = eval_main(apply_expr, &mut ec).unwrap();
 
         // Should return 6
-        match &evaluator.heap.get_value(result) {
+        match &evaluator.heap.get_value(result[0]) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "6"),
             _ => panic!("Expected integer result"),
         }
@@ -857,7 +857,7 @@ mod tests {
         result = eval_main(apply_expr, &mut ec).unwrap();
 
         // Should return 7
-        match &evaluator.heap.get_value(result) {
+        match &evaluator.heap.get_value(result[0]) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "7"),
             _ => panic!("Expected integer result"),
         }
@@ -943,7 +943,7 @@ mod tests {
 
         // This should work because we're using the same interned symbol
         let result = eval_main(apply_expr, &mut ec).unwrap();
-        match &evaluator.heap.get_value(result) {
+        match &evaluator.heap.get_value(result[0]) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "6"),
             _ => panic!("Expected integer result"),
         }
@@ -955,20 +955,20 @@ mod tests {
         let mut ec = crate::eval::EvalContext::from_eval(&mut ev);
         // Simple arithmetic
         let result = eval_string(&mut ec, "(+ 1 2)").unwrap();
-        match &ec.heap.get_value(result) {
+        match &ec.heap.get_value(result[0]) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "3"),
             _ => panic!("Expected integer result"),
         }
         // Multiple expressions, last result returned
         let result = eval_string(&mut ec, "(+ 1 2) (* 2 3)").unwrap();
-        match &ec.heap.get_value(result) {
+        match &ec.heap.get_value(result[0]) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "6"),
             _ => panic!("Expected integer result"),
         }
         // Variable definition and use
         eval_string(&mut ec, "(define x 42)").unwrap();
         let result = eval_string(&mut ec, "(+ x 1)").unwrap();
-        match &ev.heap.get_value(result) {
+        match &ev.heap.get_value(result[0]) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "43"),
             _ => panic!("Expected integer result"),
         }

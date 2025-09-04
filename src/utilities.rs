@@ -90,6 +90,7 @@ fn dump_control(control: &Control) -> String {
     match control {
         Control::Expr(obj) => format!("Expr  = {}", print_value(obj)),
         Control::Value(obj) => format!("Value = {}", print_value(obj)),
+        Control::Values(vals) => format!("Values[0]={:20}", print_value(&vals[0])),
         Control::Escape(val, k) => format!("Escape = {}, {:?}", print_value(val), k),
         Control::Empty => format!("Empty"),
     }
@@ -112,6 +113,13 @@ pub fn dump_cek(loc: &str, state: &CEKState) {
                 eprintln!(
                     "{loc:18} Control: Value={:20}; Kont={}",
                     print_value(obj),
+                    frame_debug_short(&state.kont)
+                );
+            }
+            Control::Values(vals) => {
+                eprintln!(
+                    "{loc:18} Control: Values[0]={:20}; Kont={}",
+                    print_value(&vals[0]),
                     frame_debug_short(&state.kont)
                 );
             }

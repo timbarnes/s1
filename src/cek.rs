@@ -14,7 +14,7 @@ use std::rc::Rc;
 
 /// CEK evaluator entry point from the repl (not used recursively)
 ///
-pub fn eval_main(expr: GcRef, ec: &mut EvalContext) -> Result<GcRef, String> {
+pub fn eval_main(expr: GcRef, ec: &mut EvalContext) -> Result<Vec<GcRef>, String> {
     let state = CEKState {
         control: Control::Expr(expr),
         kont: Rc::new(Kont::Halt),
@@ -29,7 +29,7 @@ pub fn eval_main(expr: GcRef, ec: &mut EvalContext) -> Result<GcRef, String> {
 ///
 /// All the state information is contained in the CEKState struct, so no result is returned until the end.
 ///
-fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> Result<GcRef, String> {
+fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> Result<Vec<GcRef>, String> {
     loop {
         // Step the CEK machine; mutates state in place
         //eprintln!("Pre-step {}", frame_debug_short(&state.kont));
@@ -38,8 +38,12 @@ fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> Result<GcRef, String> 
         }
         match &state.control {
             Control::Value(val) => match *state.kont {
-                Kont::Halt => return Ok(*val), // fully evaluated, exit
-                _ => continue,                 // Some continuation remains; continue loop
+                Kont::Halt => return Ok(vec![*val]), // fully evaluated, exit
+                _ => continue,                       // Some continuation remains; continue loop
+            },
+            Control::Values(vals) => match *state.kont {
+                Kont::Halt => return Ok(vals.clone()), // fully evaluated, exit
+                _ => continue,                         // Some continuation remains; continue loop
             },
             Control::Expr(_) => continue, // Still evaluating an expression; continue loop
             Control::Empty => return Err("CEK: Control::Empty".to_string()),
@@ -71,6 +75,10 @@ fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
             state.control = Control::Value(val);
             dispatch_kont(state, ec, val, Rc::clone(&state.kont))
         }
+        Control::Values(vals) => {
+            *ec.depth -= 1;
+            dispatch_values_kont(state, ec, vals.clone(), Rc::clone(&state.kont))
+        }
         Control::Escape(val, kont) => {
             *ec.depth -= 1;
             state.control = Control::Value(val);
@@ -89,6 +97,22 @@ fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
 //         Err(shared) => shared.as_ref().clone(), // fallback: shallow clone
 //     }
 // }
+#[inline]
+fn dispatch_values_kont(
+    state: &mut CEKState,
+    ec: &mut EvalContext,
+    vals: Vec<GcRef>,
+    kont: KontRef,
+) -> Result<(), String> {
+    match &*kont {
+        Kont::ApplySpecial {
+            proc,
+            original_call,
+            next,
+        } => handle_apply_special(state, ec, *proc, *original_call, Rc::clone(next)),
+        _ => Err("Unexpected Kont in dispatch_values_kont".to_string()),
+    }
+}
 
 #[inline]
 fn dispatch_kont(

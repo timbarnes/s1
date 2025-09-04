@@ -88,7 +88,7 @@ fn expand_list_pair(
                 let body = list_ref(evaluator, expr, 1)?;
                 if depth == 1 {
                     let val = eval_main(body, evaluator)?;
-                    return Ok(Expanded::Single(val));
+                    return Ok(Expanded::Single(val[0]));
                 } else {
                     let inner = expand_macro_internal(&body, depth - 1, evaluator)?;
                     return wrap("unquote", inner, evaluator);
@@ -101,11 +101,11 @@ fn expand_list_pair(
                 let body = list_ref(evaluator, expr, 1)?;
                 if depth == 1 {
                     let val = eval_main(body, evaluator)?;
-                    if let SchemeValue::Pair(_, _) = &evaluator.heap.get_value(val) {
+                    if let SchemeValue::Pair(_, _) = &evaluator.heap.get_value(val[0]) {
                         // Proper list: flatten it
-                        let vec = list_to_vec(&evaluator.heap, val)?;
+                        let vec = list_to_vec(&evaluator.heap, val[0])?;
                         return Ok(Expanded::Splice(vec));
-                    } else if let SchemeValue::Nil = &evaluator.heap.get_value(val) {
+                    } else if let SchemeValue::Nil = &evaluator.heap.get_value(val[0]) {
                         return Ok(Expanded::Splice(vec![]));
                     } else {
                         return Err("Splice requires a proper list".to_string());

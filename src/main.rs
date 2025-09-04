@@ -120,8 +120,9 @@ fn repl(ev: &mut EvalContext) {
             Ok(expr) => match eval_main(expr, ev) {
                 Ok(result) => {
                     if interactive {
-                        //let ec = eval::EvalContext::from_eval(ev);
-                        println!("=> {}", print_value(&result));
+                        for v in result.iter() {
+                            println!("=> {}", print_value(&v));
+                        }
                     }
                 }
                 Err(e) => println!("Error: {}", e),

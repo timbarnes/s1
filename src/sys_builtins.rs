@@ -30,6 +30,7 @@ macro_rules! register_sys_builtins {
 
 pub fn register_sys_builtins(heap: &mut GcHeap, env: &mut crate::env::Environment) {
     register_sys_builtins!(heap, env,
+        "eval-string" => eval_string_sp,
         "eval" => eval_eval_sp,
         "apply" => apply_sp,
         "debug-stack" => debug_stack_sp,
@@ -37,6 +38,28 @@ pub fn register_sys_builtins(heap: &mut GcHeap, env: &mut crate::env::Environmen
         "call-with-current-continuation" => call_cc_sp,
         "escape" => escape_sp,
     );
+}
+
+fn eval_string_sp(
+    ec: &mut EvalContext,
+    args: &[GcRef],
+    state: &mut CEKState,
+) -> Result<(), String> {
+    if args.len() != 1 {
+        return Err("eval-string: expected exactly 1 argument".to_string());
+    }
+    let string = match &ec.heap.get_value(args[0]) {
+        SchemeValue::Str(string) => string.clone(),
+        _ => return Err("eval-string: argument must be a string".to_string()),
+    };
+    // Evaluate the string
+    let result = crate::eval::eval_string(ec, &string)?;
+    if result.len() == 1 {
+        state.control = Control::Value(result[0]);
+    } else {
+        state.control = Control::Values(result);
+    }
+    Ok(())
 }
 
 /// (eval expr [env])
