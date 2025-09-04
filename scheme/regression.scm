@@ -10,7 +10,7 @@
 
 (define **failed-tests** '()) ; keep track of test failures
 (define **counter** 0)
-(define **print-successes** #t)
+(define **print-successes** #f)
 
 (define fails
   (lambda (message)
@@ -377,7 +377,6 @@
 (test-equal 6 (let ((x 2) (y 3)) (* x y)) "Two binding let with single body expression")
 (test-equal 9 (let ((x 3)) (* x x)) "Single binding let with single body expression")
 (test-equal 42 (let ((x 6)) (let ((y (+ x 1))) (* x y))) "Nested let expression")
-(newline)
 
 (display "          === Testing read ===")
 (newline)
@@ -401,7 +400,6 @@
 (define x 5)
 (test-equal 6 (force p) "First force")
 (test-equal 6 (begin (set! **count** 10) (force p)) "Second force")
-(newline)
 
 (display "          === Testing call/cc ===")
 (newline)
@@ -504,7 +502,7 @@
                (if (= y 0)
                    (error 'division-by-zero)
                    (/ x y))))))
-(test-equal 5 (safe-divide 10 2) "call/cc error simulation normal")
+(test-equal 5.0 (safe-divide 10 2) "call/cc error simulation normal")
 (test-equal 'division-by-zero (safe-divide 10 0) "call/cc error simulation escape")
 
 (newline)
