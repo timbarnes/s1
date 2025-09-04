@@ -413,6 +413,100 @@
     (call/cc (lambda (k) (set! saved k) 'ok)))
 (test-equal 'ok result "Capture and re-use continuation")
 (test-equal 99 (saved 99) "Reuse previous continuation")
+
+;; Additional call/cc regression tests
+;; Basic call/cc with assignment (the original bug case)
+(define cont1 (call/cc (lambda (k) (k 42))))
+(test-equal 42 cont1 "call/cc assignment should work")
+
+;; call/cc with nested computation
+(define result1 (call/cc (lambda (k) (+ 10 (k 5) 20))))
+(test-equal 5 result1 "call/cc should escape from nested computation")
+
+;; call/cc without escape (normal return)
+(define result2 (call/cc (lambda (k) (+ 1 2 3))))
+(test-equal 6 result2 "call/cc should work without escaping")
+
+;; Multiple call/cc in sequence
+(define val1 (call/cc (lambda (k) (k 'first))))
+(define val2 (call/cc (lambda (k) (k 'second))))
+(test-equal 'first val1 "first call/cc should work")
+(test-equal 'second val2 "second call/cc should work")
+
+;; call/cc with conditional escape
+(define test-escape
+  (lambda (x)
+    (call/cc (lambda (return)
+               (if (< x 0)
+                   (return 'negative)
+                   (+ x 10))))))
+(test-equal 15 (test-escape 5) "call/cc conditional no escape")
+(test-equal 'negative (test-escape -3) "call/cc conditional escape")
+
+;; call/cc capturing loop state
+(define sum 0)
+(define loop-result
+  (call/cc (lambda (break)
+             (define loop (lambda (i)
+               (set! sum (+ sum i))
+               (if (> i 5)
+                   (break sum)
+                   (loop (+ i 1)))))
+             (loop 1))))
+(test-equal 21 loop-result "call/cc should capture loop state")
+
+;; Nested call/cc
+(define nested-result
+  (call/cc (lambda (outer)
+             (+ 100
+                (call/cc (lambda (inner)
+                          (outer 42)))
+                200))))
+(test-equal 42 nested-result "nested call/cc should escape to outer")
+
+;; call/cc with function application
+(define add-or-escape
+  (lambda (x y escape?)
+    (call/cc (lambda (k)
+               (if escape?
+                   (k 'escaped)
+                   (+ x y))))))
+(test-equal 7 (add-or-escape 3 4 #f) "call/cc function normal case")
+(test-equal 'escaped (add-or-escape 3 4 #t) "call/cc function escape case")
+
+;; call/cc with list processing
+(define find-negative
+  (lambda (lst)
+    (call/cc (lambda (found)
+               (define loop (lambda (items)
+                 (cond
+                   ((null? items) 'none)
+                   ((< (car items) 0) (found (car items)))
+                   (else (loop (cdr items))))))
+               (loop lst)))))
+(test-equal -3 (find-negative '(1 2 -3 4)) "call/cc list processing escape")
+(test-equal 'none (find-negative '(1 2 3 4)) "call/cc list processing normal")
+
+;; call/cc with string operations
+(define process-string
+  (lambda (str)
+    (call/cc (lambda (return)
+               (if (string=? str "")
+                   (return 'empty-string)
+                   (string-length str))))))
+(test-equal 5 (process-string "hello") "call/cc string processing normal")
+(test-equal 'empty-string (process-string "") "call/cc string processing escape")
+
+;; call/cc with error simulation
+(define safe-divide
+  (lambda (x y)
+    (call/cc (lambda (error)
+               (if (= y 0)
+                   (error 'division-by-zero)
+                   (/ x y))))))
+(test-equal 5 (safe-divide 10 2) "call/cc error simulation normal")
+(test-equal 'division-by-zero (safe-divide 10 0) "call/cc error simulation escape")
+
 (newline)
 
 (display "          === All tests completed ===")

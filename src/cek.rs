@@ -43,7 +43,7 @@ fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> Result<GcRef, String> 
             },
             Control::Expr(_) => continue, // Still evaluating an expression; continue loop
             Control::Empty => return Err("CEK: Control::Empty".to_string()),
-            Control::Escape(val, _) => return Ok(*val),
+            Control::Escape(_, _) => continue, // Escape continuation; proceed from new continuation
         }
     }
 }
@@ -74,8 +74,8 @@ fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
         Control::Escape(val, kont) => {
             *ec.depth -= 1;
             state.control = Control::Value(val);
-            state.kont = Rc::clone(&kont);
-            dispatch_kont(state, ec, val, kont)
+            state.kont = kont;
+            Ok(())
         }
         Control::Empty => Err("Unexpected Control::Halt in step()".to_string()),
     }

@@ -153,8 +153,8 @@ fn escape_sp(_ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Res
             // Return the second argument
             //state.control = crate::kont::Control::Escape(result, Rc::clone(new_kont));
             state.control = crate::kont::Control::Escape(result, Rc::clone(new_kont));
-            eprintln!("Escaping to continuation:");
-            crate::utilities::dump_kont(Rc::clone(new_kont));
+            //eprintln!("Escaping to continuation:");
+            //crate::utilities::dump_kont(Rc::clone(new_kont));
             Ok(())
         }
         _ => return Err("escape: first argument must be a continuation".to_string()),
