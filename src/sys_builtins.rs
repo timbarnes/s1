@@ -37,6 +37,7 @@ pub fn register_sys_builtins(heap: &mut GcHeap, env: &mut crate::env::Environmen
         "call/cc" => call_cc_sp,
         "call-with-current-continuation" => call_cc_sp,
         "escape" => escape_sp,
+        "values" => values_sp,
     );
 }
 
@@ -184,6 +185,16 @@ fn escape_sp(_ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Res
     }
 }
 
+fn values_sp(_ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+    if args.len() < 1 {
+        return Err("values: requires at least one argument".to_string());
+    }
+    state.control = Control::Values(args.to_vec());
+    Ok(())
+}
+
+/// Utility functions
+///
 fn capture_call_site_kont(k: &KontRef) -> KontRef {
     match &**k {
         Kont::EvalArg { next, .. } | Kont::ApplyProc { next, .. } => capture_call_site_kont(next),
