@@ -255,6 +255,10 @@ pub fn dump_kont(kont: KontRef) {
                 println!("    Bind {{symbol={}}}", print_value(&symbol),);
                 kr = Rc::clone(next);
             } // other => format!("{:?}", other),
+            Kont::CallWithValues { consumer, next } => {
+                println!("    CallWithValues {{consumer={}}}", print_value(&consumer));
+                kr = Rc::clone(next);
+            }
             Kont::Cond { remaining, next } => {
                 println!("    Cond {{remaining={}}}", remaining.len());
                 kr = Rc::clone(next);

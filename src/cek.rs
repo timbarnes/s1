@@ -97,6 +97,75 @@ fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
 //         Err(shared) => shared.as_ref().clone(), // fallback: shallow clone
 //     }
 // }
+
+/// Capture the current environment and control state, then pass the CEKState to the CEK loop.
+///
+pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
+    dump_cek("   eval_cek", &state);
+    match &gc_value!(expr) {
+        // Self-evaluating values are returned unchanged
+        Int(_) | Float(_) | Str(_) | Bool(_) | Vector(_) | Char(_) | Nil | Continuation(_)
+        | Void | Undefined => {
+            state.control = Control::Value(expr);
+        }
+        // Symbols are looked up in the environment
+        Symbol(name) => {
+            if let Some(val) = ctx.env.get_symbol(expr) {
+                state.control = Control::Value(val);
+            } else {
+                post_error(state, ctx, format!("Unbound variable: {}", name));
+            }
+        }
+
+        // Callables: Builtin, SysBuiltin, Closure, Macro, or SpecialForm gets evaluated
+        Callable(_) => {
+            state.control = Control::Value(expr);
+        }
+
+        // Pair: potentially a function application
+        Pair(car, cdr) => {
+            // Quick path: is this a special form?
+            if let Symbol(_) = &gc_value!(*car) {
+                if let Some(op) = ctx.env.get_symbol(*car) {
+                    if matches!(gc_value!(op), Callable(Callable::SpecialForm { .. })) {
+                        // Call the special-form handler in-place.
+                        state.control = Control::Expr(*car); // or set Value/Expr as your handler expects
+                        let result = apply_special_direct(expr, ctx, state);
+                        match result {
+                            Ok(_) => {}
+                            Err(err) => post_error(state, ctx, err),
+                        }
+                        return; // let run_cek loop continue
+                    }
+                }
+            }
+
+            let args_vec = list_to_vec(&ctx.heap, *cdr)
+                .map_err(|_| "invalid argument list".to_string())
+                .unwrap();
+
+            let prev = Rc::clone(&state.kont);
+
+            state.control = Control::Expr(*car);
+            state.tail = false; // reset after using it
+            state.kont = Rc::new(Kont::EvalArg {
+                proc: None,
+                remaining: args_vec.into_iter().rev().collect(),
+                evaluated: vec![],
+                tail: true,
+                original_call: expr,
+                env: state.env.clone(),
+                next: prev,
+            });
+        }
+        _ => post_error(
+            state,
+            ctx,
+            format!("Unsupported expression in eval_cek: {}", print_value(&expr)),
+        ),
+    }
+}
+
 #[inline]
 fn dispatch_values_kont(
     state: &mut CEKState,
@@ -545,73 +614,6 @@ fn handle_seq(
         state.kont = Rc::new(Kont::Seq { rest, next });
     }
     Ok(())
-}
-
-/// Capture the current environment and control state, then pass the CEKState to the CEK loop.
-///
-pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
-    dump_cek("   eval_cek", &state);
-    match &gc_value!(expr) {
-        // Self-evaluating values
-        Int(_) | Float(_) | Str(_) | Bool(_) | Vector(_) | Char(_) | Nil | Continuation(_)
-        | Void | Undefined => {
-            state.control = Control::Value(expr);
-        }
-        Symbol(name) => {
-            if let Some(val) = ctx.env.get_symbol(expr) {
-                state.control = Control::Value(val);
-            } else {
-                post_error(state, ctx, format!("Unbound variable: {}", name));
-            }
-        }
-
-        // Callables: Builtin, Closure, Macro, or SpecialForm
-        Callable(_) => {
-            state.control = Control::Value(expr);
-        }
-
-        // Pair: potentially a function application
-        Pair(car, cdr) => {
-            // Quick path: is this a special form?
-            if let Symbol(_) = &gc_value!(*car) {
-                if let Some(op) = ctx.env.get_symbol(*car) {
-                    if matches!(gc_value!(op), Callable(Callable::SpecialForm { .. })) {
-                        // Call the special-form handler in-place.
-                        state.control = Control::Expr(*car); // or set Value/Expr as your handler expects
-                        let result = apply_special_direct(expr, ctx, state);
-                        match result {
-                            Ok(_) => {}
-                            Err(err) => post_error(state, ctx, err),
-                        }
-                        return; // let run_cek loop continue
-                    }
-                }
-            }
-
-            let args_vec = list_to_vec(&ctx.heap, *cdr)
-                .map_err(|_| "invalid argument list".to_string())
-                .unwrap();
-
-            let prev = Rc::clone(&state.kont);
-
-            state.control = Control::Expr(*car);
-            state.tail = false; // reset after using it
-            state.kont = Rc::new(Kont::EvalArg {
-                proc: None,
-                remaining: args_vec.into_iter().rev().collect(),
-                evaluated: vec![],
-                tail: true,
-                original_call: expr,
-                env: state.env.clone(),
-                next: prev,
-            });
-        }
-        _ => post_error(
-            state,
-            ctx,
-            format!("Unsupported expression in eval_cek: {}", print_value(&expr)),
-        ),
-    }
 }
 
 fn apply_special_direct(

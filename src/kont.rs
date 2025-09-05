@@ -28,6 +28,10 @@ pub enum Kont {
         env: Option<EnvRef>,
         next: KontRef,
     },
+    CallWithValues {
+        consumer: GcRef,
+        next: KontRef,
+    },
     Cond {
         // processes cond
         remaining: Vec<CondClause>,

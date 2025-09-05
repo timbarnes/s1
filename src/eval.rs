@@ -6,12 +6,12 @@
 
 use crate::cek::eval_main;
 use crate::env::{Environment, Frame};
-use crate::gc::SchemeValue::*;
+//use crate::gc::SchemeValue::*;
 use crate::gc::{GcHeap, GcRef, SchemeValue, list_from_slice, list_to_vec};
 use crate::io::PortKind;
 use crate::macros::expand_macro;
 use crate::parser::parse;
-use crate::printer::print_value;
+//use crate::printer::print_value;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -221,13 +221,13 @@ pub fn expect_symbol(heap: &GcHeap, expr: &GcRef) -> Result<GcRef, String> {
     }
 }
 
-fn is_value(v: &SchemeValue) -> bool {
-    match v {
-        // Symbols are NOT values (must be looked up). Pairs are applications.
-        Symbol(_) | Pair(_, _) => false,
-        _ => true,
-    }
-}
+// fn is_value(v: &SchemeValue) -> bool {
+//     match v {
+//         // Symbols are NOT values (must be looked up). Pairs are applications.
+//         Symbol(_) | Pair(_, _) => false,
+//         _ => true,
+//     }
+// }
 
 // ============================================================================
 // TESTS

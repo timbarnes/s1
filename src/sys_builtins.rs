@@ -38,6 +38,7 @@ pub fn register_sys_builtins(heap: &mut GcHeap, env: &mut crate::env::Environmen
         "call-with-current-continuation" => call_cc_sp,
         "escape" => escape_sp,
         "values" => values_sp,
+        "call-with-values" => call_with_values_sp,
     );
 }
 
@@ -190,6 +191,29 @@ fn values_sp(_ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Res
         return Err("values: requires at least one argument".to_string());
     }
     state.control = Control::Values(args.to_vec());
+    Ok(())
+}
+
+fn call_with_values_sp(
+    _ec: &mut EvalContext,
+    args: &[GcRef],
+    state: &mut CEKState,
+) -> Result<(), String> {
+    if args.len() != 2 {
+        return Err("call-with-values: expected 2 arguments".to_string());
+    }
+    let producer = args[0];
+    let consumer = args[1];
+
+    // Push continuation that remembers consumer
+    let prev = Rc::clone(&state.kont);
+    state.kont = Rc::new(Kont::CallWithValues {
+        consumer,
+        next: prev,
+    });
+
+    // Evaluate the producer thunk
+    state.control = Control::Expr(producer);
     Ok(())
 }
 
