@@ -187,10 +187,11 @@ fn escape_sp(_ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Res
 }
 
 fn values_sp(_ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
-    if args.len() < 1 {
-        return Err("values: requires at least one argument".to_string());
+    match args.len() {
+        0 => return Err("values: requires at least one argument".to_string()),
+        1 => state.control = Control::Value(args[0]),
+        _ => state.control = Control::Values(args.to_vec()),
     }
-    state.control = Control::Values(args.to_vec());
     Ok(())
 }
 
