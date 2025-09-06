@@ -7,7 +7,7 @@ use crate::env::Environment;
 use crate::eval::{EvalContext, TraceType};
 use crate::gc::{GcHeap, GcRef, SchemeValue};
 use crate::gc_value;
-use crate::utilities::dump_env;
+use crate::utilities::dbg_env;
 
 /// (trace [arg])
 /// Controls step and tracing options
@@ -37,7 +37,7 @@ fn trace(evaluator: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
                 _ => TraceType::Off,
             };
         }
-        _ => return Err("trace: requires integer argument".to_string()),
+        _ => return Err("trace: expects o(ff), a(ll), e(xpr), or s(tep)".to_string()),
     };
     Ok(args[0])
 }
@@ -61,13 +61,13 @@ fn trace(evaluator: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
 
 /// (debug-env)
 /// Prints the environment up to the given depth, or all if.
-fn debug_env(evaluator: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
+fn trace_env(evaluator: &mut EvalContext, args: &[GcRef]) -> Result<GcRef, String> {
     *evaluator.depth -= 1;
     if args.len() != 0 {
         return Err("debug-env: requires no arguments".to_string());
     }
     let env = evaluator.env.current_frame.clone();
-    dump_env(Some(env));
+    dbg_env(Some(env));
     Ok(evaluator.heap.true_s())
 }
 
@@ -84,7 +84,7 @@ macro_rules! register_builtin_family {
 pub fn register_debug_builtins(heap: &mut GcHeap, env: &mut Environment) {
     register_builtin_family!(heap, env,
         "trace" => trace,
-        "debug-env" => debug_env,
+        "trace-env" => trace_env,
         //"step" => stepper,
     );
 }

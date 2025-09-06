@@ -2,6 +2,8 @@
 ///
 use crate::env::Frame;
 use crate::eval::{EvalContext, TraceType};
+use crate::gc::GcRef;
+use crate::gc_value;
 use crate::kont::{AndOrKind, CEKState, Control, Kont, KontRef};
 use crate::printer::print_value;
 use std::cell::RefCell;
@@ -27,7 +29,7 @@ pub fn debugger(state: &mut CEKState, ec: &mut EvalContext) {
             indent(*ec.depth, true);
             println!(" {}", dump_control(&state.control));
             indent(*ec.depth + 1, false);
-            println!("{}", frame_debug_short(&state.kont));
+            println!("{}", dbg_one_kont(&state.kont));
             //dump_cek("", &state);
         }
         TraceType::Step => {
@@ -69,6 +71,7 @@ fn debug_interactive(state: &mut CEKState, ec: &mut EvalContext) {
         match cmd {
             "" | "n" | "next" => {
                 // step one more and come back
+                println!("control expr = {}", dump_control(&state.control));
                 break;
             }
             "c" | "continue" => {
@@ -78,19 +81,19 @@ fn debug_interactive(state: &mut CEKState, ec: &mut EvalContext) {
             }
             "e" | "env" => {
                 let frame = ec.env.current_frame.clone();
-                dump_env(Some(frame));
+                dbg_env(Some(frame));
             }
             "k" | "kont" => {
-                dump_kont(Rc::clone(&state.kont));
+                dbg_kont(Rc::clone(&state.kont));
             }
             "l" | "locals" => {
-                dump_locals(&state.env);
+                dbg_one_env(&state.env);
             }
-            "expr" => {
-                println!("control = {}", dump_control(&state.control));
+            "x" | "expr" => {
+                println!("control expr = {}", dump_control(&state.control));
             }
             "s" | "state" => {
-                dump_cek("", &state);
+                dump_cek("state: ", &state);
             }
             "q" | "quit" => {
                 println!("Exiting...");
@@ -98,7 +101,9 @@ fn debug_interactive(state: &mut CEKState, ec: &mut EvalContext) {
                 state.kont = Rc::new(Kont::Halt);
             }
             _ => {
-                println!("commands: n(ext), c(ontinue), e(nv), k(ont), l(ocals), expr, s(tate)");
+                println!(
+                    "commands: n(ext), c(ontinue), e(nv), k(ont), l(ocals), x or expr, s(tate)"
+                );
             }
         }
     }
@@ -122,7 +127,7 @@ pub fn dump_cek(loc: &str, state: &CEKState) {
             eprintln!(
                 "Expr   {};      Kont = {}; Tail={}",
                 print_value(obj),
-                frame_debug_short(&state.kont),
+                dbg_one_kont(&state.kont),
                 state.tail
             );
         }
@@ -130,30 +135,30 @@ pub fn dump_cek(loc: &str, state: &CEKState) {
             eprintln!(
                 "Value  {};      Kont = {}",
                 print_value(obj),
-                frame_debug_short(&state.kont)
+                dbg_one_kont(&state.kont)
             );
         }
         Control::Values(vals) => {
             eprintln!(
                 "Values[0] {};      Kont = {}",
                 print_value(&vals[0]),
-                frame_debug_short(&state.kont)
+                dbg_one_kont(&state.kont)
             );
         }
         Control::Escape(val, kont) => {
             eprintln!(
                 "Escape; Val {};      Kont = {}",
                 print_value(val),
-                frame_debug_short(&kont)
+                dbg_one_kont(&kont)
             );
         }
         Control::Empty => {
-            eprintln!("Halt      Kont = {}", frame_debug_short(&state.kont));
+            eprintln!("Halt      Kont = {}", dbg_one_kont(&state.kont));
         }
     }
 }
 
-fn frame_debug_short(frame: &Kont) -> String {
+fn dbg_one_kont(frame: &Kont) -> String {
     match frame {
         Kont::EvalArg {
             proc,
@@ -216,7 +221,7 @@ fn frame_debug_short(frame: &Kont) -> String {
     }
 }
 
-pub fn dump_kont(kont: KontRef) {
+pub fn dbg_kont(kont: KontRef) {
     println!("  Stack:");
     let mut kr = Rc::clone(&kont);
     loop {
@@ -339,7 +344,7 @@ pub fn dump_kont(kont: KontRef) {
     }
 }
 
-pub fn dump_locals(env: &Rc<RefCell<Frame>>) {
+pub fn dbg_one_env(env: &Rc<RefCell<Frame>>) {
     let frame = env.borrow();
     println!("Local env: ");
     for (k, v) in frame.bindings.iter() {
@@ -348,17 +353,33 @@ pub fn dump_locals(env: &Rc<RefCell<Frame>>) {
     }
 }
 
-pub fn dump_env(env: Option<Rc<RefCell<Frame>>>) {
+pub fn dbg_env(env: Option<Rc<RefCell<Frame>>>) {
     let mut depth = 0;
     let mut current = env;
     while let Some(frame_rc) = current {
-        let frame = frame_rc.borrow();
-        println!("Env frame {depth}:");
-        for (k, v) in frame.bindings.iter() {
-            // Replace with your actual printer for GcRef
-            println!("  {:20} => {}", print_value(&k), print_value(&v));
+        current = frame_rc.borrow().parent.clone(); // Look at the parent frame
+        match current {
+            Some(_) => {
+                let frame = frame_rc.borrow();
+                let mut bindings = Vec::new();
+                println!("Env frame {depth}:");
+                for (k, v) in frame.bindings.iter() {
+                    match gc_value!(*k) {
+                        crate::gc::SchemeValue::Symbol(s) => {
+                            bindings.push((s, v));
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                bindings.sort_by(|(k1, _v1), (k2, _v2)| k1.cmp(k2));
+                for (k, v) in bindings {
+                    println!("  {:20} => {}", &k, print_value(&v));
+                }
+                depth += 1;
+            }
+            None => {
+                println!("Omitting global frame");
+            }
         }
-        current = frame.parent.clone();
-        depth += 1;
     }
 }
