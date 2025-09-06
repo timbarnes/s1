@@ -1,7 +1,7 @@
 /// Internal utility functions
 ///
 use crate::env::Frame;
-use crate::eval::EvalContext;
+use crate::eval::{EvalContext, TraceType};
 use crate::kont::{AndOrKind, CEKState, Control, Kont, KontRef};
 use crate::printer::print_value;
 use std::cell::RefCell;
@@ -10,33 +10,51 @@ use std::rc::Rc;
 /// Push an error into the existing CEKState.
 pub fn post_error(state: &mut CEKState, ec: &mut EvalContext, error: String) {
     eprintln!("Error: {}", error);
-    debug_cek(state, ec);
+    debugger(state, ec);
 }
 
 /// Trace / debug function called from within the CEK machine and on error
 ///
-pub fn debug_cek(state: &mut CEKState, ec: &mut EvalContext) {
+pub fn debugger(state: &mut CEKState, ec: &mut EvalContext) {
     // simple indentation
-    for i in 0..*ec.depth {
-        if i % 10 == 0 {
-            print!("{}", i / 10);
-        } else if i % 2 == 0 {
-            print!(".");
+    match ec.trace {
+        TraceType::Off => return,
+        TraceType::Control => {
+            indent(*ec.depth, true);
+            println!(" {}", dump_control(&state.control));
+        }
+        TraceType::Full => {
+            indent(*ec.depth, true);
+            println!(" {}", dump_control(&state.control));
+            indent(*ec.depth + 1, false);
+            println!("{}", frame_debug_short(&state.kont));
+            //dump_cek("", &state);
+        }
+        TraceType::Step => {
+            indent(*ec.depth, true);
+            debug_interactive(state, ec);
+        }
+    }
+}
+
+fn indent(n: i32, v: bool) {
+    for i in 0..n {
+        if v {
+            if i % 10 == 0 {
+                print!("{}", i / 10);
+            } else if i % 2 == 0 {
+                print!(".");
+            } else {
+                print!(" ");
+            }
         } else {
             print!(" ");
         }
-    }
-
-    println!(" {}", dump_control(&state.control));
-
-    if *ec.step {
-        debug_interactive(state, ec);
     }
 }
 
 fn debug_interactive(state: &mut CEKState, ec: &mut EvalContext) {
     use std::io::{self, Write};
-
     loop {
         print!("debug> ");
         io::stdout().flush().unwrap();
@@ -47,7 +65,7 @@ fn debug_interactive(state: &mut CEKState, ec: &mut EvalContext) {
             continue;
         }
         let cmd = input.trim();
-        println!("Command: {}", cmd);
+        //println!("Command: {}", cmd);
         match cmd {
             "" | "n" | "next" => {
                 // step one more and come back
@@ -55,7 +73,7 @@ fn debug_interactive(state: &mut CEKState, ec: &mut EvalContext) {
             }
             "c" | "continue" => {
                 // run freely until next breakpoint / error
-                *ec.step = false;
+                *ec.trace = TraceType::Off;
                 break;
             }
             "e" | "env" => {
@@ -68,7 +86,7 @@ fn debug_interactive(state: &mut CEKState, ec: &mut EvalContext) {
             "l" | "locals" => {
                 dump_locals(&state.env);
             }
-            "ctrl" => {
+            "expr" => {
                 println!("control = {}", dump_control(&state.control));
             }
             "s" | "state" => {
@@ -80,7 +98,7 @@ fn debug_interactive(state: &mut CEKState, ec: &mut EvalContext) {
                 state.kont = Rc::new(Kont::Halt);
             }
             _ => {
-                println!("commands: n(ext), c(ontinue), e(nv), k(ont), l(ocals), ctrl, s(tate)");
+                println!("commands: n(ext), c(ontinue), e(nv), k(ont), l(ocals), expr, s(tate)");
             }
         }
     }
@@ -99,43 +117,38 @@ fn dump_control(control: &Control) -> String {
 // Dump a summary of the CEK machine state
 ///
 pub fn dump_cek(loc: &str, state: &CEKState) {
-    if false {
-        match &state.control {
-            Control::Expr(obj) => {
-                eprintln!(
-                    "{loc:18} Control: Expr={}; Kont={}; Tail={}",
-                    print_value(obj),
-                    frame_debug_short(&state.kont),
-                    state.tail
-                );
-            }
-            Control::Value(obj) => {
-                eprintln!(
-                    "{loc:18} Control: Value={:20}; Kont={}",
-                    print_value(obj),
-                    frame_debug_short(&state.kont)
-                );
-            }
-            Control::Values(vals) => {
-                eprintln!(
-                    "{loc:18} Control: Values[0]={:20}; Kont={}",
-                    print_value(&vals[0]),
-                    frame_debug_short(&state.kont)
-                );
-            }
-            Control::Escape(val, kont) => {
-                eprintln!(
-                    "{loc:18} Control: Escape; Val = {}; Kont={}",
-                    print_value(val),
-                    frame_debug_short(&kont)
-                );
-            }
-            Control::Empty => {
-                eprintln!(
-                    "{loc:18} Control: Halt; Kont={}",
-                    frame_debug_short(&state.kont)
-                );
-            }
+    match &state.control {
+        Control::Expr(obj) => {
+            eprintln!(
+                "Expr   {};      Kont = {}; Tail={}",
+                print_value(obj),
+                frame_debug_short(&state.kont),
+                state.tail
+            );
+        }
+        Control::Value(obj) => {
+            eprintln!(
+                "Value  {};      Kont = {}",
+                print_value(obj),
+                frame_debug_short(&state.kont)
+            );
+        }
+        Control::Values(vals) => {
+            eprintln!(
+                "Values[0] {};      Kont = {}",
+                print_value(&vals[0]),
+                frame_debug_short(&state.kont)
+            );
+        }
+        Control::Escape(val, kont) => {
+            eprintln!(
+                "Escape; Val {};      Kont = {}",
+                print_value(val),
+                frame_debug_short(&kont)
+            );
+        }
+        Control::Empty => {
+            eprintln!("Halt      Kont = {}", frame_debug_short(&state.kont));
         }
     }
 }

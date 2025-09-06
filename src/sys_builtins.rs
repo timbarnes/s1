@@ -5,10 +5,10 @@ use crate::gc::{
     new_sys_builtin,
 };
 use crate::gc_value;
-use crate::kont::{CEKState, Control, Kont, KontRef, insert_eval_eval};
+use crate::kont::{CEKState, Control, Kont, KontRef, insert_eval, insert_eval_eval};
 //use crate::printer::print_value;
 use crate::special_forms::create_callable;
-use crate::utilities::dump_cek;
+//use crate::utilities::dump_cek;
 use std::rc::Rc;
 
 /// System Builtin Functions
@@ -113,7 +113,7 @@ fn debug_stack_sp(
     _args: &[GcRef],
     state: &mut CEKState,
 ) -> Result<(), String> {
-    dump_cek("", state);
+    //dump_cek("", state);
     state.control = crate::kont::Control::Value(ec.heap.void());
     Ok(())
 }
@@ -176,7 +176,6 @@ fn escape_sp(_ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Res
             //state.kont = Rc::clone(new_kont);
             let result = args[1];
             // Return the second argument
-            //state.control = crate::kont::Control::Escape(result, Rc::clone(new_kont));
             state.control = crate::kont::Control::Escape(result, Rc::clone(new_kont));
             //eprintln!("Escaping to continuation:");
             //crate::utilities::dump_kont(Rc::clone(new_kont));
@@ -187,6 +186,7 @@ fn escape_sp(_ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Res
 }
 
 fn values_sp(_ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+    eprintln!("Processing {} values", args.len());
     match args.len() {
         0 => return Err("values: requires at least one argument".to_string()),
         1 => state.control = Control::Value(args[0]),
@@ -196,7 +196,7 @@ fn values_sp(_ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Res
 }
 
 fn call_with_values_sp(
-    _ec: &mut EvalContext,
+    ec: &mut EvalContext,
     args: &[GcRef],
     state: &mut CEKState,
 ) -> Result<(), String> {
@@ -205,16 +205,15 @@ fn call_with_values_sp(
     }
     let producer = args[0];
     let consumer = args[1];
-
     // Push continuation that remembers consumer
     let prev = Rc::clone(&state.kont);
     state.kont = Rc::new(Kont::CallWithValues {
         consumer,
         next: prev,
     });
-
     // Evaluate the producer thunk
-    state.control = Control::Expr(producer);
+    state.control = Control::Expr(list(producer, ec.heap)?);
+    // dump_cek("call_with_values_sp", state);
     Ok(())
 }
 

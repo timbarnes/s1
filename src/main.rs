@@ -32,9 +32,6 @@ struct Args {
     /// exit after file loading, do not enter REPL
     #[argh(switch, short = 'q')]
     quit: bool,
-    /// trace mode
-    #[argh(switch, short = 't')]
-    trace: i32,
     /// run regression tests
     #[argh(switch, short = 'r')]
     regression: bool,
@@ -84,8 +81,6 @@ fn main() {
             std::process::exit(1);
         }
     }
-
-    *ec.trace = num_traits::abs(args.trace);
 
     // Drop into the REPL
     repl(&mut ec);

@@ -561,7 +561,9 @@
 (test-equal 5.0 (safe-divide 10 2) "call/cc error simulation normal")
 (test-equal 'division-by-zero (safe-divide 10 0) "call/cc error simulation escape")
 
+(display "          === Testing values / call-with-values ===")
 (newline)
+(test-equal 5 (+ (values 2)3) "Singleton values call")
 
 (display "          === All tests completed ===")
 (newline)

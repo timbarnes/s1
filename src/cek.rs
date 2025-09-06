@@ -9,7 +9,7 @@ use crate::kont::{
     AndOrKind, CEKState, CondClause, Control, EvalPhase, Kont, KontRef, insert_eval,
 };
 use crate::printer::print_value;
-use crate::utilities::{debug_cek, dump_cek, post_error};
+use crate::utilities::{debugger, post_error};
 use std::rc::Rc;
 
 /// CEK evaluator entry point from the repl (not used recursively)
@@ -21,7 +21,7 @@ pub fn eval_main(expr: GcRef, ec: &mut EvalContext) -> Result<Vec<GcRef>, String
         env: ec.env.current_frame(),
         tail: false,
     };
-    dump_cek("***eval_main***", &state);
+    //dump_cek("***eval_main***", &state);
     run_cek(state, ec)
 }
 
@@ -59,10 +59,9 @@ fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> Result<Vec<GcRef>, Str
 ///
 
 fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
-    dump_cek("  step", &state);
-    if *ec.trace > 0 && ec.depth <= ec.trace {
-        debug_cek(state, ec);
-    }
+    //dump_cek("  step", &state);
+    debugger(state, ec);
+
     let control = std::mem::replace(&mut state.control, Control::Empty);
     match control {
         Control::Expr(expr) => {
@@ -76,6 +75,7 @@ fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
             dispatch_kont(state, ec, val, Rc::clone(&state.kont))
         }
         Control::Values(vals) => {
+            eprintln!("step::Values");
             *ec.depth -= 1;
             dispatch_values_kont(state, ec, vals.clone(), Rc::clone(&state.kont))
         }
@@ -101,7 +101,7 @@ fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
 /// Capture the current environment and control state, then pass the CEKState to the CEK loop.
 ///
 pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
-    dump_cek("   eval_cek", &state);
+    //dump_cek("   eval_cek", &state);
     match &gc_value!(expr) {
         // Self-evaluating values are returned unchanged
         Int(_) | Float(_) | Str(_) | Bool(_) | Vector(_) | Char(_) | Nil | Continuation(_)
@@ -169,16 +169,21 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
 #[inline]
 fn dispatch_values_kont(
     state: &mut CEKState,
-    ec: &mut EvalContext,
+    _ec: &mut EvalContext,
     vals: Vec<GcRef>,
     kont: KontRef,
 ) -> Result<(), String> {
+    eprintln!("dispatch_values_kont: vals = {:?}", vals);
     match &*kont {
-        Kont::ApplySpecial {
-            proc,
-            original_call,
-            next,
-        } => handle_apply_special(state, ec, *proc, *original_call, Rc::clone(next)),
+        Kont::CallWithValues { consumer, next } => {
+            // Construct ApplyProc with consumer and vals
+            state.kont = Rc::new(Kont::ApplyProc {
+                proc: *consumer,
+                evaluated_args: vals,
+                next: Rc::clone(&next),
+            });
+            Ok(())
+        }
         _ => Err("Unexpected Kont in dispatch_values_kont".to_string()),
     }
 }
@@ -290,7 +295,7 @@ fn handle_apply_special(
         next,
     };
     state.tail = false;
-    apply_special(state, ec, frame)?;
+    apply_unevaluated(state, ec, frame)?;
     Ok(())
 }
 
@@ -488,7 +493,7 @@ fn handle_eval_arg(
                     original_call,
                     next,
                 };
-                apply_special(state, ec, frame)?;
+                apply_unevaluated(state, ec, frame)?;
                 return Ok(());
             }
             _ => {
@@ -557,7 +562,7 @@ fn handle_if(
     else_branch: GcRef,
     next: KontRef,
 ) -> Result<(), String> {
-    dump_cek("handle_if", state);
+    //dump_cek("handle_if", state);
     match &state.control {
         Control::Value(val) => {
             if is_false(*val) {
@@ -631,9 +636,13 @@ fn apply_special_direct(
     }
 }
 
-/// Process SpecialForm and Macro applications. Argument evaluation is deferred to the callee.
+/// Process applications that do not require argument evaluation: macros, special forms, and call-with-values.
 ///
-fn apply_special(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Result<(), String> {
+fn apply_unevaluated(
+    state: &mut CEKState,
+    ec: &mut EvalContext,
+    frame: Kont,
+) -> Result<(), String> {
     if let Kont::ApplySpecial {
         proc,
         original_call,
@@ -671,14 +680,14 @@ fn apply_special(state: &mut CEKState, ec: &mut EvalContext, frame: Kont) -> Res
     }
 }
 
-/// Process Builtin and Closure applications. Arguments are already evaluated.
+/// Process Builtin, SysBuiltin, and Closure applications. Arguments are already evaluated.
 ///
 pub fn apply_proc(
     state: &mut CEKState,
     ec: &mut EvalContext,
     frame: KontRef,
 ) -> Result<(), String> {
-    dump_cek("     apply_proc", &state);
+    //dump_cek("     apply_proc", &state);
 
     if let Kont::ApplyProc {
         proc,

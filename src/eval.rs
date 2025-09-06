@@ -17,23 +17,19 @@ use std::rc::Rc;
 
 /// Evaluator that owns both heap and environment
 pub struct Evaluator {
-    pub heap: GcHeap, // The global heap for scheme data
-    env: Environment, // The current state of the environment
-    //tail_call: Option<TailCall>,   // Tail call optimization state
-    pub port_stack: Vec<PortKind>, // Stack of ports for input/output operations         // Indicates a new port has been pushed on the stack
-    pub trace: i32,                // Indicates tracing is enabled to a given depth
-    pub depth: i32,                // Evaluation nesting depth (used by trace)
-    pub step: bool,
+    pub heap: GcHeap,              // The global heap for scheme data
+    env: Environment,              // The current state of the environment
+    pub port_stack: Vec<PortKind>, // Stack of ports for input/output operations
+    pub trace: TraceType,
+    pub depth: i32,
 }
 
 pub struct EvalContext<'a> {
     pub heap: &'a mut GcHeap,
     pub env: &'a mut Environment,
-    //pub tail_call: Option<TailCall>,
     pub port_stack: &'a mut Vec<PortKind>,
-    pub trace: &'a mut i32,
+    pub trace: &'a mut TraceType,
     pub depth: &'a mut i32,
-    pub step: &'a mut bool,
 }
 
 impl<'a> EvalContext<'a> {
@@ -41,13 +37,18 @@ impl<'a> EvalContext<'a> {
         EvalContext {
             heap: &mut eval.heap,
             env: &mut eval.env,
-            //tail_call: None,
             port_stack: &mut eval.port_stack,
             trace: &mut eval.trace,
             depth: &mut eval.depth,
-            step: &mut eval.step,
         }
     }
+}
+
+pub enum TraceType {
+    Control,
+    Full,
+    Step,
+    Off,
 }
 
 /// Represents a tail call that should be optimized
@@ -63,11 +64,9 @@ impl Evaluator {
         let mut evaluator = Self {
             heap: GcHeap::new(),
             env: g_env,
-            //tail_call: None,
             port_stack: Vec::new(),
-            trace: 0,
+            trace: TraceType::Off,
             depth: 0,
-            step: false,
         };
 
         // Register built-ins in the evaluator's heap and environment

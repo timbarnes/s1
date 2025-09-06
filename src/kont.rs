@@ -133,6 +133,14 @@ impl std::fmt::Debug for Kont {
                     next
                 )
             }
+            Kont::CallWithValues { consumer, next } => {
+                write!(
+                    f,
+                    "CallWithValues {{ consumer: {}, next: {:?} }}",
+                    print_value(consumer),
+                    next
+                )
+            }
             Kont::If {
                 then_branch,
                 else_branch,
@@ -246,7 +254,7 @@ pub fn insert_eval(state: &mut CEKState, expr: GcRef, replace_next: bool) {
     // and set EvalArg.next = Box::new(Kont::Halt); otherwise leave state.kont as-is.
     state.tail = replace_next;
     state.control = Control::Expr(expr);
-    crate::utilities::dump_cek(" insert_eval", &state);
+    //crate::utilities::dump_cek(" insert_eval", &state);
 }
 
 /// Return a value from a special form without evaluation.

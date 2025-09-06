@@ -93,6 +93,29 @@ impl Clone for PortKind {
     }
 }
 
+// impl std::fmt::Debug for PortKind {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         match self {
+//             PortKind::StringPortInput { content, pos } => {
+//                 let l = if content.len() < 20 {
+//                     content.len()
+//                 } else {
+//                     20
+//                 };
+//                 let substring = content[..len];
+//                 write!(f, "StringPortInput: {:?}", content[..l]);
+//             }
+//             PortKind::StringPortOutput { content } => {
+//                 write!(f, "StringPortOutput: {}", content[..l]);
+//             }
+//             PortKind::Stdin => write!(f, "StdIn"),
+//             PortKind::Stdout => write!(f, "StdOut"),
+//             PortKind::Stderr => write!(f, "StdErr"),
+//             _ => write!(f, "unrecognized port type"),
+//         }
+//     }
+// }
+
 impl PartialEq for PortKind {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
