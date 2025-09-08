@@ -278,6 +278,7 @@ fn trace_env_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Resul
     }
     let env = state.env.clone();
     crate::utilities::dbg_env(Some(env));
+    state.control = Control::Value(ec.heap.void());
     Ok(())
 }
 

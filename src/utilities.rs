@@ -377,7 +377,7 @@ pub fn dbg_env(env: Option<Rc<RefCell<Frame>>>) {
                 depth += 1;
             }
             None => {
-                println!("Omitting global frame");
+                //println!("Omitting global frame");
             }
         }
     }
