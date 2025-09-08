@@ -1,7 +1,7 @@
 /// Continuation-Passing Style (CPS) evaluator.
 ///
-use crate::env::EnvRef;
-use crate::eval::{EvalContext, bind_params, eval_macro};
+use crate::env::{EnvOps, EnvRef};
+use crate::eval::{RunTime, bind_params, eval_macro};
 use crate::gc::SchemeValue::*;
 use crate::gc::{Callable, GcRef, cons, is_false, list_to_vec};
 use crate::gc_value;
@@ -14,11 +14,11 @@ use std::rc::Rc;
 
 /// CEK evaluator entry point from the repl (not used recursively)
 ///
-pub fn eval_main(expr: GcRef, ec: &mut EvalContext) -> Result<Vec<GcRef>, String> {
+pub fn eval_main(expr: GcRef, env: EnvRef, ec: &mut RunTime) -> Result<Vec<GcRef>, String> {
     let state = CEKState {
         control: Control::Expr(expr),
         kont: Rc::new(Kont::Halt),
-        env: ec.env.current_frame(),
+        env: env,
         tail: false,
     };
     //dump_cek("***eval_main***", &state);
@@ -29,7 +29,7 @@ pub fn eval_main(expr: GcRef, ec: &mut EvalContext) -> Result<Vec<GcRef>, String
 ///
 /// All the state information is contained in the CEKState struct, so no result is returned until the end.
 ///
-fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> Result<Vec<GcRef>, String> {
+fn run_cek(mut state: CEKState, ctx: &mut RunTime) -> Result<Vec<GcRef>, String> {
     loop {
         // Step the CEK machine; mutates state in place
         //eprintln!("Pre-step {}", frame_debug_short(&state.kont));
@@ -58,7 +58,7 @@ fn run_cek(mut state: CEKState, ctx: &mut EvalContext) -> Result<Vec<GcRef>, Str
 /// resolving symbols, starting applications, and handling continuations as needed.
 ///
 
-fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
+fn step(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> {
     //dump_cek("  step", &state);
     debugger(state, ec);
 
@@ -100,7 +100,7 @@ fn step(state: &mut CEKState, ec: &mut EvalContext) -> Result<(), String> {
 
 /// Capture the current environment and control state, then pass the CEKState to the CEK loop.
 ///
-pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
+pub fn eval_cek(expr: GcRef, ctx: &mut RunTime, state: &mut CEKState) {
     //dump_cek("   eval_cek", &state);
     match &gc_value!(expr) {
         // Self-evaluating values are returned unchanged
@@ -110,7 +110,7 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
         }
         // Symbols are looked up in the environment
         Symbol(name) => {
-            if let Some(val) = ctx.env.get_symbol(expr) {
+            if let Some(val) = state.env.lookup(expr) {
                 state.control = Control::Value(val);
             } else {
                 post_error(state, ctx, format!("Unbound variable: {}", name));
@@ -126,7 +126,7 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
         Pair(car, cdr) => {
             // Quick path: is this a special form?
             if let Symbol(_) = &gc_value!(*car) {
-                if let Some(op) = ctx.env.get_symbol(*car) {
+                if let Some(op) = state.env.lookup(*car) {
                     if matches!(gc_value!(op), Callable(Callable::SpecialForm { .. })) {
                         // Call the special-form handler in-place.
                         state.control = Control::Expr(*car); // or set Value/Expr as your handler expects
@@ -169,7 +169,7 @@ pub fn eval_cek(expr: GcRef, ctx: &mut EvalContext, state: &mut CEKState) {
 #[inline]
 fn dispatch_values_kont(
     state: &mut CEKState,
-    _ec: &mut EvalContext,
+    _ec: &mut RunTime,
     vals: Vec<GcRef>,
     kont: KontRef,
 ) -> Result<(), String> {
@@ -191,7 +191,7 @@ fn dispatch_values_kont(
 #[inline]
 fn dispatch_kont(
     state: &mut CEKState,
-    ec: &mut EvalContext,
+    ec: &mut RunTime,
     val: GcRef,
     kont: KontRef,
 ) -> Result<(), String> {
@@ -255,7 +255,7 @@ fn dispatch_kont(
 
 fn handle_and_or(
     state: &mut CEKState,
-    _ec: &mut EvalContext,
+    _ec: &mut RunTime,
     kind: AndOrKind,
     mut rest: Vec<GcRef>,
     next: KontRef,
@@ -284,7 +284,7 @@ fn handle_and_or(
 
 fn handle_apply_special(
     state: &mut CEKState,
-    ec: &mut EvalContext,
+    ec: &mut RunTime,
     proc: GcRef,
     original_call: GcRef,
     next: KontRef,
@@ -301,7 +301,7 @@ fn handle_apply_special(
 
 fn handle_bind(
     state: &mut CEKState,
-    ec: &mut EvalContext,
+    ec: &mut RunTime,
     symbol: GcRef,
     env: Option<EnvRef>,
     next: KontRef,
@@ -311,12 +311,12 @@ fn handle_bind(
         match env {
             Some(frame) => {
                 // global and set! path: update specific frame
-                frame.borrow_mut().set_local(symbol, val);
+                frame.set_local(symbol, val);
                 state.control = Control::Value(ec.heap.unspecified());
             }
             None => {
                 // local define path: bind in current frame
-                state.env.borrow_mut().set_local(symbol, val);
+                state.env.set_local(symbol, val);
                 state.control = Control::Value(symbol);
             }
         }
@@ -330,7 +330,7 @@ fn handle_bind(
 
 fn handle_cond(
     state: &mut CEKState,
-    ec: &mut EvalContext,
+    ec: &mut RunTime,
     mut remaining: Vec<CondClause>,
     next: KontRef,
 ) -> Result<(), String> {
@@ -360,7 +360,7 @@ fn handle_cond(
 
 fn handle_cond_clause(
     state: &mut CEKState,
-    ec: &mut EvalContext,
+    ec: &mut RunTime,
     cond_clause: CondClause,
     next: KontRef,
 ) -> Result<(), String> {
@@ -423,7 +423,7 @@ fn handle_cond_clause(
 
 fn handle_eval(
     state: &mut CEKState,
-    _ec: &mut EvalContext,
+    _ec: &mut RunTime,
     expr: GcRef,
     env: Option<GcRef>,
     phase: EvalPhase,
@@ -474,7 +474,7 @@ fn handle_eval(
 
 fn handle_eval_arg(
     state: &mut CEKState,
-    ec: &mut EvalContext,
+    ec: &mut RunTime,
     val: GcRef,
     proc: Option<GcRef>,
     mut remaining: Vec<GcRef>,
@@ -557,7 +557,7 @@ fn handle_eval_arg(
 
 fn handle_if(
     state: &mut CEKState,
-    _ec: &mut EvalContext,
+    _ec: &mut RunTime,
     then_branch: GcRef,
     else_branch: GcRef,
     next: KontRef,
@@ -580,13 +580,13 @@ fn handle_if(
 
 fn handle_restore_env(
     state: &mut CEKState,
-    ec: &mut EvalContext,
+    _ec: &mut RunTime,
     old_env: EnvRef,
     val: GcRef,
     next: Rc<Kont>,
 ) -> Result<(), String> {
     // Restore environment
-    ec.env.set_current_frame(old_env.clone());
+    state.env = old_env.clone();
     state.env = old_env;
     // Propagate the value
     state.control = Control::Value(val);
@@ -600,7 +600,7 @@ fn handle_restore_env(
 
 fn handle_seq(
     state: &mut CEKState,
-    _ec: &mut EvalContext,
+    _ec: &mut RunTime,
     mut rest: Vec<GcRef>,
     next: Rc<Kont>,
 ) -> Result<(), String> {
@@ -621,13 +621,9 @@ fn handle_seq(
     Ok(())
 }
 
-fn apply_special_direct(
-    expr: GcRef,
-    ec: &mut EvalContext,
-    state: &mut CEKState,
-) -> Result<(), String> {
+fn apply_special_direct(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let op_sym = crate::gc::car(expr)?;
-    let op_val = ec.env.get_symbol(op_sym).ok_or("unbound special form")?;
+    let op_val = state.env.lookup(op_sym).ok_or("unbound special form")?;
     //println!("op_val: {}", print_scheme_value(&op_val));
     if let Callable(Callable::SpecialForm { func, .. }) = gc_value!(op_val) {
         func(expr, ec, state) // handler mutates state; returns Ok(()) immediately
@@ -638,11 +634,7 @@ fn apply_special_direct(
 
 /// Process applications that do not require argument evaluation: macros, special forms, and call-with-values.
 ///
-fn apply_unevaluated(
-    state: &mut CEKState,
-    ec: &mut EvalContext,
-    frame: Kont,
-) -> Result<(), String> {
+fn apply_unevaluated(state: &mut CEKState, ec: &mut RunTime, frame: Kont) -> Result<(), String> {
     if let Kont::ApplySpecial {
         proc,
         original_call,
@@ -664,7 +656,7 @@ fn apply_unevaluated(
                     _ => return Err("macro: not a proper call".to_string()),
                 };
                 let raw_args = list_to_vec(ec.heap, cdr)?;
-                let expanded = eval_macro(&params, *body, &env, &raw_args, ec);
+                let expanded = eval_macro(&params, *body, env.clone(), &raw_args, ec);
                 match expanded {
                     Ok(exp) => state.control = Control::Expr(exp),
                     Err(err) => post_error(state, ec, err),
@@ -682,11 +674,7 @@ fn apply_unevaluated(
 
 /// Process Builtin, SysBuiltin, and Closure applications. Arguments are already evaluated.
 ///
-pub fn apply_proc(
-    state: &mut CEKState,
-    ec: &mut EvalContext,
-    frame: KontRef,
-) -> Result<(), String> {
+pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime, frame: KontRef) -> Result<(), String> {
     //dump_cek("     apply_proc", &state);
 
     if let Kont::ApplyProc {
@@ -698,7 +686,7 @@ pub fn apply_proc(
         match gc_value!(*proc) {
             Callable(callable) => match callable {
                 Callable::Builtin { func, .. } => {
-                    let result = func(ec, &evaluated_args);
+                    let result = func(ec.heap, &evaluated_args);
                     match result {
                         Err(err) => post_error(state, ec, err),
                         Ok(result) => state.control = Control::Value(result),
@@ -725,8 +713,7 @@ pub fn apply_proc(
 
                     if state.tail {
                         // Tail-call optimization: no RestoreEnv frame.
-                        ec.env.set_current_frame(new_env.current_frame());
-                        state.env = new_env.current_frame();
+                        state.env = new_env;
                         state.kont = Rc::clone(next); // reuse continuation depth
                         state.control = Control::Expr(*body);
                         Ok(())
@@ -736,8 +723,7 @@ pub fn apply_proc(
                             old_env,
                             next: Rc::clone(next),
                         });
-                        ec.env.set_current_frame(new_env.current_frame());
-                        state.env = new_env.current_frame();
+                        state.env = new_env;
                         state.control = Control::Expr(*body);
                         Ok(())
                     }

@@ -30,7 +30,7 @@ macro_rules! gc_value {
 }
 
 use crate::env::EnvRef;
-use crate::eval::EvalContext;
+use crate::eval::RunTime;
 use crate::io::PortKind;
 use crate::kont::{CEKState, KontRef};
 use num_bigint::BigInt;
@@ -43,17 +43,17 @@ use std::rc::Rc;
 pub enum Callable {
     // Standard library / core functions
     Builtin {
-        func: fn(&mut EvalContext, &[GcRef]) -> Result<GcRef, String>,
+        func: fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>,
         doc: String,
     },
     // Privileged system procedures with access to the evaluator
     SysBuiltin {
-        func: fn(&mut EvalContext, &[GcRef], &mut CEKState) -> Result<(), String>,
+        func: fn(&mut RunTime, &[GcRef], &mut CEKState) -> Result<(), String>,
         doc: String,
     },
     // Syntax procedures called with unevaluated arguments
     SpecialForm {
-        func: fn(GcRef, &mut EvalContext, &mut CEKState) -> Result<(), String>,
+        func: fn(GcRef, &mut RunTime, &mut CEKState) -> Result<(), String>,
         doc: String,
     },
     // Scheme-implemented procedures
@@ -216,53 +216,6 @@ pub fn is_false(value: GcRef) -> bool {
     }
 }
 
-// Manual Debug implementation for SchemeValueSimple
-// impl std::fmt::Debug for SchemeValue {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         match self {
-//             SchemeValue::Int(i) => write!(f, "Int({})", i),
-//             SchemeValue::Float(fl) => write!(f, "Float({})", fl),
-//             SchemeValue::Symbol(s) => write!(f, "Symbol({:?})", s),
-//             SchemeValue::Pair(car, cdr) => f
-//                 .debug_tuple("Pair")
-//                 .field(&heap.get_value(car))
-//                 .field(&heap.get_value(cdr))
-//                 .finish(),
-//             SchemeValue::Str(s) => write!(f, "Str({:?})", s),
-//             SchemeValue::Vector(v) => f.debug_tuple("Vector").field(v).finish(),
-//             SchemeValue::Bool(b) => write!(f, "Bool({})", b),
-//             SchemeValue::Char(c) => write!(f, "Char({:?})", c),
-//             SchemeValue::Callable(c) => match c {
-//                 Callable::Builtin { doc, .. } => write!(f, "Primitive({:?})", doc),
-//                 Callable::SpecialForm { doc, .. } => write!(f, "SpecialForm({:?})", doc),
-//                 Callable::Macro { params, body, .. } => {
-//                     let param_names: Vec<String> = params
-//                         .iter()
-//                         .map(|p| match &heap.get_value(p) {
-//                             SchemeValue::Symbol(name) => name.clone(),
-//                             _ => "?".to_string(),
-//                         })
-//                         .collect();
-//                     write!(f, "Macro({:?}, {:?})", param_names, &heap.get_value(body))
-//                 }
-//                 Callable::Closure { params, body, .. } => {
-//                     let param_names: Vec<String> = params
-//                         .iter()
-//                         .map(|p| match &heap.get_value(p) {
-//                             SchemeValue::Symbol(name) => name.clone(),
-//                             _ => "?".to_string(),
-//                         })
-//                         .collect();
-//                     write!(f, "Closure({:?}, {:?})", param_names, &heap.get_value(body))
-//                 }
-//             },
-//             SchemeValue::Nil => write!(f, "Nil"),
-//             SchemeValue::Port { kind } => write!(f, "Port({:?})", kind),
-//             SchemeValue::TailCallScheduled => write!(f, "TailCallScheduled"),
-//         }
-//     }
-// }
-
 /// Reference to a garbage-collected Scheme object.
 pub type GcRef = *mut GcObject;
 
@@ -274,14 +227,6 @@ pub struct GcObject {
     /// Mark bit used during garbage collection
     marked: bool,
 }
-
-// impl Eq for GcObject {}
-
-// impl PartialEq for GcObject {
-//     fn eq(&self, other: &Self) -> bool {
-//         heap.get_value(self) == heap.get_value(other)
-//     }
-// }
 
 impl Hash for SchemeValue {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -683,9 +628,9 @@ pub fn new_continuation(heap: &mut GcHeap, kont: KontRef) -> GcRef {
 }
 
 /// Create a new primitive function.
-pub fn new_primitive(
+pub fn new_builtin(
     heap: &mut GcHeap,
-    f: fn(&mut EvalContext, &[GcRef]) -> Result<GcRef, String>,
+    f: fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>,
     doc: String,
 ) -> GcRef {
     let primitive = SchemeValue::Callable(Callable::Builtin { func: f, doc });
@@ -697,8 +642,8 @@ pub fn new_primitive(
 }
 
 pub fn new_sys_builtin(
-    heap: &mut GcHeap,
-    f: fn(&mut EvalContext, &[GcRef], &mut CEKState) -> Result<(), String>,
+    rt: &mut RunTime,
+    f: fn(&mut RunTime, &[GcRef], &mut CEKState) -> Result<(), String>,
     doc: String,
 ) -> GcRef {
     let primitive = SchemeValue::Callable(Callable::SysBuiltin { func: f, doc });
@@ -706,13 +651,13 @@ pub fn new_sys_builtin(
         value: primitive,
         marked: false,
     };
-    heap.alloc(obj)
+    rt.heap.alloc(obj)
 }
 
 /// Create a new special form.
 pub fn new_special_form(
     heap: &mut GcHeap,
-    f: fn(GcRef, &mut EvalContext, &mut CEKState) -> Result<(), String>,
+    f: fn(GcRef, &mut RunTime, &mut CEKState) -> Result<(), String>,
     doc: String,
 ) -> GcRef {
     let primitive = SchemeValue::Callable(Callable::SpecialForm { func: f, doc });

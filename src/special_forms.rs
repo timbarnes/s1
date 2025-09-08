@@ -5,7 +5,8 @@
 /// This is required for lambda and macro differentiation.
 ///
 use crate::cek::eval_main;
-use crate::eval::{EvalContext, expect_at_least_n_args, expect_n_args, expect_symbol};
+use crate::env::{EnvOps, EnvRef};
+use crate::eval::{RunTime, expect_at_least_n_args, expect_n_args, expect_symbol};
 use crate::gc::{
     GcHeap, GcRef, SchemeValue, car, cdr, cons, get_nil, list_from_slice, list_to_vec, matches_sym,
     new_float, new_macro, new_special_form,
@@ -33,16 +34,16 @@ enum Ptype {
 ///     "another" => another_function,
 /// );
 macro_rules! register_special_form {
-    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
+    ($rt:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
         $(
-            $env.set_symbol($heap.intern_symbol($name),
-                new_special_form($heap, $func,
+            $env.set($rt.intern_symbol($name),
+                new_special_form($rt, $func,
                     concat!($name, ": special form").to_string()));
         )*
     };
 }
 
-pub fn register_special_forms(heap: &mut GcHeap, env: &mut crate::env::Environment) {
+pub fn register_special_forms(heap: &mut GcHeap, env: EnvRef) {
     register_special_form!(heap, env,
         "quote" => quote_sf,
         "define" => define_sf,
@@ -69,14 +70,10 @@ pub fn register_special_forms(heap: &mut GcHeap, env: &mut crate::env::Environme
 ///     - a vec with multiple entries following a nil first entry, meaning named arguments
 ///     - a vec with variadic arguments bound as a list and named arguments
 ///
-pub fn create_callable(
-    expr: GcRef,
-    ec: &mut EvalContext,
-    state: &mut CEKState,
-) -> Result<(), String> {
+pub fn create_callable(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let form = expect_at_least_n_args(&ec.heap, expr, 3)?;
     let (params, ptype) = params_to_vec(&mut ec.heap, form[1]);
-    let closure = create_lambda_or_macro(&form, &params, ptype, ec);
+    let closure = create_lambda_or_macro(&form, &params, ptype, ec, state.env.clone());
     match closure {
         Ok(closure) => {
             insert_value(state, closure);
@@ -90,7 +87,8 @@ fn create_lambda_or_macro(
     form: &Vec<GcRef>,
     params: &Vec<GcRef>,
     ptype: Ptype,
-    ec: &mut EvalContext,
+    ec: &mut RunTime,
+    env: EnvRef,
 ) -> Result<GcRef, String> {
     use crate::gc::new_closure;
     //eprintln!("Creating lambda or macro");
@@ -155,7 +153,7 @@ fn create_lambda_or_macro(
         }
     }
 
-    let captured_frame = ec.env.current_frame();
+    let captured_frame = env;
     match &ec.heap.get_value(form[0]) {
         SchemeValue::Symbol(name) => {
             if name == "lambda" || name == "let" {
@@ -185,7 +183,7 @@ fn create_lambda_or_macro(
 }
 
 /// Quote logic: return first argument unevaluated
-fn quote_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
+fn quote_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     // (quote x) => return x unevaluated
     match &ec.heap.get_value(expr) {
         SchemeValue::Pair(_, cdr) => match &ec.heap.get_value(*cdr) {
@@ -207,7 +205,7 @@ fn quote_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(
 }
 
 /// (begin form1 ..)
-fn begin_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
+fn begin_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     // (begin expr1 expr2 ... exprN) => evaluate each in sequence, return last
     let mut argvec = expect_at_least_n_args(&ec.heap, expr, 2)?;
 
@@ -225,7 +223,7 @@ fn begin_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(
 }
 
 /// (define sym expr)
-pub fn define_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
+pub fn define_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     // (define symbol expr)
     let args = expect_n_args(&ec.heap, expr, 3)?; // including 'define
     let sym = expect_symbol(&mut ec.heap, &args[1])?;
@@ -237,11 +235,11 @@ pub fn define_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Res
 
 /// (set! sym expr)
 /// sym must have been previously defined.
-pub fn set_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
+pub fn set_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let args = expect_n_args(&ec.heap, expr, 3)?;
     //let sym = expect_symbol(&ec.heap, &args[1])?;
 
-    match &ec.env.get_symbol_and_frame(args[1]) {
+    match &state.env.lookup_with_frame(args[1]) {
         Some((_val, binding_env)) => {
             insert_bind(state, args[1], Some(binding_env.clone()));
             insert_eval(state, args[2], false);
@@ -253,7 +251,7 @@ pub fn set_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result
 
 /// (if test consequent alternate)
 /// Requires three arguments.
-pub fn if_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
+pub fn if_sf(expr: GcRef, evaluator: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let args = expect_at_least_n_args(&evaluator.heap, expr, 3);
     match args {
         Ok(a) => {
@@ -271,7 +269,7 @@ pub fn if_sf(expr: GcRef, evaluator: &mut EvalContext, state: &mut CEKState) -> 
 }
 
 /// (cond (test1 expr) [(test 2...)] [(else expr)])
-pub fn cond_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
+pub fn cond_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let mut args = expect_at_least_n_args(&ec.heap, expr, 2)?;
     args = args.into_iter().skip(1).collect();
     args.reverse();
@@ -316,7 +314,7 @@ pub fn cond_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Resul
 }
 
 /// let (basic version, without labels)
-pub fn let_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
+pub fn let_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let formvec = expect_at_least_n_args(&ec.heap, expr, 3)?;
     let bindings = list_to_vec(&mut ec.heap, formvec[1])?; // (let bindings . body)
 
@@ -336,7 +334,7 @@ pub fn let_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result
         }
     }
     let (params, ptype) = params_to_vec(&mut ec.heap, vars);
-    let lambda_expr = create_lambda_or_macro(&formvec, &params, ptype, ec)?;
+    let lambda_expr = create_lambda_or_macro(&formvec, &params, ptype, ec, state.env.clone())?;
     // cons the lambda to the list of values
     let call = cons(lambda_expr, exprs, ec.heap)?;
 
@@ -344,9 +342,9 @@ pub fn let_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result
     Ok(())
 }
 
-fn expand_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
+fn expand_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let m = car(cdr(expr)?)?;
-    match expand_macro(&m, 0, ec) {
+    match expand_macro(&m, 0, ec, state.env.clone()) {
         Ok(expr) => {
             insert_value(state, expr);
         }
@@ -357,7 +355,7 @@ fn expand_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<
 
 /// (and expr1 expr2 ... exprN)
 /// Stops on first false value
-pub fn and_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
+pub fn and_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     // (and expr1 expr2 ... exprN)
     let mut argvec = expect_at_least_n_args(&ec.heap, expr, 1)?;
 
@@ -377,7 +375,7 @@ pub fn and_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result
 
 /// (or expr1 expr2 ... exprN)
 /// Stops on first true value
-pub fn or_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
+pub fn or_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     // (and expr1 expr2 ... exprN)
     let mut argvec = expect_at_least_n_args(&ec.heap, expr, 1)?;
 
@@ -394,10 +392,10 @@ pub fn or_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<
     Ok(())
 }
 
-fn with_timer_sf(expr: GcRef, ec: &mut EvalContext, state: &mut CEKState) -> Result<(), String> {
+fn with_timer_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let args = expect_n_args(&ec.heap, expr, 2)?;
     let timer = Instant::now();
-    eval_main(args[1], ec)?;
+    eval_main(args[1], state.env.clone(), ec)?;
     let elapsed_time = timer.elapsed().as_secs_f64();
     let time = new_float(&mut ec.heap, elapsed_time);
     insert_value(state, time);

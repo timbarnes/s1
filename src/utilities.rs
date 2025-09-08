@@ -1,7 +1,7 @@
 /// Internal utility functions
 ///
 use crate::env::Frame;
-use crate::eval::{EvalContext, TraceType};
+use crate::eval::{RunTime, TraceType};
 use crate::gc::GcRef;
 use crate::gc_value;
 use crate::kont::{AndOrKind, CEKState, Control, Kont, KontRef};
@@ -10,14 +10,14 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 /// Push an error into the existing CEKState.
-pub fn post_error(state: &mut CEKState, ec: &mut EvalContext, error: String) {
+pub fn post_error(state: &mut CEKState, ec: &mut RunTime, error: String) {
     eprintln!("Error: {}", error);
     debugger(state, ec);
 }
 
 /// Trace / debug function called from within the CEK machine and on error
 ///
-pub fn debugger(state: &mut CEKState, ec: &mut EvalContext) {
+pub fn debugger(state: &mut CEKState, ec: &mut RunTime) {
     // simple indentation
     match ec.trace {
         TraceType::Off => return,
@@ -55,7 +55,7 @@ fn indent(n: i32, v: bool) {
     }
 }
 
-fn debug_interactive(state: &mut CEKState, ec: &mut EvalContext) {
+fn debug_interactive(state: &mut CEKState, ec: &mut RunTime) {
     use std::io::{self, Write};
     loop {
         print!("debug> ");
@@ -80,7 +80,7 @@ fn debug_interactive(state: &mut CEKState, ec: &mut EvalContext) {
                 break;
             }
             "e" | "env" => {
-                let frame = ec.env.current_frame.clone();
+                let frame = state.env.clone();
                 dbg_env(Some(frame));
             }
             "k" | "kont" => {

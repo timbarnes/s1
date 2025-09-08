@@ -14,10 +14,14 @@ mod tokenizer;
 mod utilities;
 
 use crate::cek::eval_main;
-use crate::eval::{Evaluator, eval_string, initialize_scheme_io_globals};
+use crate::env::EnvRef;
+use crate::eval::{Evaluator, eval_string};
 use crate::printer::print_value;
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use argh::FromArgs;
-use eval::EvalContext;
+use eval::RunTime;
 use std::io as stdio;
 
 #[derive(FromArgs)]
@@ -39,15 +43,16 @@ struct Args {
 
 fn main() {
     let args: Args = argh::from_env();
-    let mut evaluator = Evaluator::new();
-    let mut ec = EvalContext::from_eval(&mut evaluator);
-    match initialize_scheme_io_globals(&mut ec) {
-        Ok(_val) => {}
-        Err(msg) => {
-            println!("IO initialization failed: {}", msg);
-            std::process::exit(1);
-        }
-    }
+    let env = Rc::new(RefCell::new(crate::env::Frame::new(None)));
+    let mut evaluator = Evaluator::new(env.clone());
+    let mut ec = RunTime::from_eval(&mut evaluator);
+    // match initialize_scheme_io_globals(env.clone()) {
+    //     Ok(_val) => {}
+    //     Err(msg) => {
+    //         println!("IO initialization failed: {}", msg);
+    //         std::process::exit(1);
+    //     }
+    // }
 
     // Execute startup commands as Scheme code
     let mut startup_commands = Vec::new();
@@ -76,17 +81,17 @@ fn main() {
 
     // Execute startup commands
     for command in startup_commands {
-        if let Err(e) = eval_string(&mut ec, &command) {
+        if let Err(e) = eval_string(&mut ec, &command, env.clone()) {
             eprintln!("Error executing startup command '{}': {}", command, e);
             std::process::exit(1);
         }
     }
 
     // Drop into the REPL
-    repl(&mut ec);
+    repl(&mut ec, env.clone());
 }
 
-fn repl(ev: &mut EvalContext) {
+fn repl(ev: &mut RunTime, env: EnvRef) {
     use crate::io::PortKind;
     use crate::parser::parse;
     use std::io as stdio;
@@ -112,7 +117,7 @@ fn repl(ev: &mut EvalContext) {
         }
         let expr = parse(ev.heap, current_port_val);
         match expr {
-            Ok(expr) => match eval_main(expr, ev) {
+            Ok(expr) => match eval_main(expr, env.clone(), ev) {
                 Ok(result) => {
                     if interactive {
                         for v in result.iter() {

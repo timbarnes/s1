@@ -1,5 +1,6 @@
 use crate::cek::eval_main;
-use crate::eval::EvalContext;
+use crate::env::EnvRef;
+use crate::eval::RunTime;
 /// Modular macro expansion engine for Scheme
 use crate::gc::{
     GcRef, SchemeValue, car, cdr, get_nil, heap_list_iter, list_from_slice, list_to_vec, new_pair,
@@ -14,9 +15,10 @@ enum Expanded {
 pub fn expand_macro(
     expr: &GcRef,
     depth: usize,
-    evaluator: &mut EvalContext,
+    evaluator: &mut RunTime,
+    env: EnvRef,
 ) -> Result<GcRef, String> {
-    match expand_macro_internal(expr, depth, evaluator)? {
+    match expand_macro_internal(expr, depth, evaluator, env)? {
         Expanded::Single(val) => Ok(val),
         Expanded::Splice(vals) => {
             let mut filtered: Vec<GcRef> = vals
@@ -38,10 +40,11 @@ pub fn expand_macro(
 fn expand_macro_internal(
     expr: &GcRef,
     depth: usize,
-    evaluator: &mut EvalContext,
+    evaluator: &mut RunTime,
+    env: EnvRef,
 ) -> Result<Expanded, String> {
     let expanded = match &evaluator.heap.get_value(*expr) {
-        SchemeValue::Pair(_, _) => expand_list_pair(expr, depth, evaluator),
+        SchemeValue::Pair(_, _) => expand_list_pair(expr, depth, evaluator, env),
         SchemeValue::Symbol(_) => expand_atom(expr),
         _ => Ok(Expanded::Single(*expr)),
     }?;
@@ -67,14 +70,15 @@ fn expand_atom(expr: &GcRef) -> Result<Expanded, String> {
 fn expand_list_pair(
     expr: &GcRef,
     depth: usize,
-    evaluator: &mut EvalContext,
+    evaluator: &mut RunTime,
+    env: EnvRef,
 ) -> Result<Expanded, String> {
     let tag = list_ref(evaluator, expr, 0)?;
     if let SchemeValue::Symbol(sym) = &evaluator.heap.get_value(tag) {
         match sym.as_str() {
             "quasiquote" => {
                 let body = list_ref(evaluator, expr, 1)?;
-                let inner = expand_macro_internal(&body, depth + 1, evaluator)?;
+                let inner = expand_macro_internal(&body, depth + 1, evaluator, env)?;
                 if depth == 0 {
                     return Ok(inner);
                 } else {
@@ -87,10 +91,10 @@ fn expand_list_pair(
                 }
                 let body = list_ref(evaluator, expr, 1)?;
                 if depth == 1 {
-                    let val = eval_main(body, evaluator)?;
+                    let val = eval_main(body, env, evaluator)?;
                     return Ok(Expanded::Single(val[0]));
                 } else {
-                    let inner = expand_macro_internal(&body, depth - 1, evaluator)?;
+                    let inner = expand_macro_internal(&body, depth - 1, evaluator, env)?;
                     return wrap("unquote", inner, evaluator);
                 }
             }
@@ -100,7 +104,7 @@ fn expand_list_pair(
                 }
                 let body = list_ref(evaluator, expr, 1)?;
                 if depth == 1 {
-                    let val = eval_main(body, evaluator)?;
+                    let val = eval_main(body, env, evaluator)?;
                     if let SchemeValue::Pair(_, _) = &evaluator.heap.get_value(val[0]) {
                         // Proper list: flatten it
                         let vec = list_to_vec(&evaluator.heap, val[0])?;
@@ -122,7 +126,7 @@ fn expand_list_pair(
     let cdr = cdr(*expr)?;
 
     // Then safely call into mutating code
-    let car_expanded = expand_macro_internal(&car, depth, evaluator)?;
+    let car_expanded = expand_macro_internal(&car, depth, evaluator, env.clone())?;
 
     // Handle splice case
     match car_expanded {
@@ -132,7 +136,7 @@ fn expand_list_pair(
                 heap_list_iter(&evaluator.heap, cdr).collect::<Result<_, _>>()?;
 
             for elem in elements {
-                let expanded = expand_macro_internal(&elem, depth, evaluator)?;
+                let expanded = expand_macro_internal(&elem, depth, evaluator, env.clone())?;
                 match expanded {
                     Expanded::Single(e) => hs.push(e),
                     Expanded::Splice(mut es) => hs.append(&mut es),
@@ -143,7 +147,7 @@ fn expand_list_pair(
 
         // Non-splice case — safe to evaluate rest now
         _ => {
-            let cdr_expanded = expand_macro_internal(&cdr, depth, evaluator)?;
+            let cdr_expanded = expand_macro_internal(&cdr, depth, evaluator, env)?;
 
             match (car_expanded, cdr_expanded) {
                 (Expanded::Single(h), Expanded::Single(t)) => {
@@ -175,7 +179,7 @@ fn expand_list_pair(
     }
 }
 
-fn wrap(tag: &str, body: Expanded, evaluator: &mut EvalContext) -> Result<Expanded, String> {
+fn wrap(tag: &str, body: Expanded, evaluator: &mut RunTime) -> Result<Expanded, String> {
     let tag_sym = evaluator.heap.intern_symbol(tag);
     match body {
         Expanded::Single(val) => Ok(Expanded::Single(list_from_slice(
@@ -193,7 +197,7 @@ fn wrap(tag: &str, body: Expanded, evaluator: &mut EvalContext) -> Result<Expand
     }
 }
 
-fn list_ref(ev: &mut EvalContext, list: &GcRef, index: usize) -> Result<GcRef, String> {
+fn list_ref(ev: &mut RunTime, list: &GcRef, index: usize) -> Result<GcRef, String> {
     let mut current = *list;
     for _ in 0..index {
         current = match &ev.heap.get_value(current) {

@@ -31,7 +31,7 @@ use std::io::{
 };
 
 // use std::io::BufReader as StdBufReader;
-use crate::eval::EvalContext;
+use crate::eval::RunTime;
 use crate::gc::GcRef;
 use std::cell::Cell;
 
@@ -757,13 +757,13 @@ pub fn new_string_port_input(content: &str) -> PortKind {
 }
 
 /// Convert a Rust Port to a Scheme port object.
-pub fn port_to_scheme_port(ec: &mut EvalContext, port_kind: PortKind) -> GcRef {
+pub fn port_to_scheme_port(ec: &mut RunTime, port_kind: PortKind) -> GcRef {
     let heap = &mut ec.heap;
     crate::gc::new_port(heap, port_kind)
 }
 
 /// Extract a PortKind from aScheme port
-pub fn port_kind_from_scheme_port(evaluator: &mut EvalContext, scheme_port: GcRef) -> PortKind {
+pub fn port_kind_from_scheme_port(evaluator: &mut RunTime, scheme_port: GcRef) -> PortKind {
     let s_p = evaluator.heap.get_value(scheme_port);
     match s_p {
         crate::gc::SchemeValue::Port(kind) => kind.clone(),

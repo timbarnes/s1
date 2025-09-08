@@ -1,13 +1,17 @@
 use crate::cek::apply_proc;
-use crate::eval::EvalContext;
+use crate::env::{EnvOps, EnvRef};
+use crate::eval::{RunTime, TraceType};
 use crate::gc::{
     Callable, GcHeap, GcRef, SchemeValue, get_symbol, list, list_to_vec, list3, new_continuation,
-    new_sys_builtin,
+    new_port, new_sys_builtin,
 };
 use crate::gc_value;
-use crate::kont::{CEKState, Control, Kont, KontRef, insert_eval, insert_eval_eval};
+use crate::io::{PortKind, port_kind_from_scheme_port};
+use crate::kont::{CEKState, Control, Kont, KontRef, insert_eval_eval};
 //use crate::printer::print_value;
+use crate::parser::{ParseError, parse};
 use crate::special_forms::create_callable;
+
 //use crate::utilities::dump_cek;
 use std::rc::Rc;
 
@@ -19,17 +23,17 @@ use std::rc::Rc;
 /// Like special forms, they return values through the CEK evaluator rather than directly.
 
 macro_rules! register_sys_builtins {
-    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
+    ($rt:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
         $(
-            $env.set_symbol($heap.intern_symbol($name),
-                new_sys_builtin($heap, $func,
+            $env.set($rt.heap.intern_symbol($name),
+                new_sys_builtin($rt, $func,
                     concat!($name, ": sys-builtin").to_string()));
         )*
     };
 }
 
-pub fn register_sys_builtins(heap: &mut GcHeap, env: &mut crate::env::Environment) {
-    register_sys_builtins!(heap, env,
+pub fn register_sys_builtins(runtime: &mut RunTime, env: EnvRef) {
+    register_sys_builtins!(runtime, env,
         "eval-string" => eval_string_sp,
         "eval" => eval_eval_sp,
         "apply" => apply_sp,
@@ -39,14 +43,12 @@ pub fn register_sys_builtins(heap: &mut GcHeap, env: &mut crate::env::Environmen
         "escape" => escape_sp,
         "values" => values_sp,
         "call-with-values" => call_with_values_sp,
+        "trace" => trace_sp,
+        "trace-env" => trace_env_sp,
     );
 }
 
-fn eval_string_sp(
-    ec: &mut EvalContext,
-    args: &[GcRef],
-    state: &mut CEKState,
-) -> Result<(), String> {
+fn eval_string_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
     if args.len() != 1 {
         return Err("eval-string: expected exactly 1 argument".to_string());
     }
@@ -55,7 +57,7 @@ fn eval_string_sp(
         _ => return Err("eval-string: argument must be a string".to_string()),
     };
     // Evaluate the string
-    let result = crate::eval::eval_string(ec, &string)?;
+    let result = crate::eval::eval_string(ec, &string, state.env.clone())?;
     if result.len() == 1 {
         state.control = Control::Value(result[0]);
     } else {
@@ -65,7 +67,7 @@ fn eval_string_sp(
 }
 
 /// (eval expr [env])
-fn eval_eval_sp(_ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn eval_eval_sp(_ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
     match args.len() {
         1 => insert_eval_eval(state, args[0], None, false),
         2 => insert_eval_eval(state, args[0], Some(args[1]), false),
@@ -76,7 +78,7 @@ fn eval_eval_sp(_ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> 
 
 /// (apply func args)
 /// Applies a function to a list of arguments
-fn apply_sp(ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn apply_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
     if args.len() < 2 {
         return Err("apply: requires at least 2 arguments".to_string());
     }
@@ -87,17 +89,30 @@ fn apply_sp(ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Resul
         SchemeValue::Callable(func) => match func {
             Callable::Builtin { func, .. } => {
                 let args = list_to_vec(ec.heap, args[1])?;
-                let result = func(ec, &args[..])?;
+                let result = func(ec.heap, &args[..])?;
                 state.control = crate::kont::Control::Value(result);
                 return Ok(());
             }
             Callable::Closure { .. } => {
-                let frame = Rc::new(Kont::ApplyProc {
+                let old_env = state.env.clone();
+                // save the continuation that was there before the call
+                let old_kont = Rc::clone(&state.kont);
+                // create RestoreEnv that will restore old_env and continue with old_kont
+                let restore = Rc::new(Kont::RestoreEnv {
+                    old_env: old_env,
+                    next: old_kont,
+                });
+                // create ApplyProc that, when handled, will set up the function's env and
+                // evaluate the body; its 'next' is the restore frame
+                let apply_kont = Rc::new(Kont::ApplyProc {
                     proc: args[0],
                     evaluated_args: list_to_vec(ec.heap, args[1])?,
-                    next: state.kont.clone(),
+                    next: Rc::clone(&restore),
                 });
-                apply_proc(state, ec, frame)?;
+                // make the apply frame the active continuation
+                state.kont = Rc::clone(&apply_kont);
+                // now invoke the handler that knows how to perform the application
+                apply_proc(state, ec, apply_kont)?;
                 return Ok(());
             }
             _ => return Err("apply: first argument must be a function".to_string()),
@@ -108,11 +123,7 @@ fn apply_sp(ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Resul
 
 /// (debug-stack)
 /// Prints the stack
-fn debug_stack_sp(
-    ec: &mut EvalContext,
-    _args: &[GcRef],
-    state: &mut CEKState,
-) -> Result<(), String> {
+fn debug_stack_sp(ec: &mut RunTime, _args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
     //dump_cek("", state);
     state.control = crate::kont::Control::Value(ec.heap.void());
     Ok(())
@@ -121,7 +132,7 @@ fn debug_stack_sp(
 /// (call/cc func)
 /// Creates and returns an escape procedure that resets the continuation to the current state
 /// at the time call/cc was invoked.
-fn call_cc_sp(ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn call_cc_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
     // 1. Check arguments
     if args.len() != 1 {
         return Err("call/cc: requires a single function argument".to_string());
@@ -166,7 +177,7 @@ fn call_cc_sp(ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Res
 /// (escape continuation arg)
 /// This is the internal mechanism for call/cc. It is bound by a lambda to the escape continuation,
 /// and when called, it resets the continuation and returns the provided arg.
-fn escape_sp(_ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn escape_sp(_ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
     if args.len() != 2 {
         return Err("escape: requires two arguments".to_string());
     }
@@ -185,7 +196,7 @@ fn escape_sp(_ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Res
     }
 }
 
-fn values_sp(_ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn values_sp(_ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
     eprintln!("Processing {} values", args.len());
     match args.len() {
         0 => return Err("values: requires at least one argument".to_string()),
@@ -196,7 +207,7 @@ fn values_sp(_ec: &mut EvalContext, args: &[GcRef], state: &mut CEKState) -> Res
 }
 
 fn call_with_values_sp(
-    ec: &mut EvalContext,
+    ec: &mut RunTime,
     args: &[GcRef],
     state: &mut CEKState,
 ) -> Result<(), String> {
@@ -215,6 +226,120 @@ fn call_with_values_sp(
     state.control = Control::Expr(list(producer, ec.heap)?);
     // dump_cek("call_with_values_sp", state);
     Ok(())
+}
+
+/// Debug Functions
+///
+
+/// (trace [arg])
+/// Controls step and tracing options
+/// (trace)         - returns the current trace setting
+/// (trace 'all)    - print state.control and state.kont each time through the evaluator
+/// (trace 'expr)   - show trace when control is an expr, or when a value is returned
+/// (trace 'step)   - enable single stepping
+/// (trace 'off)    - disable tracing and stepping
+fn trace_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+    *ec.depth -= 1;
+    if args.len() == 0 {
+        let result = match ec.trace {
+            TraceType::Off => ec.heap.intern_symbol("off"),
+            TraceType::Full => ec.heap.intern_symbol("all"),
+            TraceType::Control => ec.heap.intern_symbol("expr"),
+            TraceType::Step => ec.heap.intern_symbol("step"),
+        };
+        state.control = Control::Value(result);
+        return Ok(());
+    }
+    match &gc_value!(args[0]) {
+        SchemeValue::Symbol(cmd) => {
+            *ec.trace = match &cmd[..] {
+                "o" | "off" => TraceType::Off,
+                "a" | "all" => TraceType::Full,
+                "e" | "expr" => TraceType::Control,
+                "s" | "step" => TraceType::Step,
+                _ => TraceType::Off,
+            };
+        }
+        _ => return Err("trace: expects o(ff), a(ll), e(xpr), or s(tep)".to_string()),
+    };
+    state.control = Control::Value(args[0]);
+    Ok(())
+}
+
+/// (debug-env)
+/// Prints the environment up to the given depth, or all if.
+fn trace_env_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+    *ec.depth -= 1;
+    if args.len() != 0 {
+        return Err("debug-env: requires no arguments".to_string());
+    }
+    let env = state.env.clone();
+    crate::utilities::dbg_env(Some(env));
+    Ok(())
+}
+
+/// (read [port])
+/// Reads an s-expression from a port. Port defaults to the current input port (normally stdin).
+fn read_builtin(ec: &mut RunTime, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() > 1 {
+        return Err("read: expected at most 1 argument".to_string());
+    }
+    let mut port_kind = ec.port_stack.last_mut().unwrap().clone();
+    if args.len() == 1 {
+        match args.get(0) {
+            Some(port) => port_kind = port_kind_from_scheme_port(ec, *port),
+            None => {
+                return Err("read: invalid port argument".to_string());
+            }
+        }
+    }
+
+    match port_kind {
+        PortKind::Stdin | PortKind::StringPortInput { .. } /* | PortKind::File { .. } */ => {
+            let result = parse(ec.heap, &mut port_kind);
+            match result {
+                Ok(expr) => Ok(expr),
+                Err(err) => match err {
+                    ParseError::Eof => Ok(ec.heap.eof()),
+                    ParseError::Syntax(err) => Err(format!("read: syntax error:{}", err)),
+                    //ParseError::Other(err) => Err(format!("read: other error:{}", err)),
+                },
+            }
+        }
+        _ => Err("read: port must be a string port or file port".to_string()),
+    }
+}
+
+/// (push-port! port)
+/// Pushes a port onto the port stack, causing the evaluator to load scheme code from it.
+/// At EOF, the evaluator will pop the port and continue evaluating code from the next port on the stack.
+///
+/// # Examples
+///
+/// ```
+/// let mut evaluator = Evaluator::new();
+/// evaluator.push_port("example.txt");
+/// ```
+pub fn push_port(ec: &mut RunTime, args: &[GcRef]) -> Result<GcRef, String> {
+    // (push-port! port)
+    if args.len() != 1 {
+        return Err("push_port!: expected exactly 1 argument".to_string());
+    }
+    let port_kind = port_kind_from_scheme_port(ec, args[0]);
+    ec.port_stack.push(port_kind);
+    Ok(ec.heap.nil_s())
+}
+
+pub fn pop_port(ec: &mut RunTime, _args: &[GcRef]) -> Result<GcRef, String> {
+    // (pop-port!)
+    let port_kind = ec.port_stack.pop();
+    match port_kind {
+        Some(port_kind) => {
+            let port = new_port(&mut ec.heap, port_kind);
+            Ok(port)
+        }
+        None => Err("Port Stack is empty".to_string()),
+    }
 }
 
 /// Utility functions
