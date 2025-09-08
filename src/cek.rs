@@ -583,18 +583,17 @@ fn handle_restore_env(
     state: &mut CEKState,
     _ec: &mut RunTime,
     old_env: EnvRef,
-    val: GcRef,
+    _val: GcRef,
     next: Rc<Kont>,
 ) -> Result<(), String> {
     // Restore environment
-    state.env = old_env.clone();
     state.env = old_env;
     // Propagate the value
-    state.control = Control::Value(val);
+    //state.control = Control::Value(val);
     // Pop this frame unconditionally
     state.kont = next;
     // Reset tail because restoring the environment is not a tail position
-    state.tail = false;
+    //state.tail = false;
 
     Ok(())
 }

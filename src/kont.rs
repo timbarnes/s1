@@ -78,6 +78,26 @@ pub enum Kont {
     // },
 }
 
+impl Kont {
+    pub fn next(&self) -> Option<&KontRef> {
+        match self {
+            Kont::AndOr { next, .. } => Some(next),
+            Kont::ApplyProc { next, .. } => Some(next),
+            Kont::ApplySpecial { next, .. } => Some(next),
+            Kont::Bind { next, .. } => Some(next),
+            Kont::CallWithValues { next, .. } => Some(next),
+            Kont::Cond { next, .. } => Some(next),
+            Kont::CondClause { next, .. } => Some(next),
+            Kont::Eval { next, .. } => Some(next),
+            Kont::EvalArg { next, .. } => Some(next),
+            Kont::Halt => None,
+            Kont::If { next, .. } => Some(next),
+            Kont::RestoreEnv { next, .. } => Some(next),
+            Kont::Seq { next, .. } => Some(next),
+        }
+    }
+}
+
 impl std::fmt::Debug for Kont {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

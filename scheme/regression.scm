@@ -10,7 +10,7 @@
 
 (define **failed-tests** '()) ; keep track of test failures
 (define **counter** 0)
-(define **print-successes** #f)
+(define **print-successes** #t)
 
 (define fails
   (lambda (message)
@@ -371,7 +371,7 @@
 (test-true (eq? (eval '(+ 1 2)) (apply + '(1 2))) "eval and apply")
 (define square (lambda (x) (* x x)))
 (test-equal 144 (apply square '(12)) "Apply with closure")
-
+(trace-env)  ;; debug: apply closure is not popping the environment chain.
 (display "          === Testing Recursion ===")
 (define fact
     (lambda (n)

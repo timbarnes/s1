@@ -28,7 +28,7 @@ pub fn debugger(state: &mut CEKState, ec: &mut RunTime) {
             indent(*ec.depth, true);
             println!(" {}", dump_control(&state.control));
             indent(*ec.depth + 1, false);
-            println!("{}", dbg_one_kont(&state.kont));
+            dbg_kont(&state.kont);
             //dump_cek("", &state);
         }
         TraceType::Step => {
@@ -83,7 +83,7 @@ fn debug_interactive(state: &mut CEKState, ec: &mut RunTime) {
                 dbg_env(frame, false);
             }
             "k" | "kont" => {
-                dbg_kont(Rc::clone(&state.kont));
+                dbg_kont(&state.kont);
             }
             "l" | "locals" => {
                 dbg_one_env(&state.env, 0);
@@ -220,126 +220,40 @@ fn dbg_one_kont(frame: &Kont) -> String {
     }
 }
 
-pub fn dbg_kont(kont: KontRef) {
-    println!("  Stack:");
+pub fn dbg_kont(kont: &KontRef) {
+    print!("  Stack:");
     let mut kr = Rc::clone(&kont);
-    loop {
-        match &*kr {
-            Kont::Halt => {
-                println!("    Halt");
-                return;
-            }
-            Kont::AndOr {
-                kind,
-                rest: _,
-                next,
-            } => {
-                match &kind {
-                    AndOrKind::And => println!("    AndOr {{kind=And}}"),
-                    AndOrKind::Or => println!("    AndOr {{kind=Or}}"),
-                }
-                kr = Rc::clone(next);
-            }
-            Kont::ApplyProc {
-                proc,
-                evaluated_args,
-                next,
-            } => {
-                println!(
-                    "    ApplyProc {{proc={:?}, args={}}}",
-                    proc,
-                    evaluated_args.len()
-                );
-                kr = Rc::clone(next);
-            }
-            Kont::ApplySpecial {
-                proc,
-                original_call,
-                next,
-            } => {
-                println!(
-                    "    ApplySpecial {{proc={}, orig={}}}",
-                    print_value(&proc),
-                    print_value(&original_call),
-                );
-                kr = Rc::clone(next);
-            }
-            Kont::Bind {
-                symbol,
-                env: _,
-                next,
-            } => {
-                println!("    Bind {{symbol={}}}", print_value(&symbol),);
-                kr = Rc::clone(next);
-            } // other => format!("{:?}", other),
-            Kont::CallWithValues { consumer, next } => {
-                println!("    CallWithValues {{consumer={}}}", print_value(&consumer));
-                kr = Rc::clone(next);
-            }
-            Kont::Cond { remaining, next } => {
-                println!("    Cond {{remaining={}}}", remaining.len());
-                kr = Rc::clone(next);
-            }
-            Kont::CondClause { clause: _, next } => {
-                println!("    CondClause");
-                kr = Rc::clone(next);
-            }
-            Kont::Eval {
-                expr,
-                env: _,
-                phase: _,
-                next,
-            } => {
-                println!("    Eval {{expr={}}}", print_value(&expr));
-                kr = Rc::clone(next);
-            }
-            Kont::EvalArg {
-                proc,
-                remaining,
-                evaluated,
-                original_call,
-                tail: _,
-                env: _,
-                next,
-            } => {
-                println!(
-                    "    EvalArg {{proc={}, rem={}, eval={}, orig={:?}}}",
-                    if proc.is_some() { "Some" } else { "None" },
-                    remaining.len(),
-                    evaluated.len(),
-                    original_call,
-                );
-                kr = Rc::clone(next);
-            }
-            // Kont::Handler {
-            //     handler_expr,
-            //     handler_env: _,
-            //     next,
-            // } => {
-            //     println!("    Handler {{expr={}}}", print_value(&handler_expr),);
-            //     kont = next.clone();
-            // }
-            Kont::If {
-                then_branch,
-                else_branch,
-                next,
-            } => {
-                println!(
-                    "    If {{then={}, else={}}}",
-                    print_value(&then_branch),
-                    print_value(&else_branch),
-                );
-                kr = Rc::clone(next);
-            }
-            Kont::RestoreEnv { old_env: _, next } => {
-                println!("    RestoreEnv");
-                kr = Rc::clone(next);
-            }
-            Kont::Seq { rest, next } => {
-                println!("    Seq {{rest={}}}", rest.len());
-                kr = Rc::clone(next);
-            }
-        }
+    dbg_one_kont(&kr);
+    let k_next = kr.next();
+    match k_next {
+        Some(k) => kr = Rc::clone(k),
+        None => return,
+    };
+    while let Some(k) = kr.next() {
+        dbg_short_kont(&kr);
+        kr = Rc::clone(k);
+    }
+    println!("");
+}
+
+pub fn dbg_short_kont(kont: &KontRef) {
+    match **kont {
+        Kont::Halt => println!("    Halt"),
+        Kont::AndOr { kind, .. } => match &kind {
+            AndOrKind::And => print!("AndOr {{kind=And}} "),
+            AndOrKind::Or => print!("AndOr {{kind=Or}} "),
+        },
+        Kont::ApplyProc { .. } => print!("ApplyProc "),
+        Kont::ApplySpecial { .. } => print!("ApplySpecial "),
+        Kont::Bind { .. } => print!("Bind "),
+        Kont::CallWithValues { .. } => print!("CallWithValues "),
+        Kont::Cond { .. } => print!("Cond "),
+        Kont::CondClause { .. } => print!("CondClause "),
+        Kont::Eval { .. } => print!("Eval "),
+        Kont::EvalArg { .. } => print!("EvalArg "),
+        Kont::If { .. } => print!("If "),
+        Kont::RestoreEnv { .. } => print!("RestoreEnv "),
+        Kont::Seq { .. } => print!("Seq "),
     }
 }
 

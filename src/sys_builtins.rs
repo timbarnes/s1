@@ -105,24 +105,28 @@ fn apply_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
                 return Ok(());
             }
             Callable::Closure { .. } => {
-                let old_env = state.env.clone();
-                // save the continuation that was there before the call
-                let old_kont = Rc::clone(&state.kont);
-                // create RestoreEnv that will restore old_env and continue with old_kont
+                // Save the current env and kont
+                let old_env = Rc::clone(&state.env); // EnvRef
+                let old_kont = Rc::clone(&state.kont); // KontRef  <-- use plain clone!
+
+                // Create the restore frame (below apply)
                 let restore = Rc::new(Kont::RestoreEnv {
                     old_env: old_env,
                     next: old_kont,
                 });
-                // create ApplyProc that, when handled, will set up the function's env and
-                // evaluate the body; its 'next' is the restore frame
+
+                // Create the apply frame that will set up the function and whose next is restore
+                let eval_args = list_to_vec(ec.heap, args[1])?;
                 let apply_kont = Rc::new(Kont::ApplyProc {
                     proc: args[0],
-                    evaluated_args: list_to_vec(ec.heap, args[1])?,
-                    next: Rc::clone(&restore),
+                    evaluated_args: eval_args,
+                    next: restore,
                 });
-                // make the apply frame the active continuation
+
+                // Make ApplyProc the active continuation
                 state.kont = Rc::clone(&apply_kont);
-                // now invoke the handler that knows how to perform the application
+
+                // Now do the apply work: apply_proc must set env, set kont to restore, and set control
                 apply_proc(state, ec, apply_kont)?;
                 return Ok(());
             }
