@@ -1,6 +1,6 @@
 /// Internal utility functions
 ///
-use crate::env::Frame;
+use crate::env::{EnvOps, EnvRef, Frame};
 use crate::eval::{RunTime, TraceType};
 use crate::gc_value;
 use crate::kont::{AndOrKind, CEKState, Control, Kont, KontRef};
@@ -80,13 +80,13 @@ fn debug_interactive(state: &mut CEKState, ec: &mut RunTime) {
             }
             "e" | "env" => {
                 let frame = state.env.clone();
-                dbg_env(Some(frame));
+                dbg_env(frame, false);
             }
             "k" | "kont" => {
                 dbg_kont(Rc::clone(&state.kont));
             }
             "l" | "locals" => {
-                dbg_one_env(&state.env);
+                dbg_one_env(&state.env, 0);
             }
             "x" | "expr" => {
                 println!("control expr = {}", dump_control(&state.control));
@@ -343,41 +343,42 @@ pub fn dbg_kont(kont: KontRef) {
     }
 }
 
-pub fn dbg_one_env(env: &Rc<RefCell<Frame>>) {
-    let frame = env.borrow();
-    println!("Local env: ");
+pub fn dbg_one_env(frame: &EnvRef, depth: usize) {
+    let frame = frame.borrow();
+    let mut bindings = Vec::new();
+    println!("Env frame {depth}:");
     for (k, v) in frame.bindings.iter() {
-        // Replace with your actual printer for GcRef
-        println!("  {:20} => {}", print_value(&k), print_value(&v));
+        match gc_value!(*k) {
+            crate::gc::SchemeValue::Symbol(s) => {
+                bindings.push((s, v));
+            }
+            _ => unreachable!(),
+        }
+    }
+    bindings.sort_by(|(k1, _v1), (k2, _v2)| k1.cmp(k2));
+    for (k, v) in bindings {
+        println!("  {:20} => {}", &k, print_value(&v));
     }
 }
 
-pub fn dbg_env(env: Option<Rc<RefCell<Frame>>>) {
+/// Debug print the environment, sorted alphabetically within each frame.
+/// If no argument, print from the top of the environment chain
+pub fn dbg_env(frame: EnvRef, global: bool) {
     let mut depth = 0;
-    let mut current = env;
-    while let Some(frame_rc) = current {
-        current = frame_rc.borrow().parent.clone(); // Look at the parent frame
-        match current {
-            Some(_) => {
-                let frame = frame_rc.borrow();
-                let mut bindings = Vec::new();
-                println!("Env frame {depth}:");
-                for (k, v) in frame.bindings.iter() {
-                    match gc_value!(*k) {
-                        crate::gc::SchemeValue::Symbol(s) => {
-                            bindings.push((s, v));
-                        }
-                        _ => unreachable!(),
-                    }
-                }
-                bindings.sort_by(|(k1, _v1), (k2, _v2)| k1.cmp(k2));
-                for (k, v) in bindings {
-                    println!("  {:20} => {}", &k, print_value(&v));
-                }
+    let mut current = frame;
+    loop {
+        let next_frame = current.parent();
+        match next_frame {
+            Some(fr) => {
+                dbg_one_env(&current, depth);
                 depth += 1;
+                current = fr;
             }
             None => {
-                //println!("Omitting global frame");
+                if global {
+                    dbg_one_env(&current, depth);
+                }
+                return;
             }
         }
     }

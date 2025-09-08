@@ -39,6 +39,7 @@ pub trait EnvOps {
     fn set(&self, symbol: GcRef, val: GcRef) -> Result<(), String>; // Set in any frame where defined
     fn set_local(&self, symbol: GcRef, val: GcRef) -> Result<(), String>; // Set in this frame only
     fn extend(&self) -> EnvRef; // Create a new frame with this frame as parent
+    fn parent(&self) -> Option<EnvRef>;
 }
 
 impl EnvOps for EnvRef {
@@ -108,6 +109,12 @@ impl EnvOps for EnvRef {
     // Add a new frame with this frame as parent
     fn extend(&self) -> EnvRef {
         Rc::new(RefCell::new(Frame::new(Some(Rc::clone(self)))))
+    }
+
+    // Get the parent environment (or None if we're at the global frame)
+    fn parent(&self) -> Option<EnvRef> {
+        let frame = self.borrow();
+        frame.parent.clone()
     }
 }
 

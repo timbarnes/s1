@@ -269,15 +269,16 @@ fn trace_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
     Ok(())
 }
 
-/// (debug-env)
-/// Prints the environment up to the given depth, or all if.
+/// (debug-env ['g(lobal)])
+/// Prints the environment, optionally including the global env.
 fn trace_env_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
     *ec.depth -= 1;
-    if args.len() != 0 {
-        return Err("debug-env: requires no arguments".to_string());
+    let mut global = false;
+    if args.len() == 1 {
+        global = true;
     }
     let env = state.env.clone();
-    crate::utilities::dbg_env(Some(env));
+    crate::utilities::dbg_env(env, global);
     state.control = Control::Value(ec.heap.void());
     Ok(())
 }

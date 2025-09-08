@@ -46,7 +46,8 @@ fn run_cek(mut state: &mut CEKState, rt: &mut RunTime) -> Result<Vec<GcRef>, Str
                 _ => continue,                         // Some continuation remains; continue loop
             },
             Control::Expr(_) => continue, // Still evaluating an expression; continue loop
-            Control::Empty => return Err("CEK: Control::Empty".to_string()),
+            Control::Empty => return Ok(vec![rt.heap.void()]),
+            //Control::Empty => return Err("CEK: Control::Empty".to_string()),
             Control::Escape(_, _) => continue, // Escape continuation; proceed from new continuation
         }
     }
