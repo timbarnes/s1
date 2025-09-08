@@ -193,12 +193,12 @@ fn quote_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), S
                 Ok(())
             }
             _ => {
-                post_error(state, ec, "Malformed quote: missing argument".to_string());
+                post_error(state, ec, "Malformed quote: missing argument");
                 Ok(())
             }
         },
         _ => {
-            post_error(state, ec, "Malformed quote: not a pair".to_string());
+            post_error(state, ec, "Malformed quote: not a pair");
             Ok(())
         }
     }

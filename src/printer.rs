@@ -105,7 +105,6 @@ fn print_callable(callable_type: &str, params: &Vec<GcRef>, body: GcRef) -> Stri
             }
             match &gc_value!(params[0]) {
                 Symbol(name) => {
-                    println!("Symbol: {}", name);
                     s.push_str(". ");
                     s.push_str(name.as_str());
                     s.push(' ');

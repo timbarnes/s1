@@ -11,6 +11,7 @@ use crate::kont::{CEKState, Control, Kont, KontRef, insert_eval_eval};
 //use crate::printer::print_value;
 use crate::parser::{ParseError, parse};
 use crate::special_forms::create_callable;
+use crate::utilities::post_error;
 
 //use crate::utilities::dump_cek;
 use std::rc::Rc;
@@ -92,8 +93,15 @@ fn apply_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
         SchemeValue::Callable(func) => match func {
             Callable::Builtin { func, .. } => {
                 let args = list_to_vec(ec.heap, args[1])?;
-                let result = func(ec.heap, &args[..])?;
-                state.control = crate::kont::Control::Value(result);
+                let result = func(ec.heap, &args[..]);
+                match &result {
+                    Err(err) => {
+                        post_error(state, ec, &err);
+                    }
+                    Ok(value) => {
+                        state.control = crate::kont::Control::Value(*value);
+                    }
+                }
                 return Ok(());
             }
             Callable::Closure { .. } => {

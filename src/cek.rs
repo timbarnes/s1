@@ -101,7 +101,7 @@ fn step(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> {
 
 /// Capture the current environment and control state, then pass the CEKState to the CEK loop.
 ///
-pub fn eval_cek(expr: GcRef, ctx: &mut RunTime, state: &mut CEKState) {
+pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
     //dump_cek("   eval_cek", &state);
     match &gc_value!(expr) {
         // Self-evaluating values are returned unchanged
@@ -114,7 +114,7 @@ pub fn eval_cek(expr: GcRef, ctx: &mut RunTime, state: &mut CEKState) {
             if let Some(val) = state.env.lookup(expr) {
                 state.control = Control::Value(val);
             } else {
-                post_error(state, ctx, format!("Unbound variable: {}", name));
+                post_error(state, rt, &format!("Unbound variable: {}", name));
             }
         }
 
@@ -131,17 +131,17 @@ pub fn eval_cek(expr: GcRef, ctx: &mut RunTime, state: &mut CEKState) {
                     if matches!(gc_value!(op), Callable(Callable::SpecialForm { .. })) {
                         // Call the special-form handler in-place.
                         state.control = Control::Expr(*car); // or set Value/Expr as your handler expects
-                        let result = apply_special_direct(expr, ctx, state);
+                        let result = apply_special_direct(expr, rt, state);
                         match result {
                             Ok(_) => {}
-                            Err(err) => post_error(state, ctx, err),
+                            Err(err) => post_error(state, rt, &err),
                         }
                         return; // let run_cek loop continue
                     }
                 }
             }
 
-            let args_vec = list_to_vec(&ctx.heap, *cdr)
+            let args_vec = list_to_vec(&rt.heap, *cdr)
                 .map_err(|_| "invalid argument list".to_string())
                 .unwrap();
 
@@ -161,8 +161,8 @@ pub fn eval_cek(expr: GcRef, ctx: &mut RunTime, state: &mut CEKState) {
         }
         _ => post_error(
             state,
-            ctx,
-            format!("Unsupported expression in eval_cek: {}", print_value(&expr)),
+            rt,
+            &format!("Unsupported expression in eval_cek: {}", print_value(&expr)),
         ),
     }
 }
@@ -629,7 +629,7 @@ fn apply_special_direct(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> 
     if let Callable(Callable::SpecialForm { func, .. }) = gc_value!(op_val) {
         func(expr, ec, state) // handler mutates state; returns Ok(()) immediately
     } else {
-        unreachable!("early-dispatch promised a SpecialForm");
+        Err("early-dispatch promised a SpecialForm".to_string())
     }
 }
 
@@ -646,7 +646,7 @@ fn apply_unevaluated(state: &mut CEKState, ec: &mut RunTime, frame: Kont) -> Res
             Callable(Callable::SpecialForm { func, .. }) => {
                 let result = func(original_call, ec, state);
                 match result {
-                    Err(err) => post_error(state, ec, err),
+                    Err(err) => post_error(state, ec, &err),
                     Ok(_) => {}
                 }
                 Ok(())
@@ -660,7 +660,7 @@ fn apply_unevaluated(state: &mut CEKState, ec: &mut RunTime, frame: Kont) -> Res
                 let expanded = eval_macro(&params, *body, env.clone(), &raw_args, state, ec);
                 match expanded {
                     Ok(exp) => state.control = Control::Expr(exp),
-                    Err(err) => post_error(state, ec, err),
+                    Err(err) => post_error(state, ec, &err),
                 }
                 state.tail = true;
                 state.kont = next;
@@ -689,7 +689,7 @@ pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime, frame: KontRef) -> Res
                 Callable::Builtin { func, .. } => {
                     let result = func(ec.heap, &evaluated_args);
                     match result {
-                        Err(err) => post_error(state, ec, err),
+                        Err(err) => post_error(state, ec, &err),
                         Ok(result) => state.control = Control::Value(result),
                     }
                     state.kont = Rc::clone(next);
@@ -698,7 +698,7 @@ pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime, frame: KontRef) -> Res
                 Callable::SysBuiltin { func, .. } => {
                     let result = func(ec, &evaluated_args, state);
                     match result {
-                        Err(err) => post_error(state, ec, err),
+                        Err(err) => post_error(state, ec, &err),
                         Ok(_) => {}
                     }
                     state.kont = Rc::clone(next);

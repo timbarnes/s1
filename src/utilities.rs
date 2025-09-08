@@ -1,16 +1,16 @@
 /// Internal utility functions
 ///
-use crate::env::{EnvOps, EnvRef, Frame};
+use crate::env::{EnvOps, EnvRef};
 use crate::eval::{RunTime, TraceType};
 use crate::gc_value;
 use crate::kont::{AndOrKind, CEKState, Control, Kont, KontRef};
 use crate::printer::print_value;
-use std::cell::RefCell;
 use std::rc::Rc;
 
 /// Push an error into the existing CEKState.
-pub fn post_error(state: &mut CEKState, ec: &mut RunTime, error: String) {
+pub fn post_error(state: &mut CEKState, ec: &mut RunTime, error: &str) {
     eprintln!("Error: {}", error);
+    *ec.trace = TraceType::Step;
     debugger(state, ec);
 }
 
