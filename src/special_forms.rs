@@ -36,7 +36,7 @@ enum Ptype {
 macro_rules! register_special_form {
     ($rt:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
         $(
-            $env.set($rt.intern_symbol($name),
+            $env.define($rt.intern_symbol($name),
                 new_special_form($rt, $func,
                     concat!($name, ": special form").to_string()));
         )*
@@ -344,7 +344,7 @@ pub fn let_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(),
 
 fn expand_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let m = car(cdr(expr)?)?;
-    match expand_macro(&m, 0, ec, state.env.clone()) {
+    match expand_macro(&m, 0, ec, state) {
         Ok(expr) => {
             insert_value(state, expr);
         }
@@ -395,7 +395,7 @@ pub fn or_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), 
 fn with_timer_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let args = expect_n_args(&ec.heap, expr, 2)?;
     let timer = Instant::now();
-    eval_main(args[1], state.env.clone(), ec)?;
+    eval_main(args[1], state, ec)?;
     let elapsed_time = timer.elapsed().as_secs_f64();
     let time = new_float(&mut ec.heap, elapsed_time);
     insert_value(state, time);

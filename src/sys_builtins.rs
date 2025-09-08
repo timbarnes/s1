@@ -2,8 +2,8 @@ use crate::cek::apply_proc;
 use crate::env::{EnvOps, EnvRef};
 use crate::eval::{RunTime, TraceType};
 use crate::gc::{
-    Callable, GcHeap, GcRef, SchemeValue, get_symbol, list, list_to_vec, list3, new_continuation,
-    new_port, new_sys_builtin,
+    Callable, GcRef, SchemeValue, get_symbol, list, list_to_vec, list3, new_continuation, new_port,
+    new_sys_builtin,
 };
 use crate::gc_value;
 use crate::io::{PortKind, port_kind_from_scheme_port};
@@ -25,7 +25,7 @@ use std::rc::Rc;
 macro_rules! register_sys_builtins {
     ($rt:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
         $(
-            $env.set($rt.heap.intern_symbol($name),
+            $env.define($rt.heap.intern_symbol($name),
                 new_sys_builtin($rt, $func,
                     concat!($name, ": sys-builtin").to_string()));
         )*
@@ -45,19 +45,22 @@ pub fn register_sys_builtins(runtime: &mut RunTime, env: EnvRef) {
         "call-with-values" => call_with_values_sp,
         "trace" => trace_sp,
         "trace-env" => trace_env_sp,
+        "read" => read_sp,
+        "push-port!" => push_port_sp,
+        "pop-port!" => pop_port_sp,
     );
 }
 
-fn eval_string_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn eval_string_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
     if args.len() != 1 {
         return Err("eval-string: expected exactly 1 argument".to_string());
     }
-    let string = match &ec.heap.get_value(args[0]) {
+    let string = match &rt.heap.get_value(args[0]) {
         SchemeValue::Str(string) => string.clone(),
         _ => return Err("eval-string: argument must be a string".to_string()),
     };
     // Evaluate the string
-    let result = crate::eval::eval_string(ec, &string, state.env.clone())?;
+    let result = crate::eval::eval_string(&string, state, rt)?;
     if result.len() == 1 {
         state.control = Control::Value(result[0]);
     } else {
@@ -124,7 +127,7 @@ fn apply_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
 /// (debug-stack)
 /// Prints the stack
 fn debug_stack_sp(ec: &mut RunTime, _args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
-    //dump_cek("", state);
+    crate::utilities::dump_cek("", state);
     state.control = crate::kont::Control::Value(ec.heap.void());
     Ok(())
 }
@@ -280,7 +283,7 @@ fn trace_env_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Resul
 
 /// (read [port])
 /// Reads an s-expression from a port. Port defaults to the current input port (normally stdin).
-fn read_builtin(ec: &mut RunTime, args: &[GcRef]) -> Result<GcRef, String> {
+fn read_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
     if args.len() > 1 {
         return Err("read: expected at most 1 argument".to_string());
     }
@@ -298,12 +301,18 @@ fn read_builtin(ec: &mut RunTime, args: &[GcRef]) -> Result<GcRef, String> {
         PortKind::Stdin | PortKind::StringPortInput { .. } /* | PortKind::File { .. } */ => {
             let result = parse(ec.heap, &mut port_kind);
             match result {
-                Ok(expr) => Ok(expr),
+                Ok(expr) => {
+                    state.control = Control::Value(expr);
+                    Ok(())
+                }
                 Err(err) => match err {
-                    ParseError::Eof => Ok(ec.heap.eof()),
+                    ParseError::Eof => {
+                        state.control = Control::Value(ec.heap.eof());
+                        Ok(())
+                    },
                     ParseError::Syntax(err) => Err(format!("read: syntax error:{}", err)),
                     //ParseError::Other(err) => Err(format!("read: other error:{}", err)),
-                },
+                }
             }
         }
         _ => Err("read: port must be a string port or file port".to_string()),
@@ -320,23 +329,25 @@ fn read_builtin(ec: &mut RunTime, args: &[GcRef]) -> Result<GcRef, String> {
 /// let mut evaluator = Evaluator::new();
 /// evaluator.push_port("example.txt");
 /// ```
-pub fn push_port(ec: &mut RunTime, args: &[GcRef]) -> Result<GcRef, String> {
+pub fn push_port_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
     // (push-port! port)
     if args.len() != 1 {
         return Err("push_port!: expected exactly 1 argument".to_string());
     }
     let port_kind = port_kind_from_scheme_port(ec, args[0]);
     ec.port_stack.push(port_kind);
-    Ok(ec.heap.nil_s())
+    state.control = Control::Value(ec.heap.void());
+    Ok(())
 }
 
-pub fn pop_port(ec: &mut RunTime, _args: &[GcRef]) -> Result<GcRef, String> {
+pub fn pop_port_sp(ec: &mut RunTime, _args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
     // (pop-port!)
     let port_kind = ec.port_stack.pop();
     match port_kind {
         Some(port_kind) => {
             let port = new_port(&mut ec.heap, port_kind);
-            Ok(port)
+            state.control = Control::Value(port);
+            Ok(())
         }
         None => Err("Port Stack is empty".to_string()),
     }

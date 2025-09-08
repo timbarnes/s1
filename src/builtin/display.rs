@@ -63,7 +63,7 @@ pub fn newline(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
 macro_rules! register_builtin_family {
     ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
         $(
-            $env.set($heap.intern_symbol($name),
+            $env.define($heap.intern_symbol($name),
                 crate::gc::new_builtin($heap, $func,
                     concat!($name, ": builtin function").to_string()));
         )*

@@ -14,8 +14,9 @@ mod tokenizer;
 mod utilities;
 
 use crate::cek::eval_main;
-use crate::env::EnvRef;
-use crate::eval::{Evaluator, eval_string};
+use crate::env::Frame;
+use crate::eval::{RunTimeStruct, eval_string, initialize_scheme_globals};
+use crate::kont::CEKState;
 use crate::printer::print_value;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -42,17 +43,23 @@ struct Args {
 }
 
 fn main() {
+    // Process command-line arguments
     let args: Args = argh::from_env();
-    let env = Rc::new(RefCell::new(crate::env::Frame::new(None)));
-    let mut evaluator = Evaluator::new(env.clone());
-    let mut ec = RunTime::from_eval(&mut evaluator);
-    // match initialize_scheme_io_globals(env.clone()) {
-    //     Ok(_val) => {}
-    //     Err(msg) => {
-    //         println!("IO initialization failed: {}", msg);
-    //         std::process::exit(1);
-    //     }
-    // }
+    // Initialize environment and runtime
+    let env = Rc::new(RefCell::new(Frame::new(None)));
+    let mut runtime = RunTimeStruct::new();
+    let mut rt = RunTime::from_eval(&mut runtime);
+    // Set up ports and builtin functions and variables
+    match initialize_scheme_globals(&mut rt, env.clone()) {
+        Ok(_val) => {}
+        Err(msg) => {
+            println!("Runtime initialization failed: {}", msg);
+            std::process::exit(1);
+        }
+    }
+    //crate::utilities::dbg_one_env(&env);
+
+    let mut state = CEKState::new(env.clone());
 
     // Execute startup commands as Scheme code
     let mut startup_commands = Vec::new();
@@ -81,17 +88,17 @@ fn main() {
 
     // Execute startup commands
     for command in startup_commands {
-        if let Err(e) = eval_string(&mut ec, &command, env.clone()) {
+        if let Err(e) = eval_string(&command, &mut state, &mut rt) {
             eprintln!("Error executing startup command '{}': {}", command, e);
             std::process::exit(1);
         }
     }
 
     // Drop into the REPL
-    repl(&mut ec, env.clone());
+    repl(&mut rt, &mut state);
 }
 
-fn repl(ev: &mut RunTime, env: EnvRef) {
+fn repl(rt: &mut RunTime, state: &mut CEKState) {
     use crate::io::PortKind;
     use crate::parser::parse;
     use std::io as stdio;
@@ -101,10 +108,10 @@ fn repl(ev: &mut RunTime, env: EnvRef) {
     println!("Welcome to the s1 Scheme REPL");
 
     loop {
-        *ev.depth = 0;
+        *rt.depth = 0;
         // Check the port. Each parse-eval needs to be sure the port hasn't changed.
         let current_port_val: &mut PortKind;
-        let current_port = ev.port_stack.last_mut();
+        let current_port = rt.port_stack.last_mut();
         match current_port {
             Some(port_kind) => current_port_val = port_kind,
             None => continue,
@@ -115,9 +122,9 @@ fn repl(ev: &mut RunTime, env: EnvRef) {
             print!("s1> ");
             stdio::stdout().flush().unwrap();
         }
-        let expr = parse(ev.heap, current_port_val);
+        let expr = parse(rt.heap, current_port_val);
         match expr {
-            Ok(expr) => match eval_main(expr, env.clone(), ev) {
+            Ok(expr) => match eval_main(expr, state, rt) {
                 Ok(result) => {
                     if interactive {
                         for v in result.iter() {
@@ -129,7 +136,7 @@ fn repl(ev: &mut RunTime, env: EnvRef) {
             },
             Err(crate::parser::ParseError::Eof) => {
                 // Pop the port stack on EOF
-                let port = ev.port_stack.pop(); // Pop and set new port
+                let port = rt.port_stack.pop(); // Pop and set new port
                 match &port {
                     Some(_) => {}
                     None => println!("Error popping port stack"),

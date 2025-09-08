@@ -245,6 +245,17 @@ pub struct CEKState {
     pub tail: bool,
 }
 
+impl CEKState {
+    pub fn new(env: EnvRef) -> Self {
+        CEKState {
+            control: Control::Empty,
+            env,
+            kont: KontRef::new(Kont::Halt),
+            tail: false,
+        }
+    }
+}
+
 /// Install `expr` into the existing CEKState and return immediately.
 /// If `replace_next` is true, the installed EvalArg (if any) will have `next = Halt`
 /// (i.e., it will replace the current continuation); otherwise the existing kont chain is preserved.

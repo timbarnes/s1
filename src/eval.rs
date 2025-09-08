@@ -4,19 +4,15 @@
 //! The logic layer handles self-evaluating forms, special forms, and argument evaluation,
 //! while the apply layer handles function calls with pre-evaluated arguments.
 
-use crate::cek::eval_main;
 use crate::env::{EnvOps, EnvRef};
-//use crate::gc::SchemeValue::*;
-use crate::gc::{GcHeap, GcRef, SchemeValue, list_from_slice, list_to_vec};
+use crate::gc::{GcHeap, GcRef, SchemeValue, list_from_slice, list_to_vec, new_port};
 use crate::io::PortKind;
+use crate::kont::{CEKState, insert_eval};
 use crate::macros::expand_macro;
 use crate::parser::parse;
-//use crate::printer::print_value;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// Evaluator that owns both heap and environment
-pub struct Evaluator {
+pub struct RunTimeStruct {
     pub heap: GcHeap,              // The global heap for scheme data
     pub port_stack: Vec<PortKind>, // Stack of ports for input/output operations
     pub trace: TraceType,
@@ -31,7 +27,7 @@ pub struct RunTime<'a> {
 }
 
 impl<'a> RunTime<'a> {
-    pub fn from_eval(eval: &'a mut Evaluator) -> Self {
+    pub fn from_eval(eval: &'a mut RunTimeStruct) -> Self {
         RunTime {
             heap: &mut eval.heap,
             port_stack: &mut eval.port_stack,
@@ -55,73 +51,59 @@ pub struct TailCall {
     pub args: Vec<GcRef>,
 }
 
-impl Evaluator {
-    pub fn new(env: EnvRef) -> Self {
-        let mut evaluator = Self {
+impl RunTimeStruct {
+    /// Create a new RunTime struct initialized to stdin
+    pub fn new() -> Self {
+        let mut port_vec = Vec::new();
+        port_vec.push(PortKind::Stdin);
+        Self {
             heap: GcHeap::new(),
-            port_stack: Vec::new(),
+            port_stack: port_vec,
             trace: TraceType::Off,
             depth: 0,
-        };
-
-        let mut ec = RunTime::from_eval(&mut evaluator);
-        // Register built-ins in the evaluator's heap and environment
-        crate::builtin::register_builtins(&mut ec.heap, env.clone());
-        crate::sys_builtins::register_sys_builtins(&mut ec, env.clone());
-        crate::special_forms::register_special_forms(&mut evaluator.heap, env.clone());
-        // Create standard ports
-        let stdin_port = crate::gc::new_port(&mut evaluator.heap, PortKind::Stdin);
-        let stdout_port = crate::gc::new_port(&mut evaluator.heap, PortKind::Stdout);
-        let stderr_port = crate::gc::new_port(&mut evaluator.heap, PortKind::Stderr);
-        // Bind **stdin**, **stdout**, and **stderr** as Scheme globals
-        let stdin_sym = evaluator.heap.intern_symbol("**stdin**");
-        let stdout_sym = evaluator.heap.intern_symbol("**stdout**");
-        let stderr_sym = evaluator.heap.intern_symbol("**stderr**");
-        env.set(stdin_sym, stdin_port);
-        env.set(stdout_sym, stdout_port);
-        env.set(stderr_sym, stderr_port);
-        // Push stdin onto port-stack
-        evaluator.port_stack.push(PortKind::Stdin);
-
-        evaluator
+        }
     }
 }
 
 /// Initialize Scheme-level I/O globals: **stdin**, **stdout**, **port-stack**
 ///
 /// This should be called after creating the Evaluator, before loading files or starting the REPL.
-// pub fn initialize_scheme_io_globals(heap: &mut GcHeap, env: EnvRef) -> Result<(), String> {
-//     // Create stdin and stdout ports
-//     let stdin_port = crate::gc::new_port(&mut heap, PortKind::Stdin);
-//     let stdout_port = crate::gc::new_port(&mut heap, PortKind::Stdout);
-//     let stderr_port = crate::gc::new_port(&mut heap, PortKind::Stderr);
-//     // Bind **stdin**, **stdout**, and **stderr** as Scheme globals
-//     let stdin_sym = heap.intern_symbol("**stdin**");
-//     let stdout_sym = heap.intern_symbol("**stdout**");
-//     let stderr_sym = heap.intern_symbol("**stderr**");
-//     env.set(stdin_sym, stdin_port);
-//     env.set(stdout_sym, stdout_port);
-//     env.set(stderr_sym, stderr_port);
-
-//     // Push stdin onto port-stack
-//     ec.port_stack.push(PortKind::Stdin);
-//     Ok(())
-// }
+pub fn initialize_scheme_globals(rt: &mut RunTime, env: EnvRef) -> Result<(), String> {
+    // Create stdin and stdout ports
+    let stdin_port = new_port(rt.heap, PortKind::Stdin);
+    let stdout_port = new_port(rt.heap, PortKind::Stdout);
+    let stderr_port = new_port(rt.heap, PortKind::Stderr);
+    // Bind **stdin**, **stdout**, and **stderr** as Scheme globals
+    let stdin_sym = rt.heap.intern_symbol("**stdin**");
+    let stdout_sym = rt.heap.intern_symbol("**stdout**");
+    let stderr_sym = rt.heap.intern_symbol("**stderr**");
+    env.define(stdin_sym, stdin_port);
+    env.define(stdout_sym, stdout_port);
+    env.define(stderr_sym, stderr_port);
+    crate::builtin::register_builtins(rt.heap, env.clone());
+    crate::special_forms::register_special_forms(rt.heap, env.clone());
+    crate::sys_builtins::register_sys_builtins(rt, env.clone());
+    Ok(())
+}
 
 /// Evaluate a string of Scheme code (all expressions, return last result)
-pub fn eval_string(ec: &mut RunTime, code: &str, env: EnvRef) -> Result<Vec<GcRef>, String> {
+pub fn eval_string(
+    code: &str,
+    state: &mut CEKState,
+    rt: &mut RunTime,
+) -> Result<Vec<GcRef>, String> {
     use crate::parser::ParseError;
     //use crate::io::{Port, PortKind};
 
     let mut port_kind = crate::io::new_string_port_input(code);
     let mut last_result = Vec::new();
     loop {
-        match parse(&mut ec.heap, &mut port_kind) {
+        match parse(&mut rt.heap, &mut port_kind) {
             Err(ParseError::Syntax(e)) => return Err(e),
             Err(ParseError::Eof) => return Ok(last_result),
             Ok(expr) => {
                 //let expr = crate::eval::deduplicate_symbols(expr, &mut self.heap);
-                last_result = eval_main(expr, env.clone(), ec)?;
+                last_result = crate::cek::eval_main(expr, state, rt)?;
             }
         }
     }
@@ -133,14 +115,16 @@ pub fn eval_macro(
     body: GcRef,
     env: EnvRef,
     args: &[GcRef],
-    evaluator: &mut RunTime,
+    state: &mut CEKState,
+    rt: &mut RunTime,
 ) -> Result<GcRef, String> {
-    let new_env = bind_params(params, args, &env, evaluator.heap)?;
-    //let original_env = env;
+    let new_env = bind_params(params, args, &env, rt.heap)?;
+    let original_env = state.env.clone();
     //println!("Before expansion: {}", print_value(&body));
-    let expanded = expand_macro(&body, 0, evaluator, new_env)?;
+    state.env = new_env;
+    let expanded = expand_macro(&body, 0, rt, state)?;
     //println!("After expansion: {}", print_value(&expanded));
-    //evaluator.env.set_current_frame(original_env);
+    state.env = original_env;
     // Review for tail recursion
     Ok(expanded)
 }
@@ -161,18 +145,18 @@ pub fn bind_params(
         0 => (),
         1 => {
             let arglist = list_from_slice(args, heap);
-            new_env.set(params[0], arglist);
+            new_env.define(params[0], arglist);
         }
         _ => {
             for (param, arg) in params[1..].iter().zip(args.iter()) {
-                new_env.set(*param, *arg);
+                new_env.define(*param, *arg);
             }
             let delta = args.len().saturating_sub(params.len() - 1);
             if delta > 0 {
                 if let SchemeValue::Symbol(_) = &heap.get_value(params[0]) {
                     let rest_args = &args[(params.len() - 1)..];
                     let arglist = list_from_slice(rest_args, heap);
-                    new_env.set(params[0], arglist);
+                    new_env.define(params[0], arglist);
                 }
             }
         }

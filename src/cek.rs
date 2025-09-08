@@ -14,14 +14,14 @@ use std::rc::Rc;
 
 /// CEK evaluator entry point from the repl (not used recursively)
 ///
-pub fn eval_main(expr: GcRef, env: EnvRef, ec: &mut RunTime) -> Result<Vec<GcRef>, String> {
-    let state = CEKState {
-        control: Control::Expr(expr),
-        kont: Rc::new(Kont::Halt),
-        env: env,
-        tail: false,
-    };
-    //dump_cek("***eval_main***", &state);
+pub fn eval_main(
+    expr: GcRef,
+    state: &mut CEKState,
+    ec: &mut RunTime,
+) -> Result<Vec<GcRef>, String> {
+    state.control = Control::Expr(expr);
+    state.kont = Rc::new(Kont::Halt);
+    state.tail = true;
     run_cek(state, ec)
 }
 
@@ -29,11 +29,11 @@ pub fn eval_main(expr: GcRef, env: EnvRef, ec: &mut RunTime) -> Result<Vec<GcRef
 ///
 /// All the state information is contained in the CEKState struct, so no result is returned until the end.
 ///
-fn run_cek(mut state: CEKState, ctx: &mut RunTime) -> Result<Vec<GcRef>, String> {
+fn run_cek(mut state: &mut CEKState, rt: &mut RunTime) -> Result<Vec<GcRef>, String> {
     loop {
         // Step the CEK machine; mutates state in place
         //eprintln!("Pre-step {}", frame_debug_short(&state.kont));
-        if let Err(err) = step(&mut state, ctx) {
+        if let Err(err) = step(&mut state, rt) {
             return Err(err);
         }
         match &state.control {
@@ -311,12 +311,12 @@ fn handle_bind(
         match env {
             Some(frame) => {
                 // global and set! path: update specific frame
-                frame.set_local(symbol, val);
+                frame.set_local(symbol, val)?;
                 state.control = Control::Value(ec.heap.unspecified());
             }
             None => {
                 // local define path: bind in current frame
-                state.env.set_local(symbol, val);
+                state.env.define(symbol, val);
                 state.control = Control::Value(symbol);
             }
         }
@@ -656,7 +656,7 @@ fn apply_unevaluated(state: &mut CEKState, ec: &mut RunTime, frame: Kont) -> Res
                     _ => return Err("macro: not a proper call".to_string()),
                 };
                 let raw_args = list_to_vec(ec.heap, cdr)?;
-                let expanded = eval_macro(&params, *body, env.clone(), &raw_args, ec);
+                let expanded = eval_macro(&params, *body, env.clone(), &raw_args, state, ec);
                 match expanded {
                     Ok(exp) => state.control = Control::Expr(exp),
                     Err(err) => post_error(state, ec, err),

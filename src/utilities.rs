@@ -2,7 +2,6 @@
 ///
 use crate::env::Frame;
 use crate::eval::{RunTime, TraceType};
-use crate::gc::GcRef;
 use crate::gc_value;
 use crate::kont::{AndOrKind, CEKState, Control, Kont, KontRef};
 use crate::printer::print_value;
@@ -121,7 +120,7 @@ fn dump_control(control: &Control) -> String {
 
 // Dump a summary of the CEK machine state
 ///
-pub fn dump_cek(loc: &str, state: &CEKState) {
+pub fn dump_cek(_loc: &str, state: &CEKState) {
     match &state.control {
         Control::Expr(obj) => {
             eprintln!(

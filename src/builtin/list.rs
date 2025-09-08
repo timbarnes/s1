@@ -186,7 +186,7 @@ pub fn set_cdr_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, Strin
 macro_rules! register_builtin_family {
     ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
         $(
-            $env.set($heap.intern_symbol($name),
+            $env.define($heap.intern_symbol($name),
                 crate::gc::new_builtin($heap, $func,
                     concat!($name, ": builtin function").to_string()));
         )*
