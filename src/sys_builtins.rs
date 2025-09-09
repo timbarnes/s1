@@ -119,7 +119,7 @@ fn apply_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
                 let eval_args = list_to_vec(ec.heap, args[1])?;
                 let apply_kont = Rc::new(Kont::ApplyProc {
                     proc: args[0],
-                    evaluated_args: eval_args,
+                    evaluated_args: Rc::new(eval_args),
                     next: restore,
                 });
 

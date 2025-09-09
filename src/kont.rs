@@ -15,7 +15,7 @@ pub enum Kont {
     },
     ApplyProc {
         proc: GcRef,
-        evaluated_args: Vec<GcRef>,
+        evaluated_args: Rc<Vec<GcRef>>,
         next: KontRef,
     },
     ApplySpecial {

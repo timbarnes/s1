@@ -180,7 +180,7 @@ fn dispatch_values_kont(
             // Construct ApplyProc with consumer and vals
             state.kont = Rc::new(Kont::ApplyProc {
                 proc: *consumer,
-                evaluated_args: vals,
+                evaluated_args: Rc::new(vals),
                 next: Rc::clone(&next),
             });
             Ok(())
@@ -504,7 +504,7 @@ fn handle_eval_arg(
                     // zero-arg call
                     state.kont = Rc::new(Kont::ApplyProc {
                         proc: proc.unwrap(),
-                        evaluated_args: evaluated,
+                        evaluated_args: Rc::new(evaluated),
                         next,
                     });
                     state.tail = true;
@@ -548,7 +548,7 @@ fn handle_eval_arg(
             // Done: apply with evaluated args
             state.kont = Rc::new(Kont::ApplyProc {
                 proc: proc.unwrap(),
-                evaluated_args: evaluated,
+                evaluated_args: Rc::new(evaluated),
                 next,
             });
             apply_proc(state, ec)?;
@@ -636,38 +636,39 @@ fn apply_special_direct(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> 
 /// Process applications that do not require argument evaluation: macros, special forms, and call-with-values.
 ///
 fn apply_unevaluated(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> {
-    match &*state.kont {
+    let (proc, original_call, next) = match &*state.kont {
         Kont::ApplySpecial {
             proc,
             original_call,
             next,
-        } => match gc_value!(*proc) {
-            Callable(Callable::SpecialForm { func, .. }) => {
-                let result = func(*original_call, ec, state);
-                match result {
-                    Err(err) => post_error(state, ec, &err),
-                    Ok(_) => {}
-                }
-                Ok(())
+        } => (proc, original_call, Rc::clone(next)),
+        _ => return Err("apply_proc expected ApplyProc continuation".to_string()),
+    };
+    match gc_value!(*proc) {
+        Callable(Callable::SpecialForm { func, .. }) => {
+            let result = func(*original_call, ec, state);
+            match result {
+                Err(err) => post_error(state, ec, &err),
+                Ok(_) => {}
             }
-            Callable(Callable::Macro { params, body, env }) => {
-                // let (_, cdr) = match gc_value!(*original_call) {
-                //     Pair(_, cdr) => ((), *cdr),
-                //     _ => return Err("macro: not a proper call".to_string()),
-                // };
-                // let raw_args = list_to_vec(ec.heap, cdr)?;
-                // let expanded = eval_macro(&params, *body, env.clone(), &raw_args, state, ec);
-                // match expanded {
-                //     Ok(exp) => state.control = Control::Expr(exp),
-                //     Err(err) => post_error(state, ec, &err),
-                // }
-                // state.tail = true;
-                // state.kont = Rc::clone(next);
-                Ok(())
+            Ok(())
+        }
+        Callable(Callable::Macro { params, body, env }) => {
+            let (_, cdr) = match gc_value!(*original_call) {
+                Pair(_, cdr) => ((), *cdr),
+                _ => return Err("macro: not a proper call".to_string()),
+            };
+            let raw_args = list_to_vec(ec.heap, cdr)?;
+            let expanded = eval_macro(&params, *body, env.clone(), &raw_args, state, ec);
+            match expanded {
+                Ok(exp) => state.control = Control::Expr(exp),
+                Err(err) => post_error(state, ec, &err),
             }
-            _ => Err("ApplySpecial: not a special form or macro".to_string()),
-        },
-        _ => Err("apply_unevaluated:Bad continuation".to_string()),
+            state.tail = true;
+            state.kont = Rc::clone(&next);
+            Ok(())
+        }
+        _ => Err("ApplySpecial: not a special form or macro".to_string()),
     }
 }
 
@@ -680,10 +681,10 @@ pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> 
             proc,
             evaluated_args,
             next,
-        } => (proc.clone(), evaluated_args.clone(), Rc::clone(next)),
+        } => (proc, evaluated_args.clone(), Rc::clone(next)),
         _ => return Err("apply_proc expected ApplyProc continuation".to_string()),
     };
-    match gc_value!(proc) {
+    match gc_value!(*proc) {
         Callable(callable) => match callable {
             Callable::Builtin { func, .. } => {
                 match func(ec.heap, &evaluated_args) {
