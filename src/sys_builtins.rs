@@ -127,7 +127,7 @@ fn apply_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
                 state.kont = Rc::clone(&apply_kont);
 
                 // Now do the apply work: apply_proc must set env, set kont to restore, and set control
-                apply_proc(state, ec, apply_kont)?;
+                apply_proc(state, ec)?;
                 return Ok(());
             }
             _ => return Err("apply: first argument must be a function".to_string()),

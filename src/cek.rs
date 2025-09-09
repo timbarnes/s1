@@ -502,13 +502,13 @@ fn handle_eval_arg(
                 let proc = Some(val);
                 if remaining.is_empty() {
                     // zero-arg call
-                    let frame = Rc::new(Kont::ApplyProc {
+                    state.kont = Rc::new(Kont::ApplyProc {
                         proc: proc.unwrap(),
                         evaluated_args: evaluated,
                         next,
                     });
                     state.tail = true;
-                    apply_proc(state, ec, frame)?;
+                    apply_proc(state, ec)?;
                     return Ok(());
                 } else {
                     // evaluate next arg
@@ -546,12 +546,12 @@ fn handle_eval_arg(
             });
         } else {
             // Done: apply with evaluated args
-            let frame = Rc::new(Kont::ApplyProc {
+            state.kont = Rc::new(Kont::ApplyProc {
                 proc: proc.unwrap(),
                 evaluated_args: evaluated,
                 next,
             });
-            apply_proc(state, ec, frame)?;
+            apply_proc(state, ec)?;
         }
         return Ok(());
     }
@@ -673,65 +673,61 @@ fn apply_unevaluated(state: &mut CEKState, ec: &mut RunTime) -> Result<(), Strin
 
 /// Process Builtin, SysBuiltin, and Closure applications. Arguments are already evaluated.
 ///
-pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime, frame: KontRef) -> Result<(), String> {
+pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> {
     //dump_cek("     apply_proc", &state);
+    let (proc, evaluated_args, next) = match &*state.kont {
+        Kont::ApplyProc {
+            proc,
+            evaluated_args,
+            next,
+        } => (proc.clone(), evaluated_args.clone(), Rc::clone(next)),
+        _ => return Err("apply_proc expected ApplyProc continuation".to_string()),
+    };
+    match gc_value!(proc) {
+        Callable(callable) => match callable {
+            Callable::Builtin { func, .. } => {
+                match func(ec.heap, &evaluated_args) {
+                    Err(err) => post_error(state, ec, &err),
+                    Ok(result) => state.control = Control::Value(result),
+                }
+                state.kont = next;
+                Ok(())
+            }
+            Callable::SysBuiltin { func, .. } => {
+                match func(ec, &evaluated_args[..], state) {
+                    Err(err) => post_error(state, ec, &err),
+                    Ok(_) => {}
+                }
+                state.kont = next;
+                Ok(())
+            }
+            Callable::Closure {
+                params,
+                body,
+                env: closure_env,
+            } => {
+                let new_env = bind_params(&params[..], &evaluated_args, &closure_env, ec.heap)?;
+                let old_env = state.env.clone();
 
-    if let Kont::ApplyProc {
-        proc,
-        evaluated_args,
-        next,
-    } = frame.as_ref()
-    {
-        match gc_value!(*proc) {
-            Callable(callable) => match callable {
-                Callable::Builtin { func, .. } => {
-                    let result = func(ec.heap, &evaluated_args);
-                    match result {
-                        Err(err) => post_error(state, ec, &err),
-                        Ok(result) => state.control = Control::Value(result),
-                    }
-                    state.kont = Rc::clone(next);
+                if state.tail {
+                    // Tail-call optimization: no RestoreEnv frame.
+                    state.env = new_env;
+                    state.kont = next; // reuse continuation depth
+                    state.control = Control::Expr(*body);
+                    Ok(())
+                } else {
+                    // Normal (non-tail) call: push a RestoreEnv barrier.
+                    state.kont = Rc::new(Kont::RestoreEnv {
+                        old_env,
+                        next: next,
+                    });
+                    state.env = new_env;
+                    state.control = Control::Expr(*body);
                     Ok(())
                 }
-                Callable::SysBuiltin { func, .. } => {
-                    let result = func(ec, &evaluated_args, state);
-                    match result {
-                        Err(err) => post_error(state, ec, &err),
-                        Ok(_) => {}
-                    }
-                    state.kont = Rc::clone(next);
-                    Ok(())
-                }
-                Callable::Closure {
-                    params,
-                    body,
-                    env: closure_env,
-                } => {
-                    let new_env = bind_params(params, &evaluated_args, closure_env, ec.heap)?;
-                    let old_env = state.env.clone();
-
-                    if state.tail {
-                        // Tail-call optimization: no RestoreEnv frame.
-                        state.env = new_env;
-                        state.kont = Rc::clone(next); // reuse continuation depth
-                        state.control = Control::Expr(*body);
-                        Ok(())
-                    } else {
-                        // Normal (non-tail) call: push a RestoreEnv barrier.
-                        state.kont = Rc::new(Kont::RestoreEnv {
-                            old_env,
-                            next: Rc::clone(next),
-                        });
-                        state.env = new_env;
-                        state.control = Control::Expr(*body);
-                        Ok(())
-                    }
-                }
-                _ => Err("apply_proc expected Builtin or Closure".to_string()),
-            },
-            _ => Err("Attempt to apply non-callable".to_string()),
-        }
-    } else {
-        unreachable!()
+            }
+            _ => Err("apply_proc expected Builtin or Closure".to_string()),
+        },
+        _ => Err("Attempt to apply non-callable".to_string()),
     }
 }
