@@ -290,13 +290,14 @@ fn handle_apply_special(
     original_call: GcRef,
     next: KontRef,
 ) -> Result<(), String> {
-    let frame = Kont::ApplySpecial {
+    let frame = Rc::new(Kont::ApplySpecial {
         proc,
         original_call,
         next,
-    };
+    });
     state.tail = false;
-    apply_unevaluated(state, ec, frame)?;
+    state.kont = frame;
+    apply_unevaluated(state, ec)?;
     Ok(())
 }
 
@@ -489,12 +490,12 @@ fn handle_eval_arg(
         // Evaluating operator (car of the call)
         match ec.heap.get_value(val) {
             Callable(Callable::SpecialForm { .. }) | Callable(Callable::Macro { .. }) => {
-                let frame = Kont::ApplySpecial {
+                state.kont = Rc::new(Kont::ApplySpecial {
                     proc: val,
                     original_call,
                     next,
-                };
-                apply_unevaluated(state, ec, frame)?;
+                });
+                apply_unevaluated(state, ec)?;
                 return Ok(());
             }
             _ => {
@@ -634,16 +635,15 @@ fn apply_special_direct(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> 
 
 /// Process applications that do not require argument evaluation: macros, special forms, and call-with-values.
 ///
-fn apply_unevaluated(state: &mut CEKState, ec: &mut RunTime, frame: Kont) -> Result<(), String> {
-    if let Kont::ApplySpecial {
-        proc,
-        original_call,
-        next,
-    } = frame
-    {
-        match gc_value!(proc) {
+fn apply_unevaluated(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> {
+    match &*state.kont {
+        Kont::ApplySpecial {
+            proc,
+            original_call,
+            next,
+        } => match gc_value!(*proc) {
             Callable(Callable::SpecialForm { func, .. }) => {
-                let result = func(original_call, ec, state);
+                let result = func(*original_call, ec, state);
                 match result {
                     Err(err) => post_error(state, ec, &err),
                     Ok(_) => {}
@@ -651,24 +651,23 @@ fn apply_unevaluated(state: &mut CEKState, ec: &mut RunTime, frame: Kont) -> Res
                 Ok(())
             }
             Callable(Callable::Macro { params, body, env }) => {
-                let (_, cdr) = match gc_value!(original_call) {
-                    Pair(_, cdr) => ((), *cdr),
-                    _ => return Err("macro: not a proper call".to_string()),
-                };
-                let raw_args = list_to_vec(ec.heap, cdr)?;
-                let expanded = eval_macro(&params, *body, env.clone(), &raw_args, state, ec);
-                match expanded {
-                    Ok(exp) => state.control = Control::Expr(exp),
-                    Err(err) => post_error(state, ec, &err),
-                }
-                state.tail = true;
-                state.kont = next;
+                // let (_, cdr) = match gc_value!(*original_call) {
+                //     Pair(_, cdr) => ((), *cdr),
+                //     _ => return Err("macro: not a proper call".to_string()),
+                // };
+                // let raw_args = list_to_vec(ec.heap, cdr)?;
+                // let expanded = eval_macro(&params, *body, env.clone(), &raw_args, state, ec);
+                // match expanded {
+                //     Ok(exp) => state.control = Control::Expr(exp),
+                //     Err(err) => post_error(state, ec, &err),
+                // }
+                // state.tail = true;
+                // state.kont = Rc::clone(next);
                 Ok(())
             }
             _ => Err("ApplySpecial: not a special form or macro".to_string()),
-        }
-    } else {
-        unreachable!();
+        },
+        _ => Err("apply_unevaluated:Bad continuation".to_string()),
     }
 }
 

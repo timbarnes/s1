@@ -8,7 +8,7 @@ use crate::printer::print_value;
 use std::rc::Rc;
 
 /// Push an error into the existing CEKState.
-pub fn post_error(state: &mut CEKState, ec: &mut RunTime, error: &str) {
+pub fn post_error(state: &CEKState, ec: &mut RunTime, error: &str) {
     eprintln!("Error: {}", error);
     *ec.trace = TraceType::Step;
     debugger(state, ec);
@@ -16,7 +16,7 @@ pub fn post_error(state: &mut CEKState, ec: &mut RunTime, error: &str) {
 
 /// Trace / debug function called from within the CEK machine and on error
 ///
-pub fn debugger(state: &mut CEKState, ec: &mut RunTime) {
+pub fn debugger(state: &CEKState, ec: &mut RunTime) {
     // simple indentation
     match ec.trace {
         TraceType::Off => return,
@@ -54,7 +54,7 @@ fn indent(n: i32, v: bool) {
     }
 }
 
-fn debug_interactive(state: &mut CEKState, ec: &mut RunTime) {
+fn debug_interactive(state: &CEKState, ec: &mut RunTime) {
     use std::io::{self, Write};
     loop {
         print!("debug> ");
@@ -94,11 +94,11 @@ fn debug_interactive(state: &mut CEKState, ec: &mut RunTime) {
             "s" | "state" => {
                 dump_cek("state: ", &state);
             }
-            "q" | "quit" => {
-                println!("Exiting...");
-                state.control = Control::Empty;
-                state.kont = Rc::new(Kont::Halt);
-            }
+            // "q" | "quit" => {
+            //     println!("Exiting...");
+            //     state.control = Control::Empty;
+            //     state.kont = Rc::new(Kont::Halt);
+            // }
             _ => {
                 println!(
                     "commands: n(ext), c(ontinue), e(nv), k(ont), l(ocals), x or expr, s(tate)"

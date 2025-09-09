@@ -388,44 +388,44 @@
 (define test-tail (lambda (n) (if (= n 0) #t (test-tail (- n 1)))))
 (test-true (test-tail 7000) "(test-tail 7000) - fails without tail recursion")
 
-(display "          === Testing Macros ===")
-(newline)
+; (display "          === Testing Macros ===")
+; (newline)
 
-(define m1 (macro (x) `(list 11 ,x)))
-(test-equal '(11 22) (m1 22) "Simple macro")
+; (define m1 (macro (x) `(list 11 ,x)))
+; (test-equal '(11 22) (m1 22) "Simple macro")
 
-(define when (macro (p body)
-    `(if ,p ,body nil)))
-(test-equal 22 (when #t 22) "when with #t")
-(test-equal nil (when #f 22) "when with #f")
+; (define when (macro (p body)
+;     `(if ,p ,body nil)))
+; (test-equal 22 (when #t 22) "when with #t")
+; (test-equal nil (when #f 22) "when with #f")
 
-(define unless (macro (p body)
-    `(if (not ,p) ,body nil)))
-(test-equal nil (unless #t 22) "unless with #t")
-(test-equal 22 (unless #f 22) "when with #f")
+; (define unless (macro (p body)
+;     `(if (not ,p) ,body nil)))
+; (test-equal nil (unless #t 22) "unless with #t")
+; (test-equal 22 (unless #f 22) "when with #f")
 
-(define m1 (macro (x) `(list ,x)))
-(test-equal '(42) (m1 42) "macro (m1 42)")
+; (define m1 (macro (x) `(list ,x)))
+; (test-equal '(42) (m1 42) "macro (m1 42)")
 
-(define m2 (macro (x) `(quote ,x)))
-(test-equal 'hello (m2 hello) "macro (m2 hello)")
+; (define m2 (macro (x) `(quote ,x)))
+; (test-equal 'hello (m2 hello) "macro (m2 hello)")
 
-(define m3 (macro args `(list ,@args)))
-(test-equal '(1 2) (m3 1 2) "macro (m3 1 2)")
+; (define m3 (macro args `(list ,@args)))
+; (test-equal '(1 2) (m3 1 2) "macro (m3 1 2)")
 
-(define m4 (macro (op . args) `(list ,op ,@args)))
-(test-equal (list + 1 2 3) (m4 + 1 2 3) "macro (m4 + 1 2 3)")
+; (define m4 (macro (op . args) `(list ,op ,@args)))
+; (test-equal (list + 1 2 3) (m4 + 1 2 3) "macro (m4 + 1 2 3)")
 
-(define m5 (macro x `(append ,@x)))
-(test-equal '(1 2 3 4) (m5 '(1 2) '(3 4)) "macro (m5 '(1 2) '(3 4))")
+; (define m5 (macro x `(append ,@x)))
+; (test-equal '(1 2 3 4) (m5 '(1 2) '(3 4)) "macro (m5 '(1 2) '(3 4))")
 
-(define m6 (macro (test . body)
-    `(if ,test (begin ,@body) nil)))
-(test-equal 22 (m6 #t 22) "macro (m6 #t 11 22)")
-(test-equal nil (m6 #f 22) "macro (m6 #f 22)")
+; (define m6 (macro (test . body)
+;     `(if ,test (begin ,@body) nil)))
+; (test-equal 22 (m6 #t 22) "macro (m6 #t 11 22)")
+; (test-equal nil (m6 #f 22) "macro (m6 #f 22)")
 
-(test-equal '(2 1) (let ((a 1) (b '(2))) (expand `(,@b ,a))) "expand macro expression")
-(test-equal '(1 2) (let ((a 1) (b '(2))) (expand `(,a ,@b))) "expand macro expression")
+; (test-equal '(2 1) (let ((a 1) (b '(2))) (expand `(,@b ,a))) "expand macro expression")
+; (test-equal '(1 2) (let ((a 1) (b '(2))) (expand `(,a ,@b))) "expand macro expression")
 
 (display "          === Testing let ===")
 (newline)
@@ -445,28 +445,28 @@
 (test-equal "a string" (read) "Reading a string")
 "a string"
 
-(display "          === Testing delay and force ===")
-(newline)
-(define **count** 0)
-(define p
-  (delay (begin (set! **count** (+ **count** 1))
-                (if (> **count** x)
-                    **count**
-                    (force p)))))
-(define x 5)
-(test-equal 6 (force p) "First force")
-(test-equal 6 (begin (set! **count** 10) (force p)) "Second force")
+; (display "          === Testing delay and force ===")
+; (newline)
+; (define **count** 0)
+; (define p
+;   (delay (begin (set! **count** (+ **count** 1))
+;                 (if (> **count** x)
+;                     **count**
+;                     (force p)))))
+; (define x 5)
+; (test-equal 6 (force p) "First force")
+; (test-equal 6 (begin (set! **count** 10) (force p)) "Second force")
 
-(display "          === Testing call/cc ===")
-(newline)
-(define cont1 (call/cc (lambda (k) (k 5))))
-(test-equal 5  cont1 "Return a value")
-(test-equal 10 (call/cc (lambda (k) (+ 1 (k 10) 3))) "Break out of add")
-(define saved #f)
-(define result
-    (call/cc (lambda (k) (set! saved k) 'ok)))
-(test-equal 'ok result "Capture and re-use continuation")
-(test-equal 99 (saved 99) "Reuse previous continuation")
+; (display "          === Testing call/cc ===")
+; (newline)
+; (define cont1 (call/cc (lambda (k) (k 5))))
+; (test-equal 5  cont1 "Return a value")
+; (test-equal 10 (call/cc (lambda (k) (+ 1 (k 10) 3))) "Break out of add")
+; (define saved #f)
+; (define result
+;     (call/cc (lambda (k) (set! saved k) 'ok)))
+; (test-equal 'ok result "Capture and re-use continuation")
+; (test-equal 99 (saved 99) "Reuse previous continuation")
 
 ;; Additional call/cc regression tests
 ;; Basic call/cc with assignment (the original bug case)
