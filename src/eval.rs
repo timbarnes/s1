@@ -87,25 +87,32 @@ pub fn initialize_scheme_globals(rt: &mut RunTime, env: EnvRef) -> Result<(), St
     Ok(())
 }
 
-/// Evaluate a string of Scheme code (all expressions, return last result)
+/// Evaluate all expressions in a string of Scheme code; return a list of the results
+/// If any of the expressions return multiple values, they are flattened into the list of results.
 pub fn eval_string(
     code: &str,
     state: &mut CEKState,
     rt: &mut RunTime,
 ) -> Result<Vec<GcRef>, String> {
     use crate::parser::ParseError;
-    //use crate::io::{Port, PortKind};
 
     let mut port_kind = crate::io::new_string_port_input(code);
-    let mut last_result = Vec::new();
+    let mut results = Vec::new();
     loop {
         match parse(&mut rt.heap, &mut port_kind) {
             Err(ParseError::Syntax(e)) => return Err(e),
-            Err(ParseError::Eof) => return Ok(last_result),
-            Ok(expr) => {
-                //let expr = crate::eval::deduplicate_symbols(expr, &mut self.heap);
-                last_result = crate::cek::eval_main(expr, state, rt)?;
+            Err(ParseError::Eof) => {
+                let r_list = crate::gc::list_from_slice(&results[..], rt.heap);
+                return Ok(vec![r_list]);
             }
+            Ok(expr) => match crate::cek::eval_main(expr, state, rt) {
+                Ok(value) => {
+                    for v in value {
+                        results.push(v);
+                    }
+                }
+                Err(err) => return Err(err),
+            },
         }
     }
 }
@@ -1021,12 +1028,18 @@ mod tests {
         // Syntax error
         let err = eval_string("(+ 1 2", &mut state, &mut ec);
         println!("test_eval_string_error: {:?}", err);
-        // assert!(
-        //     err.contains("end of input") ||
-        //     err.contains("unexpected EOF") ||
-        //     err.contains("Unclosed list"),
-        //     "Unexpected error message: {}", err
-        // );
+        match err {
+            Err(e) => {
+                assert!(
+                    e.contains("end of input")
+                        || e.contains("unexpected EOF")
+                        || e.contains("Unclosed list"),
+                    "Unexpected error message: {}",
+                    e
+                );
+            }
+            _ => panic!("Expected error"),
+        }
         // Unbound variable
         let err = eval_string("(+ y 1)", &mut state, &mut ec).unwrap_err();
         assert!(err.contains("Unbound"));

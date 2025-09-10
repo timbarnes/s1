@@ -174,7 +174,7 @@ fn parse_list(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<GcRef, Par
                 }
                 return Ok(list);
             }
-            None => {
+            None | Some(Token::Eof) => {
                 return Err(ParseError::Syntax(
                     "Unclosed list (unexpected EOF)".to_string(),
                 ));
