@@ -8,10 +8,18 @@ use crate::printer::print_value;
 use std::rc::Rc;
 
 /// Push an error into the existing CEKState.
-pub fn post_error(state: &CEKState, ec: &mut RunTime, error: &str) {
+pub fn post_error(state: &mut CEKState, ec: &mut RunTime, error: &str) {
     eprintln!("Error: {}", error);
-    *ec.trace = TraceType::Step;
-    debugger(state, ec);
+    match ec.trace {
+        TraceType::Reset => {
+            state.control = Control::Value(ec.heap.void());
+            state.kont = Rc::new(Kont::Halt);
+        }
+        _ => {
+            *ec.trace = TraceType::Step;
+            debugger(state, ec);
+        }
+    }
 }
 
 /// Trace / debug function called from within the CEK machine and on error
@@ -35,6 +43,7 @@ pub fn debugger(state: &CEKState, ec: &mut RunTime) {
             indent(*ec.depth, true);
             debug_interactive(state, ec);
         }
+        TraceType::Reset => {}
     }
 }
 

@@ -261,6 +261,7 @@ fn trace_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
             TraceType::Full => ec.heap.intern_symbol("all"),
             TraceType::Control => ec.heap.intern_symbol("expr"),
             TraceType::Step => ec.heap.intern_symbol("step"),
+            TraceType::Reset => ec.heap.intern_symbol("reset"),
         };
         state.control = Control::Value(result);
         return Ok(());
@@ -272,6 +273,7 @@ fn trace_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
                 "a" | "all" => TraceType::Full,
                 "e" | "expr" => TraceType::Control,
                 "s" | "step" => TraceType::Step,
+                "r" | "reset" => TraceType::Reset,
                 _ => TraceType::Off,
             };
         }

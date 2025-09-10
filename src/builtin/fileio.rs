@@ -65,54 +65,54 @@ pub fn register_fileio_builtins(heap: &mut GcHeap, env: EnvRef) {
     );
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::eval::Evaluator;
-//     use crate::gc::{SchemeValue, new_int, new_string};
-//     use std::io::Write;
-//     use tempfile::NamedTempFile;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::eval::RunTimeStruct;
+    use crate::gc::{SchemeValue, new_int, new_string};
+    use std::io::Write;
+    use tempfile::NamedTempFile;
 
-//     #[test]
-//     fn test_open_input_file_success() {
-//         let mut ev = Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
-//         // Create a temp file with some content
-//         let mut tmpfile = NamedTempFile::new().unwrap();
-//         write!(tmpfile, "hello world").unwrap();
-//         let path = tmpfile.path().to_str().unwrap().to_string();
-//         let filename = new_string(&mut ec.heap, &path);
-//         let result = open_input_file(&mut ec, &[filename]);
-//         assert!(result.is_ok());
-//         let port = result.unwrap();
-//         match &ec.heap.get_value(port) {
-//             SchemeValue::Port(kind) => match kind {
-//                 crate::io::PortKind::StringPortInput { content, .. } => {
-//                     assert_eq!(content, "hello world");
-//                 }
-//                 _ => panic!("Expected StringPortInput"),
-//             },
-//             _ => panic!("Expected Port"),
-//         }
-//     }
+    #[test]
+    fn test_open_input_file_success() {
+        let mut ev = RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+        // Create a temp file with some content
+        let mut tmpfile = NamedTempFile::new().unwrap();
+        write!(tmpfile, "hello world").unwrap();
+        let path = tmpfile.path().to_str().unwrap().to_string();
+        let filename = new_string(&mut ec.heap, &path);
+        let result = open_input_file(&mut ec.heap, &[filename]);
+        assert!(result.is_ok());
+        let port = result.unwrap();
+        match &ec.heap.get_value(port) {
+            SchemeValue::Port(kind) => match kind {
+                crate::io::PortKind::StringPortInput { content, .. } => {
+                    assert_eq!(content, "hello world");
+                }
+                _ => panic!("Expected StringPortInput"),
+            },
+            _ => panic!("Expected Port"),
+        }
+    }
 
-//     #[test]
-//     fn test_open_input_file_nonexistent() {
-//         let mut ev = Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
-//         let filename = new_string(&mut ec.heap, "/no/such/file/hopefully.txt");
-//         let result = open_input_file(&mut ec, &[filename]);
-//         assert!(result.is_err());
-//         assert!(result.unwrap_err().contains("could not open file"));
-//     }
+    #[test]
+    fn test_open_input_file_nonexistent() {
+        let mut ev = RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+        let filename = new_string(&mut ec.heap, "/no/such/file/hopefully.txt");
+        let result = open_input_file(&mut ec.heap, &[filename]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("could not open file"));
+    }
 
-//     #[test]
-//     fn test_open_input_file_nonstring_arg() {
-//         let mut ev = Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
-//         let not_a_string = new_int(&mut ec.heap, 42.into());
-//         let result = open_input_file(&mut ec, &[not_a_string]);
-//         assert!(result.is_err());
-//         assert!(result.unwrap_err().contains("argument must be a string"));
-//     }
-// }
+    #[test]
+    fn test_open_input_file_nonstring_arg() {
+        let mut ev = RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+        let not_a_string = new_int(&mut ec.heap, 42.into());
+        let result = open_input_file(&mut ec.heap, &[not_a_string]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("argument must be a string"));
+    }
+}

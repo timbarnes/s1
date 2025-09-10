@@ -1,5 +1,6 @@
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{GcHeap, GcRef, SchemeValue, new_bool, new_float, new_int};
+use crate::gc_value;
 use num_bigint::BigInt;
 use num_traits::{One, ToPrimitive, Zero};
 
@@ -11,7 +12,7 @@ pub fn plus_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     let mut sum_int = BigInt::from(0);
     let mut sum_float = 0.0;
     for arg in args {
-        match &heap.get_value(*arg) {
+        match &gc_value!(*arg) {
             SchemeValue::Int(i) => {
                 if is_float {
                     sum_float += i.to_f64().unwrap();
@@ -44,7 +45,7 @@ pub fn minus_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     let mut result_int;
     let mut result_float;
     let mut iter = args.iter();
-    match &heap.get_value(*iter.next().unwrap()) {
+    match &gc_value!(*iter.next().unwrap()) {
         SchemeValue::Int(i) => {
             result_int = i.clone();
             result_float = i.to_f64().unwrap();
@@ -65,7 +66,7 @@ pub fn minus_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
         }
     }
     for arg in iter {
-        match &heap.get_value(*arg) {
+        match &gc_value!(*arg) {
             SchemeValue::Int(i) => {
                 if is_float {
                     result_float -= i.to_f64().unwrap();
@@ -98,7 +99,7 @@ pub fn times_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     let mut prod_int = BigInt::one();
     let mut prod_float = 1.0;
     for arg in args {
-        match &heap.get_value(*arg) {
+        match &gc_value!(*arg) {
             SchemeValue::Int(i) => {
                 if is_float {
                     prod_float *= i.to_f64().unwrap();
@@ -129,7 +130,7 @@ pub fn div_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     }
     let mut result_float;
     let mut iter = args.iter();
-    match &heap.get_value(*iter.next().unwrap()) {
+    match &gc_value!(*iter.next().unwrap()) {
         SchemeValue::Int(i) => {
             result_float = i.to_f64().unwrap();
         }
@@ -139,7 +140,7 @@ pub fn div_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
         _ => return Err("/: all arguments must be numbers".to_string()),
     }
     for arg in iter {
-        match &heap.get_value(*arg) {
+        match &gc_value!(*arg) {
             SchemeValue::Int(i) => {
                 result_float /= i.to_f64().unwrap();
             }
@@ -156,11 +157,11 @@ pub fn mod_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 2 {
         return Err("mod: expects exactly 2 arguments".to_string());
     }
-    let a = match &heap.get_value(args[0]) {
+    let a = match &gc_value!(args[0]) {
         SchemeValue::Int(i) => i,
         _ => return Err("mod: arguments must be integers".to_string()),
     };
-    let b = match &heap.get_value(args[1]) {
+    let b = match &gc_value!(args[1]) {
         SchemeValue::Int(i) => i,
         _ => return Err("mod: arguments must be integers".to_string()),
     };
@@ -178,7 +179,7 @@ pub fn eq_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     // Convert all arguments to f64 for comparison
     let mut numbers = Vec::new();
     for arg in args {
-        let num = match &heap.get_value(*arg) {
+        let num = match &gc_value!(*arg) {
             SchemeValue::Int(i) => i.to_f64().unwrap(),
             SchemeValue::Float(f) => *f,
             _ => return Err("=: all arguments must be numbers".to_string()),
@@ -201,7 +202,7 @@ pub fn lt_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     // Convert all arguments to f64 for comparison
     let mut numbers = Vec::new();
     for arg in args {
-        let num = match &heap.get_value(*arg) {
+        let num = match &gc_value!(*arg) {
             SchemeValue::Int(i) => i.to_f64().unwrap(),
             SchemeValue::Float(f) => *f,
             _ => return Err("<: all arguments must be numbers".to_string()),
@@ -229,7 +230,7 @@ pub fn gt_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     // Convert all arguments to f64 for comparison
     let mut numbers = Vec::new();
     for arg in args {
-        let num = match &heap.get_value(*arg) {
+        let num = match &gc_value!(*arg) {
             SchemeValue::Int(i) => i.to_f64().unwrap(),
             SchemeValue::Float(f) => *f,
             _ => return Err(">: all arguments must be numbers".to_string()),
@@ -255,11 +256,11 @@ pub fn quotient_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 2 {
         return Err("quotient: expects exactly 2 arguments".to_string());
     }
-    let a = match &heap.get_value(args[0]) {
+    let a = match &gc_value!(args[0]) {
         SchemeValue::Int(i) => i,
         _ => return Err("quotient: arguments must be integers".to_string()),
     };
-    let b = match &heap.get_value(args[1]) {
+    let b = match &gc_value!(args[1]) {
         SchemeValue::Int(i) => i,
         _ => return Err("quotient: arguments must be integers".to_string()),
     };
@@ -275,11 +276,11 @@ pub fn remainder_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 2 {
         return Err("remainder: expects exactly 2 arguments".to_string());
     }
-    let a = match &heap.get_value(args[0]) {
+    let a = match &gc_value!(args[0]) {
         SchemeValue::Int(i) => i,
         _ => return Err("remainder: arguments must be integers".to_string()),
     };
-    let b = match &heap.get_value(args[1]) {
+    let b = match &gc_value!(args[1]) {
         SchemeValue::Int(i) => i,
         _ => return Err("remainder: arguments must be integers".to_string()),
     };
@@ -295,7 +296,7 @@ pub fn numerator_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 1 {
         return Err("numerator: expects exactly 1 argument".to_string());
     }
-    match &heap.get_value(args[0]) {
+    match &gc_value!(args[0]) {
         SchemeValue::Int(_) => Ok(args[0]), // For integers, numerator is the integer itself
         SchemeValue::Float(f) => {
             // Convert float to rational representation (simplified)
@@ -316,7 +317,7 @@ pub fn denominator_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String>
     if args.len() != 1 {
         return Err("denominator: expects exactly 1 argument".to_string());
     }
-    match &heap.get_value(args[0]) {
+    match &gc_value!(args[0]) {
         SchemeValue::Int(_) => Ok(new_int(heap, BigInt::one())), // For integers, denominator is 1
         SchemeValue::Float(f) => {
             if f.fract() == 0.0 {
@@ -336,7 +337,7 @@ pub fn floor_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 1 {
         return Err("floor: expects exactly 1 argument".to_string());
     }
-    match &heap.get_value(args[0]) {
+    match &gc_value!(args[0]) {
         SchemeValue::Int(_) => Ok(args[0]), // Integers are unchanged
         SchemeValue::Float(f) => Ok(new_int(heap, BigInt::from(f.floor() as i64))),
         _ => return Err("floor: argument must be a number".to_string()),
@@ -349,7 +350,7 @@ pub fn ceiling_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 1 {
         return Err("ceiling: expects exactly 1 argument".to_string());
     }
-    match &heap.get_value(args[0]) {
+    match &gc_value!(args[0]) {
         SchemeValue::Int(_) => Ok(args[0]), // Integers are unchanged
         SchemeValue::Float(f) => Ok(new_int(heap, BigInt::from(f.ceil() as i64))),
         _ => return Err("ceiling: argument must be a number".to_string()),
@@ -362,7 +363,7 @@ pub fn truncate_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 1 {
         return Err("truncate: expects exactly 1 argument".to_string());
     }
-    match &heap.get_value(args[0]) {
+    match &gc_value!(args[0]) {
         SchemeValue::Int(_) => Ok(args[0]), // Integers are unchanged
         SchemeValue::Float(f) => Ok(new_int(heap, BigInt::from(f.trunc() as i64))),
         _ => return Err("truncate: argument must be a number".to_string()),
@@ -375,7 +376,7 @@ pub fn round_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 1 {
         return Err("round: expects exactly 1 argument".to_string());
     }
-    match &heap.get_value(args[0]) {
+    match &gc_value!(args[0]) {
         SchemeValue::Int(_) => Ok(args[0]), // Integers are unchanged
         SchemeValue::Float(f) => Ok(new_int(heap, BigInt::from(f.round() as i64))),
         _ => return Err("round: argument must be a number".to_string()),
@@ -388,7 +389,7 @@ pub fn sqrt_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 1 {
         return Err("sqrt: expects exactly 1 argument".to_string());
     }
-    let num = match &heap.get_value(args[0]) {
+    let num = match &gc_value!(args[0]) {
         SchemeValue::Int(i) => i.to_f64().unwrap(),
         SchemeValue::Float(f) => *f,
         _ => return Err("sqrt: argument must be a number".to_string()),
@@ -405,12 +406,12 @@ pub fn expt_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 2 {
         return Err("expt: expects exactly 2 arguments".to_string());
     }
-    let base = match &heap.get_value(args[0]) {
+    let base = match &gc_value!(args[0]) {
         SchemeValue::Int(i) => i.to_f64().unwrap(),
         SchemeValue::Float(f) => *f,
         _ => return Err("expt: arguments must be numbers".to_string()),
     };
-    let exp = match &heap.get_value(args[1]) {
+    let exp = match &gc_value!(args[1]) {
         SchemeValue::Int(i) => i.to_f64().unwrap(),
         SchemeValue::Float(f) => *f,
         _ => return Err("expt: arguments must be numbers".to_string()),
@@ -464,213 +465,213 @@ pub fn register_number_builtins(heap: &mut GcHeap, env: EnvRef) {
     );
 }
 
-// mod tests {
-//     #[allow(unused_imports)]
-//     use super::*;
+mod tests {
+    #[allow(unused_imports)]
+    use super::*;
 
-//     #[test]
-//     fn test_plus_builtin() {
-//         let mut ev = crate::eval::Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
-//         let args = vec![
-//             new_int(heap, BigInt::from(1)),
-//             new_int(heap, BigInt::from(2)),
-//             new_int(heap, BigInt::from(3)),
-//         ];
-//         let result = plus_b(&mut ec, &args).unwrap();
-//         match &heap.get_value(result) {
-//             SchemeValue::Int(i) => assert_eq!(i.to_string(), "6"),
-//             _ => panic!("Expected integer"),
-//         }
-//     }
+    #[test]
+    fn test_plus_builtin() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+        let args = vec![
+            new_int(ec.heap, BigInt::from(1)),
+            new_int(ec.heap, BigInt::from(2)),
+            new_int(ec.heap, BigInt::from(3)),
+        ];
+        let result = plus_b(&mut ec.heap, &args).unwrap();
+        match &gc_value!(result) {
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "6"),
+            _ => panic!("Expected integer"),
+        }
+    }
 
-//     #[test]
-//     fn test_minus_builtin() {
-//         let mut ev = crate::eval::Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
-//         let args = vec![
-//             new_int(heap, BigInt::from(10)),
-//             new_int(heap, BigInt::from(3)),
-//         ];
-//         let result = minus_b(&mut ec, &args).unwrap();
-//         match &heap.get_value(result) {
-//             SchemeValue::Int(i) => assert_eq!(i.to_string(), "7"),
-//             _ => panic!("Expected integer"),
-//         }
-//     }
+    #[test]
+    fn test_minus_builtin() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+        let args = vec![
+            new_int(ec.heap, BigInt::from(10)),
+            new_int(ec.heap, BigInt::from(3)),
+        ];
+        let result = minus_b(&mut ec.heap, &args).unwrap();
+        match &gc_value!(result) {
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "7"),
+            _ => panic!("Expected integer"),
+        }
+    }
 
-//     #[test]
-//     fn test_times_builtin() {
-//         let mut ev = crate::eval::Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
-//         let args = vec![
-//             new_int(heap, BigInt::from(2)),
-//             new_int(heap, BigInt::from(3)),
-//             new_int(heap, BigInt::from(4)),
-//         ];
-//         let result = times_b(&mut ec, &args).unwrap();
-//         match &heap.get_value(result) {
-//             SchemeValue::Int(i) => assert_eq!(i.to_string(), "24"),
-//             _ => panic!("Expected integer"),
-//         }
-//     }
+    #[test]
+    fn test_times_builtin() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+        let args = vec![
+            new_int(ec.heap, BigInt::from(2)),
+            new_int(ec.heap, BigInt::from(3)),
+            new_int(ec.heap, BigInt::from(4)),
+        ];
+        let result = times_b(&mut ec.heap, &args).unwrap();
+        match &gc_value!(result) {
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "24"),
+            _ => panic!("Expected integer"),
+        }
+    }
 
-//     #[test]
-//     fn test_div_builtin() {
-//         let mut ev = crate::eval::Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
-//         let args = vec![
-//             new_int(heap, BigInt::from(10)),
-//             new_int(heap, BigInt::from(2)),
-//         ];
-//         let result = div_b(&mut ec, &args).unwrap();
-//         match &heap.get_value(result) {
-//             SchemeValue::Float(f) => assert_eq!(*f, 5.0),
-//             _ => panic!("Expected float"),
-//         }
-//     }
+    #[test]
+    fn test_div_builtin() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+        let args = vec![
+            new_int(ec.heap, BigInt::from(10)),
+            new_int(ec.heap, BigInt::from(2)),
+        ];
+        let result = div_b(&mut ec.heap, &args).unwrap();
+        match &gc_value!(result) {
+            SchemeValue::Float(f) => assert_eq!(*f, 5.0),
+            _ => panic!("Expected float"),
+        }
+    }
 
-//     #[test]
-//     fn test_mod_builtin() {
-//         let mut ev = crate::eval::Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
-//         let args = vec![
-//             new_int(heap, BigInt::from(7)),
-//             new_int(heap, BigInt::from(3)),
-//         ];
-//         let result = mod_b(&mut ec, &args).unwrap();
-//         match &heap.get_value(result) {
-//             SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
-//             _ => panic!("Expected integer"),
-//         }
-//     }
+    #[test]
+    fn test_mod_builtin() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+        let args = vec![
+            new_int(ec.heap, BigInt::from(7)),
+            new_int(ec.heap, BigInt::from(3)),
+        ];
+        let result = mod_b(&mut ec.heap, &args).unwrap();
+        match &gc_value!(result) {
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
+            _ => panic!("Expected integer"),
+        }
+    }
 
-//     #[test]
-//     fn test_eq_builtin() {
-//         let mut ev = crate::eval::Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+    #[test]
+    fn test_eq_builtin() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
 
-//         // Test equal integers
-//         let args = vec![
-//             new_int(heap, BigInt::from(5)),
-//             new_int(heap, BigInt::from(5)),
-//         ];
-//         let result = eq_b(&mut ec, &args).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Bool(true)));
+        // Test equal integers
+        let args = vec![
+            new_int(ec.heap, BigInt::from(5)),
+            new_int(ec.heap, BigInt::from(5)),
+        ];
+        let result = eq_b(&mut ec.heap, &args).unwrap();
+        assert!(matches!(&gc_value!(result), SchemeValue::Bool(true)));
 
-//         // Test unequal integers
-//         let args = vec![
-//             new_int(heap, BigInt::from(5)),
-//             new_int(heap, BigInt::from(6)),
-//         ];
-//         let result = eq_b(&mut ec, &args).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Bool(false)));
+        // Test unequal integers
+        let args = vec![
+            new_int(ec.heap, BigInt::from(5)),
+            new_int(ec.heap, BigInt::from(6)),
+        ];
+        let result = eq_b(&mut ec.heap, &args).unwrap();
+        assert!(matches!(&gc_value!(result), SchemeValue::Bool(false)));
 
-//         // Test mixed int and float
-//         let args = vec![new_int(heap, BigInt::from(5)), new_float(heap, 5.0)];
-//         let result = eq_b(&mut ec, &args).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Bool(true)));
+        // Test mixed int and float
+        let args = vec![new_int(ec.heap, BigInt::from(5)), new_float(ec.heap, 5.0)];
+        let result = eq_b(&mut ec.heap, &args).unwrap();
+        assert!(matches!(&gc_value!(result), SchemeValue::Bool(true)));
 
-//         // Test multiple equal values
-//         let args = vec![
-//             new_int(heap, BigInt::from(5)),
-//             new_float(heap, 5.0),
-//             new_int(heap, BigInt::from(5)),
-//         ];
-//         let result = eq_b(&mut ec, &args).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Bool(true)));
+        // Test multiple equal values
+        let args = vec![
+            new_int(ec.heap, BigInt::from(5)),
+            new_float(ec.heap, 5.0),
+            new_int(ec.heap, BigInt::from(5)),
+        ];
+        let result = eq_b(&mut ec.heap, &args).unwrap();
+        assert!(matches!(&gc_value!(result), SchemeValue::Bool(true)));
 
-//         // Test multiple unequal values
-//         let args = vec![
-//             new_int(heap, BigInt::from(5)),
-//             new_float(heap, 5.0),
-//             new_int(heap, BigInt::from(6)),
-//         ];
-//         let result = eq_b(&mut ec, &args).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Bool(false)));
-//     }
+        // Test multiple unequal values
+        let args = vec![
+            new_int(ec.heap, BigInt::from(5)),
+            new_float(ec.heap, 5.0),
+            new_int(ec.heap, BigInt::from(6)),
+        ];
+        let result = eq_b(&mut ec.heap, &args).unwrap();
+        assert!(matches!(&gc_value!(result), SchemeValue::Bool(false)));
+    }
 
-//     #[test]
-//     fn test_lt_builtin() {
-//         let mut ev = crate::eval::Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+    #[test]
+    fn test_lt_builtin() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
 
-//         // Test strictly increasing integers
-//         let args = vec![
-//             new_int(heap, BigInt::from(1)),
-//             new_int(heap, BigInt::from(2)),
-//             new_int(heap, BigInt::from(3)),
-//         ];
-//         let result = lt_b(&mut ec, &args).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Bool(true)));
+        // Test strictly increasing integers
+        let args = vec![
+            new_int(ec.heap, BigInt::from(1)),
+            new_int(ec.heap, BigInt::from(2)),
+            new_int(ec.heap, BigInt::from(3)),
+        ];
+        let result = lt_b(&mut ec.heap, &args).unwrap();
+        assert!(matches!(&gc_value!(result), SchemeValue::Bool(true)));
 
-//         // Test not strictly increasing
-//         let args = vec![
-//             new_int(heap, BigInt::from(1)),
-//             new_int(heap, BigInt::from(2)),
-//             new_int(heap, BigInt::from(2)),
-//         ];
-//         let result = lt_b(&mut ec, &args).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Bool(false)));
+        // Test not strictly increasing
+        let args = vec![
+            new_int(ec.heap, BigInt::from(1)),
+            new_int(ec.heap, BigInt::from(2)),
+            new_int(ec.heap, BigInt::from(2)),
+        ];
+        let result = lt_b(&mut ec.heap, &args).unwrap();
+        assert!(matches!(&gc_value!(result), SchemeValue::Bool(false)));
 
-//         // Test mixed int and float
-//         let args = vec![
-//             new_int(heap, BigInt::from(1)),
-//             new_float(heap, 1.5),
-//             new_int(heap, BigInt::from(2)),
-//         ];
-//         let result = lt_b(&mut ec, &args).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Bool(true)));
+        // Test mixed int and float
+        let args = vec![
+            new_int(ec.heap, BigInt::from(1)),
+            new_float(ec.heap, 1.5),
+            new_int(ec.heap, BigInt::from(2)),
+        ];
+        let result = lt_b(&mut ec.heap, &args).unwrap();
+        assert!(matches!(&gc_value!(result), SchemeValue::Bool(true)));
 
-//         // Test decreasing sequence
-//         let args = vec![
-//             new_int(heap, BigInt::from(3)),
-//             new_int(heap, BigInt::from(2)),
-//             new_int(heap, BigInt::from(1)),
-//         ];
-//         let result = lt_b(&mut ec, &args).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Bool(false)));
-//     }
+        // Test decreasing sequence
+        let args = vec![
+            new_int(ec.heap, BigInt::from(3)),
+            new_int(ec.heap, BigInt::from(2)),
+            new_int(ec.heap, BigInt::from(1)),
+        ];
+        let result = lt_b(&mut ec.heap, &args).unwrap();
+        assert!(matches!(&gc_value!(result), SchemeValue::Bool(false)));
+    }
 
-//     #[test]
-//     fn test_gt_builtin() {
-//         let mut ev = crate::eval::Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+    #[test]
+    fn test_gt_builtin() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
 
-//         // Test strictly decreasing integers
-//         let args = vec![
-//             new_int(heap, BigInt::from(3)),
-//             new_int(heap, BigInt::from(2)),
-//             new_int(heap, BigInt::from(1)),
-//         ];
-//         let result = gt_b(&mut ec, &args).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Bool(true)));
+        // Test strictly decreasing integers
+        let args = vec![
+            new_int(ec.heap, BigInt::from(3)),
+            new_int(ec.heap, BigInt::from(2)),
+            new_int(ec.heap, BigInt::from(1)),
+        ];
+        let result = gt_b(&mut ec.heap, &args).unwrap();
+        assert!(matches!(&gc_value!(result), SchemeValue::Bool(true)));
 
-//         // Test not strictly decreasing
-//         let args = vec![
-//             new_int(heap, BigInt::from(3)),
-//             new_int(heap, BigInt::from(2)),
-//             new_int(heap, BigInt::from(2)),
-//         ];
-//         let result = gt_b(&mut ec, &args).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Bool(false)));
+        // Test not strictly decreasing
+        let args = vec![
+            new_int(ec.heap, BigInt::from(3)),
+            new_int(ec.heap, BigInt::from(2)),
+            new_int(ec.heap, BigInt::from(2)),
+        ];
+        let result = gt_b(&mut ec.heap, &args).unwrap();
+        assert!(matches!(&gc_value!(result), SchemeValue::Bool(false)));
 
-//         // Test mixed int and float
-//         let args = vec![
-//             new_int(heap, BigInt::from(3)),
-//             new_float(heap, 2.5),
-//             new_int(heap, BigInt::from(2)),
-//         ];
-//         let result = gt_b(&mut ec, &args).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Bool(true)));
+        // Test mixed int and float
+        let args = vec![
+            new_int(ec.heap, BigInt::from(3)),
+            new_float(ec.heap, 2.5),
+            new_int(ec.heap, BigInt::from(2)),
+        ];
+        let result = gt_b(&mut ec.heap, &args).unwrap();
+        assert!(matches!(&gc_value!(result), SchemeValue::Bool(true)));
 
-//         // Test increasing sequence
-//         let args = vec![
-//             new_int(heap, BigInt::from(1)),
-//             new_int(heap, BigInt::from(2)),
-//             new_int(heap, BigInt::from(3)),
-//         ];
-//         let result = gt_b(&mut ec, &args).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Bool(false)));
-//     }
-// }
+        // Test increasing sequence
+        let args = vec![
+            new_int(ec.heap, BigInt::from(1)),
+            new_int(ec.heap, BigInt::from(2)),
+            new_int(ec.heap, BigInt::from(3)),
+        ];
+        let result = gt_b(&mut ec.heap, &args).unwrap();
+        assert!(matches!(&gc_value!(result), SchemeValue::Bool(false)));
+    }
+}

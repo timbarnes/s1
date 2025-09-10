@@ -7,7 +7,7 @@
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{GcHeap, GcRef, SchemeValue, list_from_slice, list_to_vec, new_port};
 use crate::io::PortKind;
-use crate::kont::{CEKState, insert_eval};
+use crate::kont::CEKState;
 use crate::macros::expand_macro;
 use crate::parser::parse;
 
@@ -38,6 +38,7 @@ impl<'a> RunTime<'a> {
 }
 
 pub enum TraceType {
+    Reset,
     Control,
     Full,
     Step,
@@ -59,7 +60,7 @@ impl RunTimeStruct {
         Self {
             heap: GcHeap::new(),
             port_stack: port_vec,
-            trace: TraceType::Off,
+            trace: TraceType::Reset,
             depth: 0,
         }
     }
@@ -213,765 +214,824 @@ pub fn expect_symbol(heap: &GcHeap, expr: &GcRef) -> Result<GcRef, String> {
 // TESTS
 // ============================================================================
 
-// #[cfg(test)]
-// mod tests {
-//     #[allow(unused_imports)]
-//     use super::*;
-//     use crate::gc::{get_symbol, new_closure, new_int, new_pair, new_builtin};
+#[cfg(test)]
+mod tests {
+    #[allow(unused_imports)]
+    use super::*;
+    use crate::cek::eval_main;
+    use crate::env::Frame;
+    use crate::gc::{get_symbol, new_builtin, new_closure, new_int, new_pair};
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
-//     #[test]
-//     fn test_eval_logic_self_evaluating() {
-//         use crate::gc::equal;
-//         let mut evaluator = Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut evaluator);
-//         let int_val;
-//         int_val = new_int(ec.heap, num_bigint::BigInt::from(42));
-//         let result = eval_main(int_val, &mut ec).unwrap();
-//         assert!(equal(&evaluator.heap, result[0], int_val));
-//     }
+    #[test]
+    fn test_eval_logic_self_evaluating() {
+        use crate::gc::equal;
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut runtime = RunTimeStruct::new();
+        let mut ec = RunTime::from_eval(&mut runtime);
+        let mut state = crate::kont::CEKState::new(env);
+        let int_val;
+        int_val = new_int(&mut ec.heap, num_bigint::BigInt::from(42));
+        let result = eval_main(int_val, &mut state, &mut ec).unwrap();
+        assert!(equal(&ec.heap, result[0], int_val));
+    }
 
-//     #[test]
-//     fn test_eval_logic_variable_lookup() {
-//         use crate::gc::equal;
-//         let mut evaluator = Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut evaluator);
-//         let value;
-//         let symbol;
-//         value = new_int(ec.heap, num_bigint::BigInt::from(99));
-//         symbol = get_symbol(ec.heap, "x");
-//         ec.env.set_symbol(symbol, value);
-//         let result = eval_main(symbol, &mut ec).unwrap();
-//         assert!(equal(&evaluator.heap, result[0], value));
-//     }
+    #[test]
+    fn test_eval_logic_variable_lookup() {
+        use crate::gc::equal;
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut runtime = RunTimeStruct::new();
+        let mut ec = RunTime::from_eval(&mut runtime);
+        let mut state = crate::kont::CEKState::new(env);
+        let value;
+        let symbol;
+        value = new_int(ec.heap, num_bigint::BigInt::from(99));
+        symbol = get_symbol(ec.heap, "x");
+        state.env.define(symbol, value);
+        let result = eval_main(symbol, &mut state, &mut ec);
+        match result {
+            Ok(result) => {
+                crate::printer::print_value(&result[0]);
+                assert!(equal(&ec.heap, result[0], value));
+            }
+            Err(err) => panic!("test_eval_logic_variable_lookup Error: {}", err),
+        }
+        // crate::printer::print_value(&result[0]);
+        // assert!(equal(&ec.heap, result[0], value));
+    }
 
-//     #[test]
-//     fn test_eval_logic_non_nested_call() {
-//         let mut evaluator = Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut evaluator);
-//         let plus;
-//         let a;
-//         let b;
-//         let plus_sym;
-//         let args;
-//         let expr;
-//         //let hp = ec.heap;
-//         plus = new_builtin(
-//             ec.heap,
-//             |heap, args| {
-//                 let a = match &heap.heap.get_value(args[0]) {
-//                     SchemeValue::Int(i) => i.clone(),
-//                     _ => return Err("not int".to_string()),
-//                 };
-//                 let b = match &heap.heap.get_value(args[1]) {
-//                     SchemeValue::Int(i) => i.clone(),
-//                     _ => return Err("not int".to_string()),
-//                 };
-//                 Ok(new_int(heap.heap, a + b))
-//             },
-//             "plus".to_string(),
-//         );
-//         a = new_int(ec.heap, num_bigint::BigInt::from(2));
-//         b = new_int(ec.heap, num_bigint::BigInt::from(3));
-//         plus_sym = get_symbol(ec.heap, "+");
-//         let nil = ec.heap.nil_s();
-//         let b_pair = new_pair(ec.heap, b, nil);
-//         args = new_pair(ec.heap, a, b_pair);
-//         expr = new_pair(ec.heap, plus_sym, args);
-//         ec.env.set_symbol(plus_sym, plus);
-//         let result = eval_main(expr, &mut ec).unwrap();
-//         match &ec.heap.get_value(result[0]) {
-//             SchemeValue::Int(i) => assert_eq!(i.to_string(), "5"),
-//             _ => panic!("Expected integer result"),
-//         }
-//     }
+    #[test]
+    fn test_eval_logic_non_nested_call() {
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut runtime = RunTimeStruct::new();
+        let mut ec = RunTime::from_eval(&mut runtime);
+        let mut state = crate::kont::CEKState::new(env);
+        let plus;
+        let a;
+        let b;
+        let plus_sym;
+        let args;
+        let expr;
+        //let hp = ec.heap;
+        plus = new_builtin(
+            ec.heap,
+            |heap, args| {
+                let a = match &heap.get_value(args[0]) {
+                    SchemeValue::Int(i) => i.clone(),
+                    _ => return Err("not int".to_string()),
+                };
+                let b = match &heap.get_value(args[1]) {
+                    SchemeValue::Int(i) => i.clone(),
+                    _ => return Err("not int".to_string()),
+                };
+                Ok(new_int(heap, a + b))
+            },
+            "plus".to_string(),
+        );
+        a = new_int(ec.heap, num_bigint::BigInt::from(2));
+        b = new_int(ec.heap, num_bigint::BigInt::from(3));
+        plus_sym = get_symbol(ec.heap, "+");
+        let nil = ec.heap.nil_s();
+        let b_pair = new_pair(ec.heap, b, nil);
+        args = new_pair(ec.heap, a, b_pair);
+        expr = new_pair(ec.heap, plus_sym, args);
+        state.env.define(plus_sym, plus);
+        let result = eval_main(expr, &mut state, &mut ec).unwrap();
+        match &ec.heap.get_value(result[0]) {
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "5"),
+            _ => panic!("Expected integer result"),
+        }
+    }
 
-//     #[test]
-//     fn test_eval_logic_nested_call() {
-//         use crate::builtin::number::{plus_b, times_b};
-//         let mut evaluator = Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut evaluator);
-//         let plus;
-//         let times;
-//         let two;
-//         let three;
-//         let four;
-//         let five;
-//         let plus_sym;
-//         let plus_args;
-//         let plus_expr;
-//         let star_sym;
-//         let star_args;
-//         let expr;
-//         plus = new_builtin(ec.heap, plus_b, "plus".to_string());
-//         times = new_builtin(ec.heap, times_b, "times".to_string());
-//         two = new_int(ec.heap, num_bigint::BigInt::from(2));
-//         three = new_int(ec.heap, num_bigint::BigInt::from(3));
-//         four = new_int(ec.heap, num_bigint::BigInt::from(4));
-//         five = new_int(ec.heap, num_bigint::BigInt::from(5));
-//         plus_sym = get_symbol(ec.heap, "+");
-//         let nil1 = ec.heap.nil_s();
-//         let five_pair = new_pair(ec.heap, five, nil1);
-//         plus_args = new_pair(ec.heap, four, five_pair);
-//         plus_expr = new_pair(ec.heap, plus_sym, plus_args);
-//         star_sym = get_symbol(ec.heap, "*");
-//         let nil2 = ec.heap.nil_s();
-//         let plus_expr_pair = new_pair(ec.heap, plus_expr, nil2);
-//         let three_pair = new_pair(ec.heap, three, plus_expr_pair);
-//         star_args = new_pair(ec.heap, two, three_pair);
-//         expr = new_pair(ec.heap, star_sym, star_args);
-//         ec.env.set_symbol(plus_sym, plus);
-//         ec.env.set_symbol(star_sym, times);
-//         let result = eval_main(expr, &mut ec).unwrap();
-//         match &evaluator.heap.get_value(result[0]) {
-//             SchemeValue::Int(i) => assert_eq!(i.to_string(), "54"),
-//             _ => panic!("Expected integer result"),
-//         }
-//     }
+    #[test]
+    fn test_eval_logic_nested_call() {
+        use crate::builtin::number::{plus_b, times_b};
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut runtime = RunTimeStruct::new();
+        let mut ec = RunTime::from_eval(&mut runtime);
+        let mut state = crate::kont::CEKState::new(env);
+        let plus;
+        let times;
+        let two;
+        let three;
+        let four;
+        let five;
+        let plus_sym;
+        let plus_args;
+        let plus_expr;
+        let star_sym;
+        let star_args;
+        let expr;
+        plus = new_builtin(ec.heap, plus_b, "plus".to_string());
+        times = new_builtin(ec.heap, times_b, "times".to_string());
+        two = new_int(ec.heap, num_bigint::BigInt::from(2));
+        three = new_int(ec.heap, num_bigint::BigInt::from(3));
+        four = new_int(ec.heap, num_bigint::BigInt::from(4));
+        five = new_int(ec.heap, num_bigint::BigInt::from(5));
+        plus_sym = get_symbol(ec.heap, "+");
+        let nil1 = ec.heap.nil_s();
+        let five_pair = new_pair(ec.heap, five, nil1);
+        plus_args = new_pair(ec.heap, four, five_pair);
+        plus_expr = new_pair(ec.heap, plus_sym, plus_args);
+        star_sym = get_symbol(ec.heap, "*");
+        let nil2 = ec.heap.nil_s();
+        let plus_expr_pair = new_pair(ec.heap, plus_expr, nil2);
+        let three_pair = new_pair(ec.heap, three, plus_expr_pair);
+        star_args = new_pair(ec.heap, two, three_pair);
+        expr = new_pair(ec.heap, star_sym, star_args);
+        state.env.define(plus_sym, plus);
+        state.env.define(star_sym, times);
+        let result = eval_main(expr, &mut state, &mut ec).unwrap();
+        match &ec.heap.get_value(result[0]) {
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "54"),
+            _ => panic!("Expected integer result"),
+        }
+    }
 
-//     #[test]
-//     fn test_extract_args() {
-//         let mut heap = crate::gc::GcHeap::new();
+    #[test]
+    fn test_extract_args() {
+        let mut heap = crate::gc::GcHeap::new();
 
-//         // Create a list (1 2 3)
-//         let arg1 = new_int(&mut heap, num_bigint::BigInt::from(1));
-//         let arg2 = new_int(&mut heap, num_bigint::BigInt::from(2));
-//         let arg3 = new_int(&mut heap, num_bigint::BigInt::from(3));
-//         let nil = heap.nil_s();
+        // Create a list (1 2 3)
+        let arg1 = new_int(&mut heap, num_bigint::BigInt::from(1));
+        let arg2 = new_int(&mut heap, num_bigint::BigInt::from(2));
+        let arg3 = new_int(&mut heap, num_bigint::BigInt::from(3));
+        let nil = heap.nil_s();
 
-//         // Build the list: (1 . (2 . (3 . nil)))
-//         let list_3 = new_pair(&mut heap, arg3, nil);
-//         let list_2_3 = new_pair(&mut heap, arg2, list_3);
-//         let list_1_2_3 = new_pair(&mut heap, arg1, list_2_3);
+        // Build the list: (1 . (2 . (3 . nil)))
+        let list_3 = new_pair(&mut heap, arg3, nil);
+        let list_2_3 = new_pair(&mut heap, arg2, list_3);
+        let list_1_2_3 = new_pair(&mut heap, arg1, list_2_3);
 
-//         // Extract arguments
-//         let args = list_to_vec(&heap, list_1_2_3).unwrap();
-//         assert_eq!(args.len(), 3);
+        // Extract arguments
+        let args = list_to_vec(&heap, list_1_2_3).unwrap();
+        assert_eq!(args.len(), 3);
 
-//         // Check the arguments
-//         match &heap.get_value(args[0]) {
-//             SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
-//             _ => panic!("Expected integer 1"),
-//         }
-//         match &heap.get_value(args[1]) {
-//             SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
-//             _ => panic!("Expected integer 2"),
-//         }
-//         match &heap.get_value(args[2]) {
-//             SchemeValue::Int(i) => assert_eq!(i.to_string(), "3"),
-//             _ => panic!("Expected integer 3"),
-//         }
-//     }
+        // Check the arguments
+        match &heap.get_value(args[0]) {
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
+            _ => panic!("Expected integer 1"),
+        }
+        match &heap.get_value(args[1]) {
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
+            _ => panic!("Expected integer 2"),
+        }
+        match &heap.get_value(args[2]) {
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "3"),
+            _ => panic!("Expected integer 3"),
+        }
+    }
 
-//     #[test]
-//     fn test_eval_logic_simple_nested_call() {
-//         use crate::builtin::number::{plus_b, times_b};
-//         let mut evaluator = Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut evaluator);
-//         let times;
-//         let plus;
-//         let two;
-//         let two2;
-//         let three;
-//         let plus_sym;
-//         let plus_args;
-//         let plus_expr;
-//         let star_sym;
-//         let star_args;
-//         let expr;
-//         times = new_builtin(ec.heap, times_b, "times".to_string());
-//         plus = new_builtin(ec.heap, plus_b, "plus".to_string());
-//         two = new_int(ec.heap, num_bigint::BigInt::from(2));
-//         two2 = new_int(ec.heap, num_bigint::BigInt::from(2));
-//         three = new_int(ec.heap, num_bigint::BigInt::from(3));
-//         plus_sym = get_symbol(ec.heap, "+");
-//         let nil1 = ec.heap.nil_s();
-//         let three_pair = new_pair(ec.heap, three, nil1);
-//         plus_args = new_pair(ec.heap, two2, three_pair);
-//         plus_expr = new_pair(ec.heap, plus_sym, plus_args);
-//         star_sym = get_symbol(ec.heap, "*");
-//         let nil2 = ec.heap.nil_s();
-//         let plus_expr_pair = new_pair(ec.heap, plus_expr, nil2);
-//         star_args = new_pair(ec.heap, two, plus_expr_pair);
-//         expr = new_pair(ec.heap, star_sym, star_args);
-//         ec.env.set_symbol(star_sym, times);
-//         ec.env.set_symbol(plus_sym, plus);
-//         let result = eval_main(expr, &mut ec).unwrap();
-//         match &ec.heap.get_value(result[0]) {
-//             SchemeValue::Int(i) => assert_eq!(i.to_string(), "10"),
-//             _ => panic!("Expected integer result"),
-//         }
-//     }
+    #[test]
+    fn test_eval_logic_simple_nested_call() {
+        use crate::builtin::number::{plus_b, times_b};
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut runtime = RunTimeStruct::new();
+        let mut ec = RunTime::from_eval(&mut runtime);
+        let mut state = crate::kont::CEKState::new(env);
+        let times;
+        let plus;
+        let two;
+        let two2;
+        let three;
+        let plus_sym;
+        let plus_args;
+        let plus_expr;
+        let star_sym;
+        let star_args;
+        let expr;
+        times = new_builtin(ec.heap, times_b, "times".to_string());
+        plus = new_builtin(ec.heap, plus_b, "plus".to_string());
+        two = new_int(ec.heap, num_bigint::BigInt::from(2));
+        two2 = new_int(ec.heap, num_bigint::BigInt::from(2));
+        three = new_int(ec.heap, num_bigint::BigInt::from(3));
+        plus_sym = get_symbol(ec.heap, "+");
+        let nil1 = ec.heap.nil_s();
+        let three_pair = new_pair(ec.heap, three, nil1);
+        plus_args = new_pair(ec.heap, two2, three_pair);
+        plus_expr = new_pair(ec.heap, plus_sym, plus_args);
+        star_sym = get_symbol(ec.heap, "*");
+        let nil2 = ec.heap.nil_s();
+        let plus_expr_pair = new_pair(ec.heap, plus_expr, nil2);
+        star_args = new_pair(ec.heap, two, plus_expr_pair);
+        expr = new_pair(ec.heap, star_sym, star_args);
+        state.env.define(star_sym, times);
+        state.env.define(plus_sym, plus);
+        let result = eval_main(expr, &mut state, &mut ec).unwrap();
+        match &ec.heap.get_value(result[0]) {
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "10"),
+            _ => panic!("Expected integer result"),
+        }
+    }
 
-//     #[test]
-//     fn test_eval_logic_nested_mixed_call() {
-//         use crate::builtin::number::{minus_b, plus_b, times_b};
-//         let mut evaluator = Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut evaluator);
-//         let plus;
-//         let times;
-//         let minus;
-//         let two;
-//         let three;
-//         let four;
-//         let five;
-//         let minus_sym;
-//         let minus_args;
-//         let minus_expr;
-//         let times_sym;
-//         let times_args;
-//         let times_expr;
-//         let plus_sym;
-//         let plus_args;
-//         let expr;
-//         plus = new_builtin(ec.heap, plus_b, "plus".to_string());
-//         times = new_builtin(ec.heap, times_b, "times".to_string());
-//         minus = new_builtin(ec.heap, minus_b, "minus".to_string());
-//         two = new_int(ec.heap, num_bigint::BigInt::from(2));
-//         three = new_int(ec.heap, num_bigint::BigInt::from(3));
-//         four = new_int(ec.heap, num_bigint::BigInt::from(4));
-//         five = new_int(ec.heap, num_bigint::BigInt::from(5));
-//         minus_sym = get_symbol(ec.heap, "-");
-//         let nil1 = ec.heap.nil_s();
-//         let five_pair = new_pair(ec.heap, five, nil1);
-//         minus_args = new_pair(ec.heap, four, five_pair);
-//         minus_expr = new_pair(ec.heap, minus_sym, minus_args);
-//         times_sym = get_symbol(ec.heap, "*");
-//         let nil2 = ec.heap.nil_s();
-//         let minus_expr_pair = new_pair(ec.heap, minus_expr, nil2);
-//         times_args = new_pair(ec.heap, three, minus_expr_pair);
-//         times_expr = new_pair(ec.heap, times_sym, times_args);
-//         plus_sym = get_symbol(ec.heap, "+");
-//         let nil3 = ec.heap.nil_s();
-//         let times_expr_pair = new_pair(ec.heap, times_expr, nil3);
-//         plus_args = new_pair(ec.heap, two, times_expr_pair);
-//         expr = new_pair(ec.heap, plus_sym, plus_args);
-//         ec.env.set_symbol(plus_sym, plus);
-//         ec.env.set_symbol(times_sym, times);
-//         ec.env.set_symbol(minus_sym, minus);
-//         let result = eval_main(expr, &mut ec).unwrap();
-//         match &ec.heap.get_value(result[0]) {
-//             SchemeValue::Int(i) => assert_eq!(i.to_string(), "-1"),
-//             _ => panic!("Expected integer result"),
-//         }
-//     }
+    #[test]
+    fn test_eval_logic_nested_mixed_call() {
+        use crate::builtin::number::{minus_b, plus_b, times_b};
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut runtime = RunTimeStruct::new();
+        let mut ec = RunTime::from_eval(&mut runtime);
+        let mut state = crate::kont::CEKState::new(env);
+        let plus;
+        let times;
+        let minus;
+        let two;
+        let three;
+        let four;
+        let five;
+        let minus_sym;
+        let minus_args;
+        let minus_expr;
+        let times_sym;
+        let times_args;
+        let times_expr;
+        let plus_sym;
+        let plus_args;
+        let expr;
+        plus = new_builtin(ec.heap, plus_b, "plus".to_string());
+        times = new_builtin(ec.heap, times_b, "times".to_string());
+        minus = new_builtin(ec.heap, minus_b, "minus".to_string());
+        two = new_int(ec.heap, num_bigint::BigInt::from(2));
+        three = new_int(ec.heap, num_bigint::BigInt::from(3));
+        four = new_int(ec.heap, num_bigint::BigInt::from(4));
+        five = new_int(ec.heap, num_bigint::BigInt::from(5));
+        minus_sym = get_symbol(ec.heap, "-");
+        let nil1 = ec.heap.nil_s();
+        let five_pair = new_pair(ec.heap, five, nil1);
+        minus_args = new_pair(ec.heap, four, five_pair);
+        minus_expr = new_pair(ec.heap, minus_sym, minus_args);
+        times_sym = get_symbol(ec.heap, "*");
+        let nil2 = ec.heap.nil_s();
+        let minus_expr_pair = new_pair(ec.heap, minus_expr, nil2);
+        times_args = new_pair(ec.heap, three, minus_expr_pair);
+        times_expr = new_pair(ec.heap, times_sym, times_args);
+        plus_sym = get_symbol(ec.heap, "+");
+        let nil3 = ec.heap.nil_s();
+        let times_expr_pair = new_pair(ec.heap, times_expr, nil3);
+        plus_args = new_pair(ec.heap, two, times_expr_pair);
+        expr = new_pair(ec.heap, plus_sym, plus_args);
+        state.env.define(plus_sym, plus);
+        state.env.define(times_sym, times);
+        state.env.define(minus_sym, minus);
+        let result = eval_main(expr, &mut state, &mut ec).unwrap();
+        match &ec.heap.get_value(result[0]) {
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "-1"),
+            _ => panic!("Expected integer result"),
+        }
+    }
 
-//     #[test]
-//     fn test_eval_logic_quote() {
-//         let mut evaluator = Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut evaluator);
-//         // let quoted;
-//         let expr;
-//         let sym = get_symbol(ec.heap, "foo");
-//         let nil = ec.heap.nil_s();
-//         let sym_list = new_pair(ec.heap, sym, nil);
-//         let quote_sym = get_symbol(ec.heap, "quote");
-//         expr = new_pair(ec.heap, quote_sym, sym_list);
-//         // quoted = sym;
-//         let result = eval_main(expr, &mut ec).unwrap();
-//         match &ec.heap.get_value(result[0]) {
-//             SchemeValue::Symbol(s) => assert_eq!(s, "foo"),
-//             _ => panic!("Expected quoted symbol"),
-//         }
-//         // Test quoting a list: '(foo bar)
-//         // let quoted_list;
-//         let expr2;
-//         let foo = get_symbol(ec.heap, "foo");
-//         let bar = get_symbol(ec.heap, "bar");
-//         let nil = ec.heap.nil_s();
-//         let bar_pair = new_pair(ec.heap, bar, nil);
-//         let foo_bar_list = new_pair(ec.heap, foo, bar_pair);
-//         let quote_sym = get_symbol(ec.heap, "quote");
-//         let foo_bar_list_pair = new_pair(ec.heap, foo_bar_list, nil);
-//         expr2 = new_pair(ec.heap, quote_sym, foo_bar_list_pair);
-//         // let quoted_list = foo_bar_list;
-//         let result2 = eval_main(expr2, &mut ec).unwrap();
-//         match &ec.heap.get_value(result2[0]) {
-//             SchemeValue::Pair(_, _) => (),
-//             _ => panic!("Expected quoted list"),
-//         }
-//     }
+    #[test]
+    fn test_eval_logic_quote() {
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut runtime = RunTimeStruct::new();
+        let mut ec = RunTime::from_eval(&mut runtime);
+        let mut state = crate::kont::CEKState::new(env);
+        // let quoted;
+        let expr;
+        let sym = get_symbol(ec.heap, "foo");
+        let nil = ec.heap.nil_s();
+        let sym_list = new_pair(ec.heap, sym, nil);
+        let quote_sym = get_symbol(ec.heap, "quote");
+        expr = new_pair(ec.heap, quote_sym, sym_list);
+        // quoted = sym;
+        let result = eval_main(expr, &mut state, &mut ec).unwrap();
+        match &ec.heap.get_value(result[0]) {
+            SchemeValue::Symbol(s) => assert_eq!(s, "foo"),
+            _ => panic!("Expected quoted symbol"),
+        }
+        // Test quoting a list: '(foo bar)
+        // let quoted_list;
+        let expr2;
+        let foo = get_symbol(ec.heap, "foo");
+        let bar = get_symbol(ec.heap, "bar");
+        let nil = ec.heap.nil_s();
+        let bar_pair = new_pair(ec.heap, bar, nil);
+        let foo_bar_list = new_pair(ec.heap, foo, bar_pair);
+        let quote_sym = get_symbol(ec.heap, "quote");
+        let foo_bar_list_pair = new_pair(ec.heap, foo_bar_list, nil);
+        expr2 = new_pair(ec.heap, quote_sym, foo_bar_list_pair);
+        // let quoted_list = foo_bar_list;
+        let result2 = eval_main(expr2, &mut state, &mut ec).unwrap();
+        match &ec.heap.get_value(result2[0]) {
+            SchemeValue::Pair(_, _) => (),
+            _ => panic!("Expected quoted list"),
+        }
+    }
 
-//     #[test]
-//     fn test_eval_logic_begin() {
-//         use crate::builtin::number::plus_b;
-//         let mut evaluator = Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut evaluator);
-//         let plus;
-//         let a;
-//         let b;
-//         let c;
-//         let plus_sym;
-//         let plus_args;
-//         let plus_expr;
-//         let begin_sym;
-//         let begin_args;
-//         let expr;
-//         plus = new_builtin(ec.heap, plus_b, "plus".to_string());
-//         a = new_int(ec.heap, num_bigint::BigInt::from(1));
-//         b = new_int(ec.heap, num_bigint::BigInt::from(2));
-//         c = new_int(ec.heap, num_bigint::BigInt::from(3));
-//         plus_sym = get_symbol(ec.heap, "+");
-//         let nil = ec.heap.nil_s();
-//         let b_pair = new_pair(ec.heap, b, nil);
-//         plus_args = new_pair(ec.heap, a, b_pair);
-//         plus_expr = new_pair(ec.heap, plus_sym, plus_args);
-//         begin_sym = get_symbol(ec.heap, "begin");
-//         let c_pair = new_pair(ec.heap, c, nil);
-//         let plus_expr_pair = new_pair(ec.heap, plus_expr, c_pair);
-//         begin_args = plus_expr_pair;
-//         expr = new_pair(ec.heap, begin_sym, begin_args);
-//         ec.env.set_symbol(plus_sym, plus);
-//         let result = eval_main(expr, &mut ec).unwrap();
-//         match &ec.heap.get_value(result[0]) {
-//             SchemeValue::Int(i) => assert_eq!(i.to_string(), "3"),
-//             _ => panic!("Expected integer result from begin"),
-//         }
-//     }
+    #[test]
+    fn test_eval_logic_begin() {
+        use crate::builtin::number::plus_b;
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut runtime = RunTimeStruct::new();
+        let mut ec = RunTime::from_eval(&mut runtime);
+        let mut state = crate::kont::CEKState::new(env);
+        let plus;
+        let a;
+        let b;
+        let c;
+        let plus_sym;
+        let plus_args;
+        let plus_expr;
+        let begin_sym;
+        let begin_args;
+        let expr;
+        plus = new_builtin(ec.heap, plus_b, "plus".to_string());
+        a = new_int(ec.heap, num_bigint::BigInt::from(1));
+        b = new_int(ec.heap, num_bigint::BigInt::from(2));
+        c = new_int(ec.heap, num_bigint::BigInt::from(3));
+        plus_sym = get_symbol(ec.heap, "+");
+        let nil = ec.heap.nil_s();
+        let b_pair = new_pair(ec.heap, b, nil);
+        plus_args = new_pair(ec.heap, a, b_pair);
+        plus_expr = new_pair(ec.heap, plus_sym, plus_args);
+        begin_sym = get_symbol(ec.heap, "begin");
+        let c_pair = new_pair(ec.heap, c, nil);
+        let plus_expr_pair = new_pair(ec.heap, plus_expr, c_pair);
+        begin_args = plus_expr_pair;
+        expr = new_pair(ec.heap, begin_sym, begin_args);
+        state.env.define(plus_sym, plus);
+        let result = eval_main(expr, &mut state, &mut ec).unwrap();
+        match &ec.heap.get_value(result[0]) {
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "3"),
+            _ => panic!("Expected integer result from begin"),
+        }
+    }
 
-//     #[test]
-//     fn test_eval_logic_define() {
-//         let mut evaluator = Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut evaluator);
-//         let symbol;
-//         let expr;
-//         symbol = get_symbol(ec.heap, "y");
-//         let val = new_int(ec.heap, num_bigint::BigInt::from(42));
-//         let nil = ec.heap.nil_s();
-//         let val_pair = new_pair(ec.heap, val, nil);
-//         let args = new_pair(ec.heap, symbol, val_pair);
-//         let define_sym = get_symbol(ec.heap, "define");
-//         expr = new_pair(ec.heap, define_sym, args);
-//         let result = eval_main(expr, &mut ec).unwrap();
-//         match &ec.heap.get_value(result[0]) {
-//             SchemeValue::Symbol(s) => assert_eq!(s.to_string(), "y"),
-//             _ => panic!("Expected symbol result"),
-//         }
-//         // Check that the variable is now bound
-//         let bound = ec.env.get_symbol(symbol).unwrap();
-//         match &ec.heap.get_value(bound) {
-//             SchemeValue::Int(i) => assert_eq!(i.to_string(), "42"),
-//             _ => panic!("Expected integer result in env"),
-//         }
-//     }
+    #[test]
+    fn test_eval_logic_define() {
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut runtime = RunTimeStruct::new();
+        let mut ec = RunTime::from_eval(&mut runtime);
+        let mut state = crate::kont::CEKState::new(env);
+        let symbol;
+        let expr;
+        symbol = get_symbol(ec.heap, "y");
+        let val = new_int(ec.heap, num_bigint::BigInt::from(42));
+        let nil = ec.heap.nil_s();
+        let val_pair = new_pair(ec.heap, val, nil);
+        let args = new_pair(ec.heap, symbol, val_pair);
+        let define_sym = get_symbol(ec.heap, "define");
+        expr = new_pair(ec.heap, define_sym, args);
+        let result = eval_main(expr, &mut state, &mut ec).unwrap();
+        match &ec.heap.get_value(result[0]) {
+            SchemeValue::Symbol(s) => assert_eq!(s.to_string(), "y"),
+            _ => panic!("Expected symbol result"),
+        }
+        // Check that the variable is now bound
+        let sym = state.env.lookup(symbol);
+        match sym {
+            Some(val) => match ec.heap.get_value(val) {
+                SchemeValue::Int(i) => assert_eq!(i.to_string(), "42"),
+                _ => panic!("Expected integer result in env"),
+            },
+            _ => panic!("Expected integer result in env"),
+        }
+    }
 
-//     #[test]
-//     fn test_eval_logic_if() {
-//         let mut evaluator = Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut evaluator);
-//         let expr_true;
-//         let expr_false;
-//         let if_sym = get_symbol(ec.heap, "if");
-//         let t = ec.heap.true_s();
-//         let f = ec.heap.false_s();
-//         let one = new_int(ec.heap, num_bigint::BigInt::from(1));
-//         let two = new_int(ec.heap, num_bigint::BigInt::from(2));
-//         let nil = ec.heap.nil_s();
-//         // (if #t 1 2)
-//         let two_pair = new_pair(ec.heap, two, nil);
-//         let one_pair = new_pair(ec.heap, one, two_pair);
-//         let t_pair = new_pair(ec.heap, t, one_pair);
-//         expr_true = new_pair(ec.heap, if_sym, t_pair);
-//         // (if #f 1 2)
-//         let two_pair2 = new_pair(ec.heap, two, nil);
-//         let one_pair2 = new_pair(ec.heap, one, two_pair2);
-//         let f_pair = new_pair(ec.heap, f, one_pair2);
-//         expr_false = new_pair(ec.heap, if_sym, f_pair);
-//         let result_true = eval_main(expr_true, &mut ec).unwrap();
-//         match &ec.heap.get_value(result_true[0]) {
-//             SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
-//             _ => panic!("Expected integer result for true branch"),
-//         }
-//         let result_false = eval_main(expr_false, &mut ec).unwrap();
-//         match &ec.heap.get_value(result_false[0]) {
-//             SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
-//             _ => panic!("Expected integer result for false branch"),
-//         }
-//     }
+    #[test]
+    fn test_eval_logic_if() {
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut runtime = RunTimeStruct::new();
+        let mut ec = RunTime::from_eval(&mut runtime);
+        let mut state = crate::kont::CEKState::new(env);
+        let expr_true;
+        let expr_false;
+        let if_sym = get_symbol(ec.heap, "if");
+        let t = ec.heap.true_s();
+        let f = ec.heap.false_s();
+        let one = new_int(ec.heap, num_bigint::BigInt::from(1));
+        let two = new_int(ec.heap, num_bigint::BigInt::from(2));
+        let nil = ec.heap.nil_s();
+        // (if #t 1 2)
+        let two_pair = new_pair(ec.heap, two, nil);
+        let one_pair = new_pair(ec.heap, one, two_pair);
+        let t_pair = new_pair(ec.heap, t, one_pair);
+        expr_true = new_pair(ec.heap, if_sym, t_pair);
+        // (if #f 1 2)
+        let two_pair2 = new_pair(ec.heap, two, nil);
+        let one_pair2 = new_pair(ec.heap, one, two_pair2);
+        let f_pair = new_pair(ec.heap, f, one_pair2);
+        expr_false = new_pair(ec.heap, if_sym, f_pair);
+        let result_true = eval_main(expr_true, &mut state, &mut ec).unwrap();
+        match &ec.heap.get_value(result_true[0]) {
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
+            _ => panic!("Expected integer result for true branch"),
+        }
+        let result_false = eval_main(expr_false, &mut state, &mut ec).unwrap();
+        match &ec.heap.get_value(result_false[0]) {
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
+            _ => panic!("Expected integer result for false branch"),
+        }
+    }
 
-//     #[test]
-//     fn test_eval_logic_and_or() {
-//         // (and)
-//         {
-//             let mut evaluator = Evaluator::new();
-//             let mut ec = crate::eval::RunTime::from_eval(&mut evaluator);
-//             let and_sym = get_symbol(ec.heap, "and");
-//             let nil = ec.heap.nil_s();
-//             let and_empty = new_pair(ec.heap, and_sym, nil);
-//             let result = eval_main(and_empty, &mut ec).unwrap();
-//             assert!(matches!(
-//                 &ec.heap.get_value(result[0]),
-//                 SchemeValue::Bool(true)
-//             ));
-//         }
-//         // (and #t 1 2)
-//         {
-//             let mut evaluator = Evaluator::new();
-//             let mut ec = crate::eval::RunTime::from_eval(&mut evaluator);
-//             let and_sym = get_symbol(ec.heap, "and");
-//             let t = ec.heap.true_s();
-//             let one = new_int(ec.heap, num_bigint::BigInt::from(1));
-//             let two = new_int(ec.heap, num_bigint::BigInt::from(2));
-//             let nil = ec.heap.nil_s();
-//             let two_pair = new_pair(ec.heap, two, nil);
-//             let one_pair = new_pair(ec.heap, one, two_pair);
-//             let t_pair = new_pair(ec.heap, t, one_pair);
-//             let and_expr = new_pair(ec.heap, and_sym, t_pair);
-//             let result = eval_main(and_expr, &mut ec).unwrap();
-//             match &ec.heap.get_value(result[0]) {
-//                 SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
-//                 _ => panic!("Expected integer result for and"),
-//             }
-//         }
-//         // (and #t #f 2)
-//         {
-//             let mut evaluator = Evaluator::new();
-//             let mut ec = crate::eval::RunTime::from_eval(&mut evaluator);
-//             let and_sym = get_symbol(ec.heap, "and");
-//             let t = ec.heap.true_s();
-//             let f = ec.heap.false_s();
-//             let two = new_int(ec.heap, num_bigint::BigInt::from(2));
-//             let nil = ec.heap.nil_s();
-//             let two_pair = new_pair(ec.heap, two, nil);
-//             let f_pair = new_pair(ec.heap, f, two_pair);
-//             let t_pair2 = new_pair(ec.heap, t, f_pair);
-//             let and_expr2 = new_pair(ec.heap, and_sym, t_pair2);
-//             let result = eval_main(and_expr2, &mut ec).unwrap();
-//             assert!(matches!(
-//                 &ec.heap.get_value(result[0]),
-//                 SchemeValue::Bool(false)
-//             ));
-//         }
-//         // (or)
-//         {
-//             let mut evaluator = Evaluator::new();
-//             let mut ec = crate::eval::RunTime::from_eval(&mut evaluator);
-//             let or_sym = get_symbol(ec.heap, "or");
-//             let nil = ec.heap.nil_s();
-//             let or_empty = new_pair(ec.heap, or_sym, nil);
-//             let result = eval_main(or_empty, &mut ec).unwrap();
-//             assert!(matches!(
-//                 &evaluator.heap.get_value(result[0]),
-//                 SchemeValue::Bool(false)
-//             ));
-//         }
-//         // (or #f 1 2)
-//         {
-//             let mut evaluator = Evaluator::new();
-//             let mut ec = crate::eval::RunTime::from_eval(&mut evaluator);
-//             let or_sym = get_symbol(ec.heap, "or");
-//             let f = ec.heap.false_s();
-//             let one = new_int(ec.heap, num_bigint::BigInt::from(1));
-//             let two = new_int(ec.heap, num_bigint::BigInt::from(2));
-//             let nil = ec.heap.nil_s();
-//             let two_pair = new_pair(ec.heap, two, nil);
-//             let one_pair = new_pair(ec.heap, one, two_pair);
-//             let f_pair = new_pair(ec.heap, f, one_pair);
-//             let or_expr = new_pair(ec.heap, or_sym, f_pair);
-//             let result = eval_main(or_expr, &mut ec).unwrap();
-//             match &ec.heap.get_value(result[0]) {
-//                 SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
-//                 _ => panic!("Expected integer result for or"),
-//             }
-//         }
-//         // (or #f #f 2)
-//         {
-//             let mut evaluator = Evaluator::new();
-//             let mut ec = crate::eval::RunTime::from_eval(&mut evaluator);
-//             let or_sym = get_symbol(ec.heap, "or");
-//             let f = ec.heap.false_s();
-//             let two = new_int(ec.heap, num_bigint::BigInt::from(2));
-//             let nil = ec.heap.nil_s();
-//             let two_pair = new_pair(ec.heap, two, nil);
-//             let f_pair2 = new_pair(ec.heap, f, two_pair);
-//             let f_pair3 = new_pair(ec.heap, f, f_pair2);
-//             let or_expr2 = new_pair(ec.heap, or_sym, f_pair3);
-//             let result = eval_main(or_expr2, &mut ec).unwrap();
-//             match &ec.heap.get_value(result[0]) {
-//                 SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
-//                 _ => panic!("Expected integer result for or"),
-//             }
-//         }
-//         // (or #f #f #f)
-//         {
-//             let mut evaluator = Evaluator::new();
-//             let mut ec = crate::eval::RunTime::from_eval(&mut evaluator);
-//             let or_sym = get_symbol(ec.heap, "or");
-//             let f = ec.heap.false_s();
-//             let nil = ec.heap.nil_s();
-//             let f_pair = new_pair(ec.heap, f, nil);
-//             let f_pair2 = new_pair(ec.heap, f, f_pair);
-//             let f_pair3 = new_pair(ec.heap, f, f_pair2);
-//             let or_expr3 = new_pair(ec.heap, or_sym, f_pair3);
-//             let result = eval_main(or_expr3, &mut ec).unwrap();
-//             assert!(matches!(
-//                 &evaluator.heap.get_value(result[0]),
-//                 SchemeValue::Bool(false)
-//             ));
-//         }
-//     }
+    #[test]
+    fn test_eval_logic_and_or() {
+        // (and)
+        {
+            let env = Rc::new(RefCell::new(Frame::new(None)));
+            let mut runtime = RunTimeStruct::new();
+            let mut ec = RunTime::from_eval(&mut runtime);
+            let mut state = crate::kont::CEKState::new(env);
+            let and_sym = get_symbol(ec.heap, "and");
+            let nil = ec.heap.nil_s();
+            let and_empty = new_pair(ec.heap, and_sym, nil);
+            let result = eval_main(and_empty, &mut state, &mut ec).unwrap();
+            assert!(matches!(
+                &ec.heap.get_value(result[0]),
+                SchemeValue::Bool(true)
+            ));
+        }
+        // (and #t 1 2)
+        {
+            let env = Rc::new(RefCell::new(Frame::new(None)));
+            let mut runtime = RunTimeStruct::new();
+            let mut ec = RunTime::from_eval(&mut runtime);
+            let mut state = crate::kont::CEKState::new(env);
+            let and_sym = get_symbol(ec.heap, "and");
+            let t = ec.heap.true_s();
+            let one = new_int(ec.heap, num_bigint::BigInt::from(1));
+            let two = new_int(ec.heap, num_bigint::BigInt::from(2));
+            let nil = ec.heap.nil_s();
+            let two_pair = new_pair(ec.heap, two, nil);
+            let one_pair = new_pair(ec.heap, one, two_pair);
+            let t_pair = new_pair(ec.heap, t, one_pair);
+            let and_expr = new_pair(ec.heap, and_sym, t_pair);
+            let result = eval_main(and_expr, &mut state, &mut ec).unwrap();
+            match &ec.heap.get_value(result[0]) {
+                SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
+                _ => panic!("Expected integer result for and"),
+            }
+        }
+        // (and #t #f 2)
+        {
+            let env = Rc::new(RefCell::new(Frame::new(None)));
+            let mut runtime = RunTimeStruct::new();
+            let mut ec = RunTime::from_eval(&mut runtime);
+            let mut state = crate::kont::CEKState::new(env);
+            let and_sym = get_symbol(ec.heap, "and");
+            let t = ec.heap.true_s();
+            let f = ec.heap.false_s();
+            let two = new_int(ec.heap, num_bigint::BigInt::from(2));
+            let nil = ec.heap.nil_s();
+            let two_pair = new_pair(ec.heap, two, nil);
+            let f_pair = new_pair(ec.heap, f, two_pair);
+            let t_pair2 = new_pair(ec.heap, t, f_pair);
+            let and_expr2 = new_pair(ec.heap, and_sym, t_pair2);
+            let result = eval_main(and_expr2, &mut state, &mut ec).unwrap();
+            assert!(matches!(
+                &ec.heap.get_value(result[0]),
+                SchemeValue::Bool(false)
+            ));
+        }
+        // (or)
+        {
+            let env = Rc::new(RefCell::new(Frame::new(None)));
+            let mut runtime = RunTimeStruct::new();
+            let mut ec = RunTime::from_eval(&mut runtime);
+            let mut state = crate::kont::CEKState::new(env);
+            let or_sym = get_symbol(ec.heap, "or");
+            let nil = ec.heap.nil_s();
+            let or_empty = new_pair(ec.heap, or_sym, nil);
+            let result = eval_main(or_empty, &mut state, &mut ec).unwrap();
+            assert!(matches!(
+                &ec.heap.get_value(result[0]),
+                SchemeValue::Bool(false)
+            ));
+        }
+        // (or #f 1 2)
+        {
+            let env = Rc::new(RefCell::new(Frame::new(None)));
+            let mut runtime = RunTimeStruct::new();
+            let mut ec = RunTime::from_eval(&mut runtime);
+            let mut state = crate::kont::CEKState::new(env);
+            let or_sym = get_symbol(ec.heap, "or");
+            let f = ec.heap.false_s();
+            let one = new_int(ec.heap, num_bigint::BigInt::from(1));
+            let two = new_int(ec.heap, num_bigint::BigInt::from(2));
+            let nil = ec.heap.nil_s();
+            let two_pair = new_pair(ec.heap, two, nil);
+            let one_pair = new_pair(ec.heap, one, two_pair);
+            let f_pair = new_pair(ec.heap, f, one_pair);
+            let or_expr = new_pair(ec.heap, or_sym, f_pair);
+            let result = eval_main(or_expr, &mut state, &mut ec).unwrap();
+            match &ec.heap.get_value(result[0]) {
+                SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
+                _ => panic!("Expected integer result for or"),
+            }
+        }
+        // (or #f #f 2)
+        {
+            let env = Rc::new(RefCell::new(Frame::new(None)));
+            let mut runtime = RunTimeStruct::new();
+            let mut ec = RunTime::from_eval(&mut runtime);
+            let mut state = crate::kont::CEKState::new(env);
+            let or_sym = get_symbol(ec.heap, "or");
+            let f = ec.heap.false_s();
+            let two = new_int(ec.heap, num_bigint::BigInt::from(2));
+            let nil = ec.heap.nil_s();
+            let two_pair = new_pair(ec.heap, two, nil);
+            let f_pair2 = new_pair(ec.heap, f, two_pair);
+            let f_pair3 = new_pair(ec.heap, f, f_pair2);
+            let or_expr2 = new_pair(ec.heap, or_sym, f_pair3);
+            let result = eval_main(or_expr2, &mut state, &mut ec).unwrap();
+            match &ec.heap.get_value(result[0]) {
+                SchemeValue::Int(i) => assert_eq!(i.to_string(), "2"),
+                _ => panic!("Expected integer result for or"),
+            }
+        }
+        // (or #f #f #f)
+        {
+            let env = Rc::new(RefCell::new(Frame::new(None)));
+            let mut runtime = RunTimeStruct::new();
+            let mut ec = RunTime::from_eval(&mut runtime);
+            let mut state = crate::kont::CEKState::new(env);
+            let or_sym = get_symbol(ec.heap, "or");
+            let f = ec.heap.false_s();
+            let nil = ec.heap.nil_s();
+            let f_pair = new_pair(ec.heap, f, nil);
+            let f_pair2 = new_pair(ec.heap, f, f_pair);
+            let f_pair3 = new_pair(ec.heap, f, f_pair2);
+            let or_expr3 = new_pair(ec.heap, or_sym, f_pair3);
+            let result = eval_main(or_expr3, &mut state, &mut ec).unwrap();
+            assert!(matches!(
+                &ec.heap.get_value(result[0]),
+                SchemeValue::Bool(false)
+            ));
+        }
+    }
 
-//     #[test]
-//     fn test_eval_logic_lambda() {
-//         let mut evaluator = Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut evaluator);
+    #[test]
+    fn test_eval_logic_lambda() {
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut runtime = RunTimeStruct::new();
+        let mut ec = RunTime::from_eval(&mut runtime);
+        let mut state = crate::kont::CEKState::new(env);
 
-//         // Set up the + function in the environment
-//         let plus = new_builtin(ec.heap, crate::builtin::number::plus_b, "plus".to_string());
-//         let plus_sym = ec.heap.intern_symbol("+");
-//         ec.env.set_symbol(plus_sym, plus);
-//         let lambda_expr;
-//         let add1;
-//         let result;
-//         // Create (lambda (x) (+ x 1))
-//         let x_param = get_symbol(ec.heap, "x");
-//         let one = new_int(ec.heap, num_bigint::BigInt::from(1));
-//         let plus_sym = ec.heap.intern_symbol("+");
-//         let nil = ec.heap.nil_s();
+        // Set up the + function in the environment
+        let plus = new_builtin(ec.heap, crate::builtin::number::plus_b, "plus".to_string());
+        let plus_sym = ec.heap.intern_symbol("+");
+        state.env.define(plus_sym, plus);
+        let lambda_expr;
+        let add1;
+        let result;
+        // Create (lambda (x) (+ x 1))
+        let x_param = get_symbol(ec.heap, "x");
+        let one = new_int(ec.heap, num_bigint::BigInt::from(1));
+        let plus_sym = ec.heap.intern_symbol("+");
+        let nil = ec.heap.nil_s();
 
-//         // Build (+ x 1)
-//         let one_pair = new_pair(ec.heap, one, nil);
-//         let x_one_pair = new_pair(ec.heap, x_param, one_pair);
-//         let plus_expr = new_pair(ec.heap, plus_sym, x_one_pair);
+        // Build (+ x 1)
+        let one_pair = new_pair(ec.heap, one, nil);
+        let x_one_pair = new_pair(ec.heap, x_param, one_pair);
+        let plus_expr = new_pair(ec.heap, plus_sym, x_one_pair);
 
-//         // Build (lambda (x) (+ x 1))
-//         let lambda_sym = get_symbol(ec.heap, "lambda");
-//         let params_list = new_pair(ec.heap, x_param, nil);
-//         let body_nil = new_pair(ec.heap, plus_expr, nil);
-//         let lambda_args = new_pair(ec.heap, params_list, body_nil);
-//         lambda_expr = new_pair(ec.heap, lambda_sym, lambda_args);
-//         // Evaluate the lambda to create a closure
-//         add1 = eval_main(lambda_expr, &mut ec).unwrap();
+        // Build (lambda (x) (+ x 1))
+        let lambda_sym = get_symbol(ec.heap, "lambda");
+        let params_list = new_pair(ec.heap, x_param, nil);
+        let body_nil = new_pair(ec.heap, plus_expr, nil);
+        let lambda_args = new_pair(ec.heap, params_list, body_nil);
+        lambda_expr = new_pair(ec.heap, lambda_sym, lambda_args);
+        // Evaluate the lambda to create a closure
+        add1 = eval_main(lambda_expr, &mut state, &mut ec).unwrap();
 
-//         // Verify it's a closure
-//         use crate::gc::Callable;
-//         match &ec.heap.get_value(add1[0]) {
-//             SchemeValue::Callable(callable) => {
-//                 match callable {
-//                     Callable::Closure { params, body, .. } => {
-//                         assert_eq!(params.len(), 2); // 1 + the zeroth element for variadics
-//                         // Check that the parameter is a symbol with the right name
-//                         match &ec.heap.get_value(params[1]) {
-//                             SchemeValue::Symbol(name) => assert_eq!(name, "x"),
-//                             _ => panic!("Expected symbol parameter"),
-//                         }
-//                         // The body should be the (+ x 1) expression
-//                         match &ec.heap.get_value(*body) {
-//                             SchemeValue::Pair(car, _cdr) => match &ec.heap.get_value(*car) {
-//                                 SchemeValue::Symbol(s) => assert_eq!(s, "+"),
-//                                 _ => panic!("Expected + symbol"),
-//                             },
-//                             _ => panic!("Expected pair as body"),
-//                         }
-//                     }
-//                     _ => panic!("Expected closure"),
-//                 }
-//             }
-//             _ => panic!("Expected closure"),
-//         }
+        // Verify it's a closure
+        use crate::gc::Callable;
+        match &ec.heap.get_value(add1[0]) {
+            SchemeValue::Callable(callable) => {
+                match callable {
+                    Callable::Closure { params, body, .. } => {
+                        assert_eq!(params.len(), 2); // 1 + the zeroth element for variadics
+                        // Check that the parameter is a symbol with the right name
+                        match &ec.heap.get_value(params[1]) {
+                            SchemeValue::Symbol(name) => assert_eq!(name, "x"),
+                            _ => panic!("Expected symbol parameter"),
+                        }
+                        // The body should be the (+ x 1) expression
+                        match &ec.heap.get_value(*body) {
+                            SchemeValue::Pair(car, _cdr) => match &ec.heap.get_value(*car) {
+                                SchemeValue::Symbol(s) => assert_eq!(s, "+"),
+                                _ => panic!("Expected + symbol"),
+                            },
+                            _ => panic!("Expected pair as body"),
+                        }
+                    }
+                    _ => panic!("Expected closure"),
+                }
+            }
+            _ => panic!("Expected closure"),
+        }
 
-//         // Now apply the closure: (add1 5)
-//         let five;
-//         let apply_expr;
-//         five = new_int(ec.heap, num_bigint::BigInt::from(5));
+        // Now apply the closure: (add1 5)
+        let five;
+        let apply_expr;
+        five = new_int(ec.heap, num_bigint::BigInt::from(5));
 
-//         // Build (add1 5)
-//         let nil = ec.heap.nil_s();
-//         let five_pair = new_pair(ec.heap, five, nil);
-//         apply_expr = new_pair(ec.heap, add1[0], five_pair);
-//         // Evaluate the application
-//         result = eval_main(apply_expr, &mut ec).unwrap();
+        // Build (add1 5)
+        let nil = ec.heap.nil_s();
+        let five_pair = new_pair(ec.heap, five, nil);
+        apply_expr = new_pair(ec.heap, add1[0], five_pair);
+        // Evaluate the application
+        result = eval_main(apply_expr, &mut state, &mut ec).unwrap();
 
-//         // Should return 6
-//         match &evaluator.heap.get_value(result[0]) {
-//             SchemeValue::Int(i) => assert_eq!(i.to_string(), "6"),
-//             _ => panic!("Expected integer result"),
-//         }
-//     }
+        // Should return 6
+        match &ec.heap.get_value(result[0]) {
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "6"),
+            _ => panic!("Expected integer result"),
+        }
+    }
 
-//     #[test]
-//     fn test_eval_logic_closure_application() {
-//         let mut evaluator = Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut evaluator);
+    #[test]
+    fn test_eval_logic_closure_application() {
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut runtime = RunTimeStruct::new();
+        let mut ec = RunTime::from_eval(&mut runtime);
+        let mut state = crate::kont::CEKState::new(env);
 
-//         // Set up the + function in the environment
-//         let plus = new_builtin(ec.heap, crate::builtin::number::plus_b, "plus".to_string());
-//         let plus_sym = ec.heap.intern_symbol("+");
-//         ec.env.set_symbol(plus_sym, plus);
+        // Set up the + function in the environment
+        let plus = new_builtin(ec.heap, crate::builtin::number::plus_b, "plus".to_string());
+        let plus_sym = ec.heap.intern_symbol("+");
+        state.env.define(plus_sym, plus);
 
-//         // Create a closure manually: (lambda (x y) (+ x y))
-//         let closure;
-//         let captured_env = ec.env.current_frame();
-//         let x_param = get_symbol(ec.heap, "x");
-//         let y_param = get_symbol(ec.heap, "y");
-//         let plus_sym = ec.heap.intern_symbol("+");
-//         let nil = ec.heap.nil_s();
+        // Create a closure manually: (lambda (x y) (+ x y))
+        let closure;
+        let captured_env = Rc::clone(&state.env);
+        let x_param = get_symbol(ec.heap, "x");
+        let y_param = get_symbol(ec.heap, "y");
+        let plus_sym = ec.heap.intern_symbol("+");
+        let nil = ec.heap.nil_s();
 
-//         // Build (+ x y)
-//         let y_pair = new_pair(ec.heap, y_param, nil);
-//         let x_y_pair = new_pair(ec.heap, x_param, y_pair);
-//         let plus_expr = new_pair(ec.heap, plus_sym, x_y_pair);
+        // Build (+ x y)
+        let y_pair = new_pair(ec.heap, y_param, nil);
+        let x_y_pair = new_pair(ec.heap, x_param, y_pair);
+        let plus_expr = new_pair(ec.heap, plus_sym, x_y_pair);
 
-//         // Create closure with captured environment
-//         closure = new_closure(
-//             ec.heap,
-//             vec![nil, x_param, y_param],
-//             plus_expr,
-//             captured_env,
-//         );
+        // Create closure with captured environment
+        closure = new_closure(
+            ec.heap,
+            vec![nil, x_param, y_param],
+            plus_expr,
+            captured_env,
+        );
 
-//         // Apply the closure: (closure 3 4)
-//         let three;
-//         let four;
-//         let apply_expr;
-//         let result;
-//         three = new_int(ec.heap, num_bigint::BigInt::from(3));
-//         four = new_int(ec.heap, num_bigint::BigInt::from(4));
+        // Apply the closure: (closure 3 4)
+        let three;
+        let four;
+        let apply_expr;
+        let result;
+        three = new_int(ec.heap, num_bigint::BigInt::from(3));
+        four = new_int(ec.heap, num_bigint::BigInt::from(4));
 
-//         // Build (closure 3 4)
-//         let nil = ec.heap.nil_s();
-//         let four_pair = new_pair(ec.heap, four, nil);
-//         let three_four_pair = new_pair(ec.heap, three, four_pair);
-//         apply_expr = new_pair(ec.heap, closure, three_four_pair);
+        // Build (closure 3 4)
+        let nil = ec.heap.nil_s();
+        let four_pair = new_pair(ec.heap, four, nil);
+        let three_four_pair = new_pair(ec.heap, three, four_pair);
+        apply_expr = new_pair(ec.heap, closure, three_four_pair);
 
-//         // Evaluate the application
-//         result = eval_main(apply_expr, &mut ec).unwrap();
+        // Evaluate the application
+        result = eval_main(apply_expr, &mut state, &mut ec).unwrap();
 
-//         // Should return 7
-//         match &evaluator.heap.get_value(result[0]) {
-//             SchemeValue::Int(i) => assert_eq!(i.to_string(), "7"),
-//             _ => panic!("Expected integer result"),
-//         }
-//     }
+        // Should return 7
+        match &ec.heap.get_value(result[0]) {
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "7"),
+            _ => panic!("Expected integer result"),
+        }
+    }
 
-//     #[test]
-//     fn test_eval_logic_set() {
-//         let mut evaluator = Evaluator::new();
-//         let symbol;
-//         let value;
-//         let set_sym;
-//         let x_sym;
-//         let val_123;
-//         let arg_pair;
-//         let args;
-//         {
-//             let heap = evaluator.heap_mut();
-//             symbol = heap.intern_symbol("x");
-//             value = new_int(heap, num_bigint::BigInt::from(123));
-//             set_sym = get_symbol(heap, "set!");
-//             x_sym = heap.intern_symbol("x");
-//             val_123 = new_int(heap, num_bigint::BigInt::from(123));
-//             let nil = heap.nil_s();
-//             arg_pair = new_pair(heap, val_123, nil);
-//             args = new_pair(heap, x_sym, arg_pair);
-//             new_pair(heap, set_sym, args);
-//         }
+    #[test]
+    fn test_eval_logic_set() {
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut runtime = RunTimeStruct::new();
+        let ec = RunTime::from_eval(&mut runtime);
+        let state = crate::kont::CEKState::new(env);
+        let symbol;
+        let value;
+        let set_sym;
+        let x_sym;
+        let val_123;
+        let arg_pair;
+        let args;
+        symbol = get_symbol(ec.heap, "x");
+        value = new_int(ec.heap, num_bigint::BigInt::from(123));
+        set_sym = get_symbol(ec.heap, "set!");
+        x_sym = ec.heap.intern_symbol("x");
+        val_123 = new_int(ec.heap, num_bigint::BigInt::from(123));
+        let nil = ec.heap.nil_s();
+        arg_pair = new_pair(ec.heap, val_123, nil);
+        args = new_pair(ec.heap, x_sym, arg_pair);
+        new_pair(ec.heap, set_sym, args);
 
-//         // First define x
-//         evaluator.env_mut().set_symbol(symbol, value);
+        // First define x
+        state.env.define(symbol, value);
 
-//         // Then set! it
-//         // let result = eval_logic(set_expr, &mut evaluator).unwrap();
+        // Then set! it
+        // let result = eval_logic(set_expr, &mut evaluator).unwrap();
 
-//         // Verify the value was set
-//         let new_value = evaluator.env().get_symbol(symbol).unwrap();
-//         match &evaluator.heap.get_value(new_value) {
-//             SchemeValue::Int(i) => assert_eq!(i.to_string(), "123"),
-//             _ => panic!("Expected integer"),
-//         }
-//     }
+        // Verify the value was set
+        let new_value = state.env.lookup(symbol).unwrap();
+        match &ec.heap.get_value(new_value) {
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "123"),
+            _ => panic!("Expected integer"),
+        }
+    }
 
-//     #[test]
-//     fn test_symbol_interning_in_lambda() {
-//         let mut evaluator = Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut evaluator);
+    #[test]
+    fn test_symbol_interning_in_lambda() {
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut runtime = RunTimeStruct::new();
+        let mut ec = RunTime::from_eval(&mut runtime);
+        let mut state = crate::kont::CEKState::new(env);
 
-//         // Create a symbol and bind it to the environment
-//         let plus_sym = ec.heap.intern_symbol("+");
-//         let plus_func = new_builtin(ec.heap, crate::builtin::number::plus_b, "plus".to_string());
-//         ec.env.set_symbol(plus_sym, plus_func);
+        // Create a symbol and bind it to the environment
+        let plus_sym = ec.heap.intern_symbol("+");
+        let plus_func = new_builtin(ec.heap, crate::builtin::number::plus_b, "plus".to_string());
+        state.env.define(plus_sym, plus_func);
 
-//         // Now create a lambda that uses the + symbol
-//         let x_param;
-//         let plus_sym;
-//         let one;
-//         let nil;
-//         let plus_expr;
-//         x_param = ec.heap.intern_symbol("x");
-//         plus_sym = ec.heap.intern_symbol("+");
-//         one = new_int(ec.heap, num_bigint::BigInt::from(1));
-//         nil = ec.heap.nil_s();
+        // Now create a lambda that uses the + symbol
+        let x_param;
+        let plus_sym;
+        let one;
+        let nil;
+        let plus_expr;
+        x_param = ec.heap.intern_symbol("x");
+        plus_sym = ec.heap.intern_symbol("+");
+        one = new_int(ec.heap, num_bigint::BigInt::from(1));
+        nil = ec.heap.nil_s();
 
-//         // Build (+ x 1) - using the same plus_sym that was bound
-//         let one_pair = new_pair(ec.heap, one, nil);
-//         let x_one_pair = new_pair(ec.heap, x_param, one_pair);
-//         plus_expr = new_pair(ec.heap, plus_sym, x_one_pair);
+        // Build (+ x 1) - using the same plus_sym that was bound
+        let one_pair = new_pair(ec.heap, one, nil);
+        let x_one_pair = new_pair(ec.heap, x_param, one_pair);
+        plus_expr = new_pair(ec.heap, plus_sym, x_one_pair);
 
-//         // Create closure manually with the deduplicated body
-//         let deduplicated_body;
-//         let captured_env = ec.env.current_frame();
-//         let closure;
-//         deduplicated_body = plus_expr; //deduplicate_symbols(plus_expr, heap);
-//         closure = new_closure(ec.heap, vec![nil, x_param], deduplicated_body, captured_env);
+        // Create closure manually with the deduplicated body
+        let deduplicated_body;
+        let captured_env = Rc::clone(&state.env);
+        let closure;
+        deduplicated_body = plus_expr; //deduplicate_symbols(plus_expr, heap);
+        closure = new_closure(ec.heap, vec![nil, x_param], deduplicated_body, captured_env);
 
-//         // Apply the closure: (closure 5)
-//         let five;
-//         let five_pair;
-//         let apply_expr;
-//         five = new_int(ec.heap, num_bigint::BigInt::from(5));
-//         five_pair = new_pair(ec.heap, five, nil);
-//         apply_expr = new_pair(ec.heap, closure, five_pair);
+        // Apply the closure: (closure 5)
+        let five;
+        let five_pair;
+        let apply_expr;
+        five = new_int(ec.heap, num_bigint::BigInt::from(5));
+        five_pair = new_pair(ec.heap, five, nil);
+        apply_expr = new_pair(ec.heap, closure, five_pair);
 
-//         // This should work because we're using the same interned symbol
-//         let result = eval_main(apply_expr, &mut ec).unwrap();
-//         match &evaluator.heap.get_value(result[0]) {
-//             SchemeValue::Int(i) => assert_eq!(i.to_string(), "6"),
-//             _ => panic!("Expected integer result"),
-//         }
-//     }
+        // This should work because we're using the same interned symbol
+        let result = eval_main(apply_expr, &mut state, &mut ec).unwrap();
+        match &ec.heap.get_value(result[0]) {
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "6"),
+            _ => panic!("Expected integer result"),
+        }
+    }
 
-//     #[test]
-//     fn test_eval_string_basic_builtins() {
-//         let mut ev = crate::eval::Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
-//         // Simple arithmetic
-//         let result = eval_string(&mut ec, "(+ 1 2)").unwrap();
-//         match &ec.heap.get_value(result[0]) {
-//             SchemeValue::Int(i) => assert_eq!(i.to_string(), "3"),
-//             _ => panic!("Expected integer result"),
-//         }
-//         // Multiple expressions, last result returned
-//         let result = eval_string(&mut ec, "(+ 1 2) (* 2 3)").unwrap();
-//         match &ec.heap.get_value(result[0]) {
-//             SchemeValue::Int(i) => assert_eq!(i.to_string(), "6"),
-//             _ => panic!("Expected integer result"),
-//         }
-//         // Variable definition and use
-//         eval_string(&mut ec, "(define x 42)").unwrap();
-//         let result = eval_string(&mut ec, "(+ x 1)").unwrap();
-//         match &ev.heap.get_value(result[0]) {
-//             SchemeValue::Int(i) => assert_eq!(i.to_string(), "43"),
-//             _ => panic!("Expected integer result"),
-//         }
-//     }
+    #[test]
+    fn test_eval_string_basic_builtins() {
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut runtime = RunTimeStruct::new();
+        let mut ec = RunTime::from_eval(&mut runtime);
+        let mut state = crate::kont::CEKState::new(env);
+        // Simple arithmetic
+        let result = eval_string("(+ 1 2)", &mut state, &mut ec).unwrap();
+        match &ec.heap.get_value(result[0]) {
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "3"),
+            _ => panic!("Expected integer result"),
+        }
+        // Multiple expressions, last result returned
+        let result = eval_string("(+ 1 2) (* 2 3)", &mut state, &mut ec).unwrap();
+        match &ec.heap.get_value(result[0]) {
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "6"),
+            _ => panic!("Expected integer result"),
+        }
+        // Variable definition and use
+        eval_string("(define x 42)", &mut state, &mut ec).unwrap();
+        let result = eval_string("(+ x 1)", &mut state, &mut ec).unwrap();
+        match &ec.heap.get_value(result[0]) {
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "43"),
+            _ => panic!("Expected integer result"),
+        }
+    }
 
-//     #[test]
-//     fn test_eval_string_error_handling() {
-//         let mut evaluator = Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut evaluator);
-//         // Syntax error
-//         let err = eval_string(&mut ec, "(+ 1 2");
-//         println!("test_eval_string_error: {:?}", err);
-//         // assert!(
-//         //     err.contains("end of input") ||
-//         //     err.contains("unexpected EOF") ||
-//         //     err.contains("Unclosed list"),
-//         //     "Unexpected error message: {}", err
-//         // );
-//         // Unbound variable
-//         let err = eval_string(&mut ec, "(+ y 1)").unwrap_err();
-//         assert!(err.contains("Unbound"));
-//         // Wrong argument type
-//         let err = eval_string(&mut ec, "(+ 1 'foo)").unwrap_err();
-//         assert!(err.contains("numbers"));
-//     }
-// }
+    #[test]
+    fn test_eval_string_error_handling() {
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut runtime = RunTimeStruct::new();
+        let mut ec = RunTime::from_eval(&mut runtime);
+        let mut state = crate::kont::CEKState::new(env);
+        // Syntax error
+        let err = eval_string("(+ 1 2", &mut state, &mut ec);
+        println!("test_eval_string_error: {:?}", err);
+        // assert!(
+        //     err.contains("end of input") ||
+        //     err.contains("unexpected EOF") ||
+        //     err.contains("Unclosed list"),
+        //     "Unexpected error message: {}", err
+        // );
+        // Unbound variable
+        let err = eval_string("(+ y 1)", &mut state, &mut ec).unwrap_err();
+        assert!(err.contains("Unbound"));
+        // Wrong argument type
+        let err = eval_string("(+ 1 'foo)", &mut state, &mut ec).unwrap_err();
+        assert!(err.contains("numbers"));
+    }
+}

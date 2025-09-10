@@ -757,39 +757,38 @@ pub fn new_string_port_input(content: &str) -> PortKind {
 }
 
 /// Convert a Rust Port to a Scheme port object.
-pub fn port_to_scheme_port(ec: &mut RunTime, port_kind: PortKind) -> GcRef {
-    let heap = &mut ec.heap;
+pub fn port_to_scheme_port(rt: &mut RunTime, port_kind: PortKind) -> GcRef {
+    let heap = &mut rt.heap;
     crate::gc::new_port(heap, port_kind)
 }
 
 /// Extract a PortKind from aScheme port
-pub fn port_kind_from_scheme_port(evaluator: &mut RunTime, scheme_port: GcRef) -> PortKind {
-    let s_p = evaluator.heap.get_value(scheme_port);
+pub fn port_kind_from_scheme_port(rt: &mut RunTime, scheme_port: GcRef) -> PortKind {
+    let s_p = rt.heap.get_value(scheme_port);
     match s_p {
         crate::gc::SchemeValue::Port(kind) => kind.clone(),
         _ => panic!("Expected port object"),
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-//     #[test]
-//     fn test_port_conversion() {
-//         use crate::gc::GcHeap;
+    #[test]
+    fn test_port_conversion() {
+        let mut runtime = crate::eval::RunTimeStruct::new();
+        let mut rt = RunTime::from_eval(&mut runtime);
 
-//         let mut heap = GcHeap::new();
-//         let original_port = Port {
-//             kind: PortKind::StringPortInput {
-//                 content: "hello".to_string(),
-//                 pos: UnsafeCell::new(0),
-//             },
-//         };
+        let orig_port_kind = PortKind::StringPortInput {
+            content: "hello".to_string(),
+            pos: Cell::new(0),
+        };
+        //let original_port = crate::gc::new_port(&mut heap, port_kind);
 
-//         let scheme_port = port_to_scheme_port(ec, original_port.clone());
-//         let converted_port = port_from_scheme_port(ec, scheme_port);
+        let scheme_port = port_to_scheme_port(&mut rt, orig_port_kind.clone());
+        let converted_port = port_kind_from_scheme_port(&mut rt, scheme_port);
 
-//         assert_eq!(original_port.kind, converted_port.kind);
-//     }
-// }
+        assert_eq!(&orig_port_kind, &converted_port);
+    }
+}

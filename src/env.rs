@@ -38,6 +38,7 @@ pub trait EnvOps {
     fn define(&self, symbol: GcRef, val: GcRef); // Define a binding in this frame
     fn set(&self, symbol: GcRef, val: GcRef) -> Result<(), String>; // Set in any frame where defined
     fn set_local(&self, symbol: GcRef, val: GcRef) -> Result<(), String>; // Set in this frame only
+    fn has_symbol(&self, symbol: GcRef) -> bool; // Check if a symbol is defined in this frame and chain
     fn extend(&self) -> EnvRef; // Create a new frame with this frame as parent
     fn parent(&self) -> Option<EnvRef>;
 }
@@ -104,6 +105,10 @@ impl EnvOps for EnvRef {
         } else {
             Err(format!("Unbound variable: {}", print_value(&symbol)))
         }
+    }
+
+    fn has_symbol(&self, symbol: GcRef) -> bool {
+        self.borrow().bindings.contains_key(&symbol)
     }
 
     // Add a new frame with this frame as parent
@@ -254,113 +259,113 @@ mod tests {
     use crate::gc::{new_int, new_string};
     use num_bigint::BigInt;
 
-    // #[test]
-    // fn test_frame_based_environment() {
-    //     let mut ev = crate::eval::Evaluator::new();
-    //     let ec = crate::eval::EvalContext::from_eval(&mut ev);
+    #[test]
+    fn test_frame_based_environment() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let ec = crate::eval::RunTime::from_eval(&mut ev);
 
-    //     // Create a new environment
-    //     let mut env = Environment::new();
+        // Create a new environment
+        let env = Rc::new(RefCell::new(Frame::new(None)));
 
-    //     // Create some interned symbols
-    //     let global_sym = ec.heap.intern_symbol("global_var");
-    //     let local_sym = ec.heap.intern_symbol("local_var");
-    //     let extended_sym = ec.heap.intern_symbol("extended_var");
+        // Create some interned symbols
+        let global_sym = ec.heap.intern_symbol("global_var");
+        let local_sym = ec.heap.intern_symbol("local_var");
+        let extended_sym = ec.heap.intern_symbol("extended_var");
 
-    //     // Set a global binding
-    //     let global_val = new_int(ec.heap, BigInt::from(42));
-    //     env.set_global_symbol(global_sym, global_val);
+        // Set a global binding
+        let global_val = new_int(ec.heap, BigInt::from(42));
+        env.define(global_sym, global_val);
 
-    //     // Verify we can get the global binding
-    //     assert!(env.get_symbol(global_sym).is_some());
+        // Verify we can get the global binding
+        assert!(env.lookup(global_sym).is_some());
 
-    //     // Set a local binding in current frame
-    //     let local_val = new_string(ec.heap, "local");
-    //     env.set_symbol(local_sym, local_val);
+        // Set a local binding in current frame
+        let local_val = new_string(ec.heap, "local");
+        env.define(local_sym, local_val);
 
-    //     // Verify we can get the local binding
-    //     assert!(env.get_symbol(local_sym).is_some());
+        // Verify we can get the local binding
+        assert!(env.lookup(local_sym).is_some());
 
-    //     // Create an extended environment (new frame)
-    //     let mut extended_env = env.extend();
+        // Create an extended environment (new frame)
+        let extended_env = env.extend();
 
-    //     // Set a binding in the new frame
-    //     let extended_val = new_int(ec.heap, BigInt::from(99));
-    //     extended_env.set_symbol(extended_sym, extended_val);
+        // Set a binding in the new frame
+        let extended_val = new_int(ec.heap, BigInt::from(99));
+        extended_env.define(extended_sym, extended_val);
 
-    //     // Verify we can get the extended binding
-    //     assert!(extended_env.get_symbol(extended_sym).is_some());
+        // Verify we can get the extended binding
+        assert!(extended_env.lookup(extended_sym).is_some());
 
-    //     // Verify we can still get the global binding (lexical scoping)
-    //     assert!(extended_env.get_symbol(global_sym).is_some());
+        // Verify we can still get the global binding (lexical scoping)
+        assert!(extended_env.lookup(global_sym).is_some());
 
-    //     // Verify we can still get the local binding from parent frame
-    //     assert!(extended_env.get_symbol(local_sym).is_some());
+        // Verify we can still get the local binding from parent frame
+        assert!(extended_env.lookup(local_sym).is_some());
 
-    //     // Verify the original environment doesn't see the extended binding
-    //     assert!(env.get_symbol(extended_sym).is_none());
+        // Verify the original environment doesn't see the extended binding
+        assert!(env.lookup(extended_sym).is_none());
 
-    //     // Test that local bindings shadow global ones
-    //     let shadow_val = new_string(ec.heap, "shadowed");
-    //     extended_env.set_symbol(global_sym, shadow_val);
-    //     assert!(extended_env.get_symbol(global_sym).is_some());
-    // }
+        // Test that local bindings shadow global ones
+        let shadow_val = new_string(ec.heap, "shadowed");
+        extended_env.define(global_sym, shadow_val);
+        assert!(extended_env.lookup(global_sym).is_some());
+    }
 
-    // #[test]
-    // fn test_symbol_based_environment() {
-    //     let mut ev = crate::eval::Evaluator::new();
-    //     let ec = crate::eval::EvalContext::from_eval(&mut ev);
+    #[test]
+    fn test_symbol_based_environment() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let ec = crate::eval::RunTime::from_eval(&mut ev);
 
-    //     // Create a new environment
-    //     let mut env = Environment::new();
+        // Create a new environment
+        let env = Rc::new(RefCell::new(Frame::new(None)));
 
-    //     // Create some interned symbols
-    //     let global_sym = ec.heap.intern_symbol("global_var");
-    //     let local_sym = ec.heap.intern_symbol("local_var");
-    //     let extended_sym = ec.heap.intern_symbol("extended_var");
+        // Create some interned symbols
+        let global_sym = ec.heap.intern_symbol("global_var");
+        let local_sym = ec.heap.intern_symbol("local_var");
+        let extended_sym = ec.heap.intern_symbol("extended_var");
 
-    //     // Set a global binding using symbol
-    //     let global_val = new_int(ec.heap, BigInt::from(42));
-    //     env.set_global_symbol(global_sym, global_val);
+        // Set a global binding using symbol
+        let global_val = new_int(ec.heap, BigInt::from(42));
+        env.define(global_sym, global_val);
 
-    //     // Verify we can get the global binding using symbol
-    //     assert!(env.get_symbol(global_sym).is_some());
+        // Verify we can get the global binding using symbol
+        assert!(env.lookup(global_sym).is_some());
 
-    //     // Set a local binding in current frame using symbol
-    //     let local_val = new_string(ec.heap, "local");
-    //     env.set_symbol(local_sym, local_val);
+        // Set a local binding in current frame using symbol
+        let local_val = new_string(ec.heap, "local");
+        env.define(local_sym, local_val);
 
-    //     // Verify we can get the local binding using symbol
-    //     assert!(env.get_symbol(local_sym).is_some());
+        // Verify we can get the local binding using symbol
+        assert!(env.lookup_local(local_sym).is_some());
 
-    //     // Create an extended environment (new frame)
-    //     let mut extended_env = env.extend();
+        // Create an extended environment (new frame)
+        let mut extended_env = env.extend();
 
-    //     // Set a binding in the new frame using symbol
-    //     let extended_val = new_int(ec.heap, BigInt::from(99));
-    //     extended_env.set_symbol(extended_sym, extended_val);
+        // Set a binding in the new frame using symbol
+        let extended_val = new_int(ec.heap, BigInt::from(99));
+        extended_env.define(extended_sym, extended_val);
 
-    //     // Verify we can get the extended binding using symbol
-    //     assert!(extended_env.get_symbol(extended_sym).is_some());
+        // Verify we can get the extended binding using symbol
+        assert!(extended_env.lookup_local(extended_sym).is_some());
 
-    //     // Verify we can still get the global binding (lexical scoping)
-    //     assert!(extended_env.get_symbol(global_sym).is_some());
+        // Verify we can still get the global binding (lexical scoping)
+        assert!(extended_env.lookup(global_sym).is_some());
 
-    //     // Verify we can still get the local binding from parent frame
-    //     assert!(extended_env.get_symbol(local_sym).is_some());
+        // Verify we can still get the local binding from parent frame
+        assert!(extended_env.lookup(local_sym).is_some());
 
-    //     // Verify the original environment doesn't see the extended binding
-    //     assert!(extended_env.get_symbol(extended_sym).is_some());
-    //     assert!(env.get_symbol(extended_sym).is_none());
+        // Verify the original environment doesn't see the extended binding
+        assert!(extended_env.lookup_local(extended_sym).is_some());
+        assert!(env.lookup_local(extended_sym).is_none());
 
-    //     // Test that local bindings shadow global ones using symbols
-    //     let shadow_val = new_string(ec.heap, "shadowed");
-    //     extended_env.set_symbol(global_sym, shadow_val);
-    //     assert!(extended_env.get_symbol(global_sym).is_some());
+        // Test that local bindings shadow global ones using symbols
+        let shadow_val = new_string(ec.heap, "shadowed");
+        extended_env.define(global_sym, shadow_val);
+        assert!(extended_env.lookup_local(global_sym).is_some());
 
-    //     // Test symbol-based has methods
-    //     assert!(env.has_symbol(global_sym));
-    //     assert!(env.has_symbol(local_sym));
-    //     assert!(!env.has_symbol(extended_sym));
-    // }
+        // Test symbol-based has methods
+        assert!(env.has_symbol(global_sym));
+        assert!(env.has_symbol(local_sym));
+        assert!(!env.has_symbol(extended_sym));
+    }
 }

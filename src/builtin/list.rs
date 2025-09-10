@@ -205,128 +205,146 @@ pub fn register_list_builtins(heap: &mut GcHeap, env: EnvRef) {
     );
 }
 
-// mod tests {
-//     #[allow(unused_imports)]
-//     use super::*;
+mod tests {
+    #[allow(unused_imports)]
+    use super::*;
 
-//     #[test]
-//     fn test_car_builtin() {
-//         let mut ev = crate::eval::Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+    #[test]
+    fn test_car_builtin() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
 
-//         // Create a pair
-//         let car = crate::gc::new_int(heap, num_bigint::BigInt::from(1));
-//         let cdr = crate::gc::new_int(heap, num_bigint::BigInt::from(2));
-//         let pair = crate::gc::new_pair(heap, car, cdr);
+        // Create a pair
+        let car = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(1));
+        let cdr = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(2));
+        let pair = crate::gc::new_pair(ec.heap, car, cdr);
 
-//         // Test car
-//         let result = car_builtin(&mut ec, &[pair]).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Int(i) if i.to_string() == "1"));
+        // Test car
+        let result = car_builtin(&mut ec.heap, &[pair]).unwrap();
+        assert!(matches!(&ec.heap.get_value(result), SchemeValue::Int(i) if i.to_string() == "1"));
 
-//         // Test error: wrong number of arguments
-//         let result = car_builtin(&mut ec, &[]);
-//         assert!(result.is_err());
-//         assert!(result.unwrap_err().contains("expects exactly 1 argument"));
+        // Test error: wrong number of arguments
+        let result = car_builtin(&mut ec.heap, &[]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expects exactly 1 argument"));
 
-//         // Test error: not a pair
-//         let not_pair = crate::gc::new_int(heap, num_bigint::BigInt::from(42));
-//         let result = car_builtin(&mut ec, &[not_pair]);
-//         assert!(result.is_err());
-//         assert!(result.unwrap_err().contains("argument must be a pair"));
-//     }
+        // Test error: not a pair
+        let not_pair = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(42));
+        let result = car_builtin(&mut ec.heap, &[not_pair]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("argument must be a pair"));
+    }
 
-//     #[test]
-//     fn test_cdr_builtin() {
-//         let mut ev = crate::eval::Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+    #[test]
+    fn test_cdr_builtin() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
 
-//         // Create a pair
-//         let car = crate::gc::new_int(heap, num_bigint::BigInt::from(1));
-//         let cdr = crate::gc::new_int(heap, num_bigint::BigInt::from(2));
-//         let pair = crate::gc::new_pair(heap, car, cdr);
+        // Create a pair
+        let car = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(1));
+        let cdr = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(2));
+        let pair = crate::gc::new_pair(ec.heap, car, cdr);
 
-//         // Test cdr
-//         let result = cdr_builtin(&mut ec, &[pair]).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Int(i) if i.to_string() == "2"));
+        // Test cdr
+        let result = cdr_builtin(&mut ec.heap, &[pair]).unwrap();
+        assert!(matches!(&ec.heap.get_value(result), SchemeValue::Int(i) if i.to_string() == "2"));
 
-//         // Test error: wrong number of arguments
-//         let result = cdr_builtin(&mut ec, &[]);
-//         assert!(result.is_err());
-//         assert!(result.unwrap_err().contains("expects exactly 1 argument"));
+        // Test error: wrong number of arguments
+        let result = cdr_builtin(&mut ec.heap, &[]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expects exactly 1 argument"));
 
-//         // Test error: not a pair
-//         let not_pair = crate::gc::new_int(heap, num_bigint::BigInt::from(42));
-//         let result = cdr_builtin(&mut ec, &[not_pair]);
-//         assert!(result.is_err());
-//         assert!(result.unwrap_err().contains("argument must be a pair"));
-//     }
+        // Test error: not a pair
+        let not_pair = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(42));
+        let result = cdr_builtin(&mut ec.heap, &[not_pair]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("argument must be a pair"));
+    }
 
-//     #[test]
-//     fn test_cons_builtin() {
-//         let mut ev = crate::eval::Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+    #[test]
+    fn test_cons_builtin() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
 
-//         let car = crate::gc::new_int(heap, num_bigint::BigInt::from(1));
-//         let cdr = crate::gc::new_int(heap, num_bigint::BigInt::from(2));
+        let car = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(1));
+        let cdr = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(2));
 
-//         // Test cons
-//         let result = cons_builtin(&mut ec, &[car, cdr]).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Pair(_, _)));
+        // Test cons
+        let result = cons_builtin(&mut ec.heap, &[car, cdr]).unwrap();
+        assert!(matches!(
+            &ec.heap.get_value(result),
+            SchemeValue::Pair(_, _)
+        ));
 
-//         // Test error: wrong number of arguments
-//         let result = cons_builtin(&mut ec, &[car]);
-//         assert!(result.is_err());
-//         assert!(result.unwrap_err().contains("expects exactly 2 arguments"));
-//     }
+        // Test error: wrong number of arguments
+        let result = cons_builtin(&mut ec.heap, &[car]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expects exactly 2 arguments"));
+    }
 
-//     #[test]
-//     fn test_list_builtin() {
-//         let mut ev = crate::eval::Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+    #[test]
+    fn test_list_builtin() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
 
-//         // Test empty list
-//         let result = list_builtin(&mut ec, &[]).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Nil));
+        // Test empty list
+        let result = list_builtin(&mut ec.heap, &[]).unwrap();
+        assert!(matches!(&ec.heap.get_value(result), SchemeValue::Nil));
 
-//         // Test single element
-//         let elem = crate::gc::new_int(heap, num_bigint::BigInt::from(42));
-//         let result = list_builtin(&mut ec, &[elem]).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Pair(_, _)));
+        // Test single element
+        let elem = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(42));
+        let result = list_builtin(&mut ec.heap, &[elem]).unwrap();
+        assert!(matches!(
+            &ec.heap.get_value(result),
+            SchemeValue::Pair(_, _)
+        ));
 
-//         // Test multiple elements
-//         let elem1 = crate::gc::new_int(heap, num_bigint::BigInt::from(1));
-//         let elem2 = crate::gc::new_int(heap, num_bigint::BigInt::from(2));
-//         let elem3 = crate::gc::new_int(heap, num_bigint::BigInt::from(3));
-//         let result = list_builtin(&mut ec, &[elem1, elem2, elem3]).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Pair(_, _)));
-//     }
+        // Test multiple elements
+        let elem1 = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(1));
+        let elem2 = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(2));
+        let elem3 = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(3));
+        let result = list_builtin(&mut ec.heap, &[elem1, elem2, elem3]).unwrap();
+        assert!(matches!(
+            &ec.heap.get_value(result),
+            SchemeValue::Pair(_, _)
+        ));
+    }
 
-//     #[test]
-//     fn test_append_builtin() {
-//         let mut ev = crate::eval::Evaluator::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+    #[test]
+    fn test_append_builtin() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
 
-//         // Test empty arguments
-//         let result = append_builtin(&mut ec, &[]).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Nil));
+        // Test empty arguments
+        let result = append_builtin(&mut ec.heap, &[]).unwrap();
+        assert!(matches!(&ec.heap.get_value(result), SchemeValue::Nil));
 
-//         // Test single list
-//         let elem1 = crate::gc::new_int(heap, num_bigint::BigInt::from(1));
-//         let elem2 = crate::gc::new_int(heap, num_bigint::BigInt::from(2));
-//         let list1 = list_builtin(&mut ec, &[elem1, elem2]).unwrap();
-//         let result = append_builtin(&mut ec, &[list1]).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Pair(_, _)));
+        // Test single list
+        let elem1 = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(1));
+        let elem2 = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(2));
+        let list1 = list_builtin(&mut ec.heap, &[elem1, elem2]).unwrap();
+        let result = append_builtin(&mut ec.heap, &[list1]).unwrap();
+        assert!(matches!(
+            &ec.heap.get_value(result),
+            SchemeValue::Pair(_, _)
+        ));
 
-//         // Test appending two lists
-//         let elem3 = crate::gc::new_int(heap, num_bigint::BigInt::from(3));
-//         let elem4 = crate::gc::new_int(heap, num_bigint::BigInt::from(4));
-//         let list2 = list_builtin(&mut ec, &[elem3, elem4]).unwrap();
-//         let result = append_builtin(&mut ec, &[list1, list2]).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Pair(_, _)));
+        // Test appending two lists
+        let elem3 = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(3));
+        let elem4 = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(4));
+        let list2 = list_builtin(&mut ec.heap, &[elem3, elem4]).unwrap();
+        let result = append_builtin(&mut ec.heap, &[list1, list2]).unwrap();
+        assert!(matches!(
+            &ec.heap.get_value(result),
+            SchemeValue::Pair(_, _)
+        ));
 
-//         // Test appending empty list
-//         let empty_list = get_nil(heap);
-//         let result = append_builtin(&mut ec, &[list1, empty_list]).unwrap();
-//         assert!(matches!(&heap.get_value(result), SchemeValue::Pair(_, _)));
-//     }
-// }
+        // Test appending empty list
+        let empty_list = get_nil(ec.heap);
+        let result = append_builtin(&mut ec.heap, &[list1, empty_list]).unwrap();
+        assert!(matches!(
+            &ec.heap.get_value(result),
+            SchemeValue::Pair(_, _)
+        ));
+    }
+}
