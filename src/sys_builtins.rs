@@ -2,8 +2,8 @@ use crate::cek::apply_proc;
 use crate::env::{EnvOps, EnvRef};
 use crate::eval::{RunTime, TraceType};
 use crate::gc::{
-    Callable, GcRef, SchemeValue, get_symbol, list, list_to_vec, list3, new_continuation, new_port,
-    new_sys_builtin,
+    Callable, GcRef, SchemeValue, get_symbol, list, list_from_slice, list_to_vec, list3,
+    new_continuation, new_port, new_sys_builtin,
 };
 use crate::gc_value;
 use crate::io::{PortKind, port_kind_from_scheme_port};
@@ -11,7 +11,7 @@ use crate::kont::{CEKState, Control, Kont, KontRef, insert_eval_eval};
 //use crate::printer::print_value;
 use crate::parser::{ParseError, parse};
 use crate::special_forms::create_callable;
-use crate::utilities::post_error;
+use crate::utilities::{dbg_cek, dbg_kont, post_error};
 
 //use crate::utilities::dump_cek;
 use std::rc::Rc;
@@ -105,29 +105,30 @@ fn apply_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
                 return Ok(());
             }
             Callable::Closure { .. } => {
+                let eval_expr = crate::gc::cons(args[0], args[1], ec.heap)?;
+                state.control = Control::Expr(eval_expr);
+
                 // Save the current env and kont
-                let old_env = Rc::clone(&state.env); // EnvRef
-                let old_kont = Rc::clone(&state.kont); // KontRef  <-- use plain clone!
+                // let old_env = Rc::clone(&state.env); // EnvRef
+                // let old_kont = Rc::clone(&state.kont); // KontRef
 
                 // Create the restore frame (below apply)
-                let restore = Rc::new(Kont::RestoreEnv {
-                    old_env: old_env,
-                    next: old_kont,
-                });
-
+                // let restore = Rc::new(Kont::RestoreEnv {
+                //     old_env: old_env,
+                //     next: old_kont,
+                // });
+                //let continuation = state.kont.next().unwrap();
                 // Create the apply frame that will set up the function and whose next is restore
-                let eval_args = list_to_vec(ec.heap, args[1])?;
-                let apply_kont = Rc::new(Kont::ApplyProc {
-                    proc: args[0],
-                    evaluated_args: Rc::new(eval_args),
-                    next: restore,
-                });
-
+                // let eval_args = list_to_vec(ec.heap, args[1])?;
+                // let apply_kont = Rc::new(Kont::ApplyProc {
+                //     proc: args[0],
+                //     evaluated_args: Rc::new(eval_args),
+                //     next: restore,
+                // });
                 // Make ApplyProc the active continuation
-                state.kont = Rc::clone(&apply_kont);
-
+                // state.kont = apply_kont;
                 // Now do the apply work: apply_proc must set env, set kont to restore, and set control
-                apply_proc(state, ec)?;
+                // apply_proc(state, ec)?;
                 return Ok(());
             }
             _ => return Err("apply: first argument must be a function".to_string()),
@@ -139,7 +140,6 @@ fn apply_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
 /// (debug-stack)
 /// Prints the stack
 fn debug_stack_sp(ec: &mut RunTime, _args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
-    crate::utilities::dump_cek("", state);
     state.control = crate::kont::Control::Value(ec.heap.void());
     Ok(())
 }
@@ -292,7 +292,6 @@ fn trace_env_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Resul
         global = true;
     }
     let env = state.env.clone();
-    crate::utilities::dbg_env(env, global);
     state.control = Control::Value(ec.heap.void());
     Ok(())
 }

@@ -61,7 +61,7 @@ fn run_cek(mut state: &mut CEKState, rt: &mut RunTime) -> Result<Vec<GcRef>, Str
 
 fn step(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> {
     //dump_cek("  step", &state);
-    debugger(state, ec);
+    debugger("step", &state, ec);
 
     let control = std::mem::replace(&mut state.control, Control::Empty);
     match control {
@@ -588,6 +588,7 @@ fn handle_restore_env(
     next: Rc<Kont>,
 ) -> Result<(), String> {
     // Restore environment
+    //eprintln!("Restoring environment {:?}", old_env);
     state.env = old_env;
     // Propagate the value
     //state.control = Control::Value(val);
@@ -642,7 +643,7 @@ fn apply_unevaluated(state: &mut CEKState, ec: &mut RunTime) -> Result<(), Strin
             original_call,
             next,
         } => (proc, original_call, Rc::clone(next)),
-        _ => return Err("apply_proc expected ApplyProc continuation".to_string()),
+        _ => return Err("apply_proc expected ApplySpecial continuation".to_string()),
     };
     match gc_value!(*proc) {
         Callable(Callable::SpecialForm { func, .. }) => {
@@ -675,7 +676,6 @@ fn apply_unevaluated(state: &mut CEKState, ec: &mut RunTime) -> Result<(), Strin
 /// Process Builtin, SysBuiltin, and Closure applications. Arguments are already evaluated.
 ///
 pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> {
-    //dump_cek("     apply_proc", &state);
     let (proc, evaluated_args, next) = match &*state.kont {
         Kont::ApplyProc {
             proc,
@@ -684,6 +684,7 @@ pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> 
         } => (proc, evaluated_args.clone(), Rc::clone(next)),
         _ => return Err("apply_proc expected ApplyProc continuation".to_string()),
     };
+    //crate::utilities::dbg_kont("kont in apply_proc", &state.kont);
     match gc_value!(*proc) {
         Callable(callable) => match callable {
             Callable::Builtin { func, .. } => {
@@ -715,6 +716,7 @@ pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> 
                     state.env = new_env;
                     state.kont = next; // reuse continuation depth
                     state.control = Control::Expr(*body);
+                    //crate::utilities::debugger("exiting apply_proc; tail call", &state, ec);
                     Ok(())
                 } else {
                     // Normal (non-tail) call: push a RestoreEnv barrier.
@@ -723,7 +725,10 @@ pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> 
                         next: next,
                     });
                     state.env = new_env;
+                    // crate::utilities::dbg_env("apply_proc", state.env.clone(), false);
+                    // crate::utilities::dbg_kont("apply_proc", &state.kont);
                     state.control = Control::Expr(*body);
+                    //crate::utilities::debugger("exiting apply_proc; non-tail call", &state, ec);
                     Ok(())
                 }
             }
