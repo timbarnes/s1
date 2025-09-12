@@ -1,6 +1,7 @@
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{GcHeap, GcRef, SchemeValue, get_nil, new_pair, set_car, set_cdr};
 use crate::gc_value;
+use num_traits::ToPrimitive;
 
 /// Builtin function: (car pair)
 ///
@@ -116,6 +117,90 @@ pub fn append_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String
     Ok(result_head)
 }
 
+pub fn reverse_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 1 {
+        return Err("reverse: expects exactly 1 argument".to_string());
+    }
+
+    let mut result = heap.nil_s();
+    let mut current = args[0];
+
+    loop {
+        match &gc_value!(current) {
+            SchemeValue::Pair(car, cdr) => {
+                result = new_pair(heap, *car, result);
+                current = *cdr;
+            }
+            SchemeValue::Nil => break,
+            _ => return Err("reverse: argument must be a proper list".to_string()),
+        }
+    }
+
+    Ok(result)
+}
+
+pub fn list_tail_builtin(_heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 2 {
+        return Err("list-tail: expects exactly 2 arguments".to_string());
+    }
+
+    let mut list = args[0];
+    let k = match &gc_value!(args[1]) {
+        SchemeValue::Int(i) => i
+            .to_i64()
+            .ok_or("list-tail: index must be an exact integer")?,
+        _ => return Err("list-tail: index must be an exact integer".to_string()),
+    };
+
+    if k < 0 {
+        return Err("list-tail: index must be non-negative".to_string());
+    }
+
+    for _ in 0..k {
+        match &gc_value!(list) {
+            SchemeValue::Pair(_, cdr) => {
+                list = *cdr;
+            }
+            _ => return Err("list-tail: index out of bounds".to_string()),
+        }
+    }
+
+    Ok(list)
+}
+
+pub fn list_ref_builtin(_heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 2 {
+        return Err("list-ref: expects exactly 2 arguments".to_string());
+    }
+
+    let list = args[0];
+    let k = match &gc_value!(args[1]) {
+        SchemeValue::Int(i) => i
+            .to_i64()
+            .ok_or("list-ref: index must be an exact integer")?,
+        _ => return Err("list-ref: index must be an exact integer".to_string()),
+    };
+
+    if k < 0 {
+        return Err("list-ref: index must be non-negative".to_string());
+    }
+
+    let mut current = list;
+    for _ in 0..k {
+        match &gc_value!(current) {
+            SchemeValue::Pair(_, cdr) => {
+                current = *cdr;
+            }
+            _ => return Err("list-ref: index out of bounds".to_string()),
+        }
+    }
+
+    match &gc_value!(current) {
+        SchemeValue::Pair(car, _) => Ok(*car),
+        _ => Err("list-ref: index out of bounds".to_string()),
+    }
+}
+
 pub fn set_car_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 2 {
         return Err("set-car!: wrong number of arguments".to_string());
@@ -155,6 +240,9 @@ pub fn register_list_builtins(heap: &mut GcHeap, env: EnvRef) {
         "cons" => cons_builtin,
         "list" => list_builtin,
         "append" => append_builtin,
+        "reverse" => reverse_builtin,
+        "list-tail" => list_tail_builtin,
+        "list-ref" => list_ref_builtin,
     );
 }
 
@@ -329,5 +417,56 @@ mod tests {
         assert!(matches!(&ec.heap.get_value(third), SchemeValue::Pair(_, _)));
         let fourth = crate::gc::cdr(third).unwrap();
         assert!(matches!(&ec.heap.get_value(fourth), SchemeValue::Symbol(s) if s == "d"));
+    }
+
+    #[test]
+    fn test_reverse_builtin() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+
+        // (reverse '(1 2 3))
+        let one = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(1));
+        let two = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(2));
+        let three = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(3));
+        let list1 = list_builtin(&mut ec.heap, &[one, two, three]).unwrap();
+        let result = reverse_builtin(&mut ec.heap, &[list1]).unwrap();
+        let first = crate::gc::car(result).unwrap();
+        assert!(matches!(&ec.heap.get_value(first), SchemeValue::Int(i) if i.to_string() == "3"));
+        let second = crate::gc::car(crate::gc::cdr(result).unwrap()).unwrap();
+        assert!(matches!(&ec.heap.get_value(second), SchemeValue::Int(i) if i.to_string() == "2"));
+        let third =
+            crate::gc::car(crate::gc::cdr(crate::gc::cdr(result).unwrap()).unwrap()).unwrap();
+        assert!(matches!(&ec.heap.get_value(third), SchemeValue::Int(i) if i.to_string() == "1"));
+    }
+
+    #[test]
+    fn test_list_tail_builtin() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+
+        // (list-tail '(1 2 3) 1)
+        let one = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(1));
+        let two = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(2));
+        let three = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(3));
+        let list1 = list_builtin(&mut ec.heap, &[one, two, three]).unwrap();
+        let k = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(1));
+        let result = list_tail_builtin(&mut ec.heap, &[list1, k]).unwrap();
+        let first = crate::gc::car(result).unwrap();
+        assert!(matches!(&ec.heap.get_value(first), SchemeValue::Int(i) if i.to_string() == "2"));
+    }
+
+    #[test]
+    fn test_list_ref_builtin() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+
+        // (list-ref '(1 2 3) 1)
+        let one = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(1));
+        let two = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(2));
+        let three = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(3));
+        let list1 = list_builtin(&mut ec.heap, &[one, two, three]).unwrap();
+        let k = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(1));
+        let result = list_ref_builtin(&mut ec.heap, &[list1, k]).unwrap();
+        assert!(matches!(&ec.heap.get_value(result), SchemeValue::Int(i) if i.to_string() == "2"));
     }
 }

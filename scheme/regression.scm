@@ -301,6 +301,7 @@
 (test-equal 1 (caar '((1 2) (3 4))) "caar of nested list")
 (test-equal '(2) (cdar '((1 2) (3 4))) "cdar of nested list")
 (test-equal '(3 4) (cadr '((1 2) (3 4))) "cadr of nested list")
+(test-equal 3 (list-ref '(0 1 2 3) 3) "list-ref last item")
 
 (display "          === Testing List Construction ===")
 (newline)
@@ -312,7 +313,7 @@
 (test-equal '(1 2 3 4) (append '(1 2) '(3 4)) "append two lists")
 (test-equal '(1 2) (append '(1 2) '()) "append with empty list")
 (test-equal 'a (append '() 'a) "append with atomic last element")
-(test-equal '((a b) c . d)) (append '(a b) '(c . d)) "append with dotted pair as last element" )
+(test-equal '(a b c . d) (append '(a b) '(c . d)) "append with dotted pair as last element")
 (define foo '(a b))
 (test-equal '(1 b) (begin (set-car! foo 1) foo)  "set-car! on list")
 (test-equal '(1 . 2) (begin (set-cdr! foo 2) foo)  "set-cdr! on list")
@@ -321,6 +322,9 @@
 (define ref bar)
 (set-car! bar 'z)
 (test-true (eq? ref bar) "mutated pair is the same object")
+(test-equal '(5 4 3 2 1) (reverse '(1 2 3 4 5)) "reverse list")
+(test-equal '(3 4 5) (list-tail '(3 4 5) 0) "degenerate list-tail")
+(test-equal '(4 5) (list-tail '(2 3 4 5) 2) "list tail")
 
 (display "          === Testing Comparisons ===")
 (newline)
