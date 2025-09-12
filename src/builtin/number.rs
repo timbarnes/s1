@@ -5,8 +5,10 @@ use num_bigint::BigInt;
 use num_traits::{One, ToPrimitive, Zero};
 
 pub fn plus_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() < 2 {
-        return Err("+: expects at least 2 arguments".to_string());
+    match args.len() {
+        0 => return Ok(new_int(heap, BigInt::from(0))),
+        1 => return Ok(args[0]),
+        _ => {}
     }
     let mut is_float = false;
     let mut sum_int = BigInt::from(0);
@@ -92,8 +94,10 @@ pub fn minus_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
 }
 
 pub fn times_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() < 2 {
-        return Err("*: expects at least 2 arguments".to_string());
+    match args.len() {
+        0 => return Ok(new_int(heap, BigInt::from(1))),
+        1 => return Ok(args[0]),
+        _ => {}
     }
     let mut is_float = false;
     let mut prod_int = BigInt::one();
@@ -125,8 +129,19 @@ pub fn times_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
 }
 
 pub fn div_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() < 2 {
-        return Err("/: expects at least 2 arguments".to_string());
+    if args.len() < 1 {
+        return Err("/: expects at least 1 argument".to_string());
+    }
+    match args.len() {
+        0 => return Err("/: expects at least 1 argument".to_string()),
+        1 => {
+            return match gc_value!(args[0]) {
+                SchemeValue::Int(i) => Ok(new_float(heap, 1.0 / i.to_f64().unwrap())),
+                SchemeValue::Float(f) => Ok(new_float(heap, 1.0 / f)),
+                _ => Err("/: all arguments must be numbers".to_string()),
+            };
+        }
+        _ => {}
     }
     let mut result_float;
     let mut iter = args.iter();
