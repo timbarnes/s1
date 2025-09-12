@@ -1,5 +1,6 @@
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{GcHeap, GcRef, SchemeValue, get_nil, new_pair, set_car, set_cdr};
+use crate::gc_value;
 
 /// Builtin function: (car pair)
 ///
@@ -67,100 +68,52 @@ pub fn append_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String
         return Ok(heap.nil_s());
     }
 
-    if args.len() == 1 {
-        return Ok(args[0]);
+    let num_args = args.len();
+    let last_arg = args[num_args - 1];
+
+    // If there's only one argument, just return it.
+    if num_args == 1 {
+        return Ok(last_arg);
     }
 
-    // Helper function to copy a list
-    fn copy_list(heap: &mut GcHeap, lst: GcRef) -> Result<GcRef, String> {
-        let val = unsafe { &(*lst).value };
-        match &val {
-            SchemeValue::Nil => Ok(heap.nil_s()),
-            SchemeValue::Pair(car, cdr) => {
-                let car = car; // GcRef, just a pointer
-                let cdr = cdr; // GcRef, just a pointer
+    let mut result_head = heap.nil_s();
+    let mut result_tail = heap.nil_s();
 
-                let new_cdr = copy_list(heap, *cdr)?;
-                Ok(new_pair(heap, *car, new_cdr))
-            }
-            _ => Err("append: arguments must be lists".to_string()),
-        }
-    }
-
-    // Helper function to get the last pair of a list
-    fn get_last_pair(heap: &mut GcHeap, lst: GcRef) -> Result<GcRef, String> {
-        match &heap.get_value(lst) {
-            SchemeValue::Nil => Err("append: cannot append to empty list".to_string()),
-            SchemeValue::Pair(_, cdr) => match &heap.get_value(*cdr) {
-                SchemeValue::Nil => Ok(lst),
-                _ => get_last_pair(heap, *cdr),
-            },
-            _ => Err("append: arguments must be lists".to_string()),
-        }
-    }
-
-    // Start with a copy of the first list
-    let mut result = copy_list(heap, args[0])?;
-
-    // For each subsequent list, append it to the result
-    for &arg in &args[1..] {
-        match &heap.get_value(arg) {
-            SchemeValue::Nil => {
-                // Empty list, nothing to append
-                continue;
-            }
-            SchemeValue::Pair(_, _) => {
-                // Get the last pair of the result list
-                let _last_pair = get_last_pair(heap, result)?;
-
-                // Copy the current list
-                let _list_copy = copy_list(heap, arg)?;
-
-                // Update the cdr of the last pair to point to the copied list
-                // This is a bit tricky since we need to modify the existing pair
-                // For now, we'll rebuild the entire result list
-                // TODO: Implement proper mutable pair modification
-
-                // For now, we'll use a simpler approach: rebuild the entire result
-                let mut all_elements = Vec::new();
-
-                // Collect all elements from the result
-                let mut current = result;
-                loop {
-                    match &heap.get_value(current) {
-                        SchemeValue::Nil => break,
-                        SchemeValue::Pair(car, cdr) => {
-                            all_elements.push(*car);
-                            current = *cdr;
-                        }
-                        _ => return Err("append: arguments must be lists".to_string()),
+    // Iterate through all but the last argument.
+    for &arg in &args[..num_args - 1] {
+        let mut current = arg;
+        loop {
+            match &gc_value!(current) {
+                SchemeValue::Pair(car, cdr) => {
+                    let new_pair = new_pair(heap, *car, heap.nil_s());
+                    if result_head == heap.nil_s() {
+                        result_head = new_pair;
+                        result_tail = new_pair;
+                    } else {
+                        set_cdr(result_tail, new_pair)?;
+                        result_tail = new_pair;
                     }
+                    current = *cdr;
                 }
-
-                // Collect all elements from the current list
-                let mut current_list = arg;
-                loop {
-                    match &heap.get_value(current_list) {
-                        SchemeValue::Nil => break,
-                        SchemeValue::Pair(car, cdr) => {
-                            all_elements.push(*car);
-                            current_list = *cdr;
-                        }
-                        _ => return Err("append: arguments must be lists".to_string()),
-                    }
-                }
-
-                // Rebuild the result list
-                result = get_nil(heap);
-                for &element in all_elements.iter().rev() {
-                    result = new_pair(heap, element, result);
+                SchemeValue::Nil => break,
+                _ => {
+                    return Err(
+                        "append: arguments before the last must be proper lists".to_string()
+                    );
                 }
             }
-            _ => return Err("append: arguments must be lists".to_string()),
         }
     }
 
-    Ok(result)
+    // If all but the last argument were empty lists, the result is just the last argument.
+    if result_head == heap.nil_s() {
+        return Ok(last_arg);
+    }
+
+    // Attach the last argument.
+    set_cdr(result_tail, last_arg)?;
+
+    Ok(result_head)
 }
 
 pub fn set_car_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
@@ -346,5 +299,35 @@ mod tests {
             &ec.heap.get_value(result),
             SchemeValue::Pair(_, _)
         ));
+    }
+
+    #[test]
+    fn test_append_improper_list() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+
+        // (append '(1 2) 'a)
+        let one = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(1));
+        let two = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(2));
+        let list1 = list_builtin(&mut ec.heap, &[one, two]).unwrap();
+        let sym_a = ec.heap.intern_symbol("a");
+        let result = append_builtin(&mut ec.heap, &[list1, sym_a]).unwrap();
+        let third = crate::gc::cdr(crate::gc::cdr(result).unwrap()).unwrap();
+        assert!(matches!(&ec.heap.get_value(third), SchemeValue::Symbol(s) if s == "a"));
+
+        // (append '() 'a)
+        let empty_list = get_nil(ec.heap);
+        let result = append_builtin(&mut ec.heap, &[empty_list, sym_a]).unwrap();
+        assert!(matches!(&ec.heap.get_value(result), SchemeValue::Symbol(s) if s == "a"));
+
+        // (append '(1 2) '(c . d))
+        let c = ec.heap.intern_symbol("c");
+        let d = ec.heap.intern_symbol("d");
+        let improper_list = cons_builtin(&mut ec.heap, &[c, d]).unwrap();
+        let result = append_builtin(&mut ec.heap, &[list1, improper_list]).unwrap();
+        let third = crate::gc::cdr(crate::gc::cdr(result).unwrap()).unwrap();
+        assert!(matches!(&ec.heap.get_value(third), SchemeValue::Pair(_, _)));
+        let fourth = crate::gc::cdr(third).unwrap();
+        assert!(matches!(&ec.heap.get_value(fourth), SchemeValue::Symbol(s) if s == "d"));
     }
 }
