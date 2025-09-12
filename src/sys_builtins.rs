@@ -2,8 +2,8 @@ use crate::cek::apply_proc;
 use crate::env::{EnvOps, EnvRef};
 use crate::eval::{RunTime, TraceType};
 use crate::gc::{
-    Callable, GcRef, SchemeValue, get_symbol, list, list_from_slice, list_to_vec, list3,
-    new_continuation, new_port, new_sys_builtin,
+    Callable, GcHeap, GcRef, SchemeValue, get_symbol, list, list_to_vec, list3, new_continuation,
+    new_port, new_sys_builtin,
 };
 use crate::gc_value;
 use crate::io::{PortKind, port_kind_from_scheme_port};
@@ -86,12 +86,14 @@ fn apply_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
     if args.len() < 2 {
         return Err("apply: requires at least 2 arguments".to_string());
     }
+    // combine args into a single list
+    let arglist = apply_arg_list(&args[1..], ec.heap);
     let func = gc_value!(args[0]);
     match func {
         SchemeValue::Callable(func) => match func {
             Callable::Builtin { func, .. } => {
-                let args = list_to_vec(ec.heap, args[1])?;
-                let result = func(ec.heap, &args[..]);
+                let args = list_to_vec(ec.heap, arglist)?;
+                let result = func(ec.heap, &args);
                 match &result {
                     Err(err) => {
                         post_error(state, ec, &err);
@@ -102,8 +104,19 @@ fn apply_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
                 }
                 return Ok(());
             }
+            Callable::SysBuiltin { func, .. } => {
+                let args = list_to_vec(ec.heap, arglist)?;
+                let result = func(ec, &args, state);
+                match &result {
+                    Err(err) => {
+                        post_error(state, ec, &err);
+                    }
+                    Ok(_) => {}
+                }
+                return Ok(());
+            }
             Callable::Closure { .. } => {
-                let eval_expr = crate::gc::cons(args[0], args[1], ec.heap)?;
+                let eval_expr = crate::gc::cons(args[0], arglist, ec.heap)?;
                 state.control = Control::Expr(eval_expr);
                 return Ok(());
             }
@@ -350,5 +363,19 @@ fn capture_call_site_kont(k: &KontRef) -> KontRef {
     match &**k {
         Kont::EvalArg { next, .. } | Kont::ApplyProc { next, .. } => capture_call_site_kont(next),
         _ => Rc::clone(k),
+    }
+}
+
+fn apply_arg_list(args: &[GcRef], heap: &mut GcHeap) -> GcRef {
+    match args.len() {
+        0 => heap.nil_s(),
+        1 => args[0],
+        _ => {
+            let mut list = *args.last().unwrap();
+            for arg in args[..args.len() - 1].iter().rev() {
+                list = crate::gc::cons(*arg, list, heap).unwrap();
+            }
+            list
+        }
     }
 }

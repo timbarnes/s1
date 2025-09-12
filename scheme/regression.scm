@@ -371,7 +371,11 @@
 (test-true (eq? (eval '(+ 1 2)) (apply + '(1 2))) "eval and apply")
 (define square (lambda (x) (* x x)))
 (test-equal 144 (apply square '(12)) "Apply with closure")
-(trace-env)  ;; debug: apply closure is not popping the environment chain.
+(test-equal '(a . b) (apply cons '(a b)) "Apply giving dotted pair")
+(test-equal '((1 2) 3 4)(apply apply (list list '(1 2) '(3 4))) "Nested apply")
+(test-equal #(1 2 3) (apply vector '(1 2 3)) "Apply creating vector")
+(define (tail x) (apply values (list x)))
+(test-equal 5 (tail 5) "Apply with (values ...)")
 (display "          === Testing Recursion ===")
 (define fact
     (lambda (n)
