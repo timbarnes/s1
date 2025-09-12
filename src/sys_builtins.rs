@@ -86,8 +86,6 @@ fn apply_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
     if args.len() < 2 {
         return Err("apply: requires at least 2 arguments".to_string());
     }
-    // eprintln!("apply_sp func: {}", print_value(&args[0]));
-    // eprintln!("apply_sp args: {}", print_value(&args[1]));
     let func = gc_value!(args[0]);
     match func {
         SchemeValue::Callable(func) => match func {
@@ -107,28 +105,6 @@ fn apply_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
             Callable::Closure { .. } => {
                 let eval_expr = crate::gc::cons(args[0], args[1], ec.heap)?;
                 state.control = Control::Expr(eval_expr);
-
-                // Save the current env and kont
-                // let old_env = Rc::clone(&state.env); // EnvRef
-                // let old_kont = Rc::clone(&state.kont); // KontRef
-
-                // Create the restore frame (below apply)
-                // let restore = Rc::new(Kont::RestoreEnv {
-                //     old_env: old_env,
-                //     next: old_kont,
-                // });
-                //let continuation = state.kont.next().unwrap();
-                // Create the apply frame that will set up the function and whose next is restore
-                // let eval_args = list_to_vec(ec.heap, args[1])?;
-                // let apply_kont = Rc::new(Kont::ApplyProc {
-                //     proc: args[0],
-                //     evaluated_args: Rc::new(eval_args),
-                //     next: restore,
-                // });
-                // Make ApplyProc the active continuation
-                // state.kont = apply_kont;
-                // Now do the apply work: apply_proc must set env, set kont to restore, and set control
-                // apply_proc(state, ec)?;
                 return Ok(());
             }
             _ => return Err("apply: first argument must be a function".to_string()),

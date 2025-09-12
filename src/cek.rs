@@ -105,8 +105,8 @@ pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
     //dump_cek("   eval_cek", &state);
     match &gc_value!(expr) {
         // Self-evaluating values are returned unchanged
-        Int(_) | Float(_) | Str(_) | Bool(_) | Vector(_) | Char(_) | Nil | Continuation(_)
-        | Void | Undefined => {
+        Int(_) | Float(_) | Str(_) | Bool(_) | Vector(_) | Char(_) | Nil | Callable(_)
+        | Continuation(_) | Void | Undefined => {
             state.control = Control::Value(expr);
         }
         // Symbols are looked up in the environment
@@ -117,12 +117,6 @@ pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
                 post_error(state, rt, &format!("Unbound variable: {}", name));
             }
         }
-
-        // Callables: Builtin, SysBuiltin, Closure, Macro, or SpecialForm gets evaluated
-        Callable(_) => {
-            state.control = Control::Value(expr);
-        }
-
         // Pair: potentially a function application
         Pair(car, cdr) => {
             // Quick path: is this a special form?
