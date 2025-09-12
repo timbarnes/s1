@@ -106,7 +106,6 @@
 
 (define load (lambda (f)
     (begin (define inp (open-input-file f))
-        (display inp)
         (push-port! inp))))
 
 (define not (lambda (v) (if v #f #t)))
