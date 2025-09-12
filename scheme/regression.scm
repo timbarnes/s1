@@ -10,7 +10,7 @@
 
 (define **failed-tests** '()) ; keep track of test failures
 (define **counter** 0)
-(define **print-successes** #t)
+(define **print-successes** #f)
 
 (define fails
   (lambda (message)
@@ -374,7 +374,7 @@
 (test-equal '(a . b) (apply cons '(a b)) "Apply giving dotted pair")
 (test-equal '((1 2) 3 4)(apply apply (list list '(1 2) '(3 4))) "Nested apply")
 (test-equal #(1 2 3) (apply vector '(1 2 3)) "Apply creating vector")
-(define (tail x) (apply values (list x)))
+(define tail (lambda (x) (apply values (list x))))
 (test-equal 5 (tail 5) "Apply with (values ...)")
 (display "          === Testing Recursion ===")
 (define fact

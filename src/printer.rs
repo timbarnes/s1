@@ -69,7 +69,7 @@ pub fn print_value(obj: &GcRef) -> String {
         Bool(true) => "#t".to_string(),
         Bool(false) => "#f".to_string(),
         Char(c) => format!("#\\{}", c),
-        Nil => "nil".to_string(),
+        Nil => "()".to_string(),
         Void => "".to_string(),
         //Void => "#<void>".to_string(),
         Undefined => "#<undefined>".to_string(),

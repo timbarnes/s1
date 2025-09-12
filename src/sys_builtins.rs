@@ -201,7 +201,6 @@ fn escape_sp(_ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<
 }
 
 fn values_sp(_ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
-    eprintln!("Processing {} values", args.len());
     match args.len() {
         0 => return Err("values: requires at least one argument".to_string()),
         1 => state.control = Control::Value(args[0]),
