@@ -59,8 +59,8 @@ pub enum PortKind {
     // },
     /// In-memory string port for input with content and current position
     StringPortInput { content: String, pos: Cell<usize> },
-    /// In-memory string port for output with accumulating content
-    StringPortOutput { content: String },
+    // In-memory string port for output with accumulating content
+    //StringPortOutput { content: String },
 }
 
 impl Clone for PortKind {
@@ -86,9 +86,9 @@ impl Clone for PortKind {
                 content: content.clone(),
                 pos: Cell::new(pos.get()),
             },
-            PortKind::StringPortOutput { content } => PortKind::StringPortOutput {
-                content: content.clone(),
-            },
+            // PortKind::StringPortOutput { content } => PortKind::StringPortOutput {
+            //     content: content.clone(),
+            // },
         }
     }
 }
@@ -148,10 +148,10 @@ impl PartialEq for PortKind {
                     pos: p2,
                 },
             ) => c1 == c2 && p1.get() == p2.get(),
-            (
-                PortKind::StringPortOutput { content: c1 },
-                PortKind::StringPortOutput { content: c2 },
-            ) => c1 == c2,
+            // (
+            //     PortKind::StringPortOutput { content: c1 },
+            //     PortKind::StringPortOutput { content: c2 },
+            // ) => c1 == c2,
             _ => false,
         }
     }
@@ -505,11 +505,11 @@ pub fn write_line(port_kind: &PortKind, _file_table: &mut FileTable, line: &str)
         //         false
         //     }
         // }
-        PortKind::StringPortOutput { .. } => {
-            // We need to modify the content, so we need a mutable reference
-            // This is a limitation of the current design - we'll need to handle this differently
-            false
-        }
+        // PortKind::StringPortOutput { .. } => {
+        // We need to modify the content, so we need a mutable reference
+        // This is a limitation of the current design - we'll need to handle this differently
+        //     false
+        // }
         _ => false,
     }
 }
@@ -574,8 +574,7 @@ pub fn read_char(port_kind: &PortKind, _file_table: &mut FileTable) -> Option<ch
             } else {
                 None
             }
-        }
-        PortKind::StringPortOutput { .. } => None,
+        } // PortKind::StringPortOutput { .. } => None,
     }
 }
 
@@ -625,11 +624,11 @@ pub fn write_char(port_kind: &PortKind, _file_table: &mut FileTable, ch: char) -
         //         false
         //     }
         // }
-        PortKind::StringPortOutput { .. } => {
-            // We need to modify the content, so we need a mutable reference
-            // This is a limitation of the current design - we'll need to handle this differently
-            false
-        }
+        // PortKind::StringPortOutput { .. } => {
+        //     // We need to modify the content, so we need a mutable reference
+        //     // This is a limitation of the current design - we'll need to handle this differently
+        //     false
+        // }
         _ => false,
     }
 }
@@ -691,11 +690,11 @@ pub fn new_string_port(s: &str) -> PortKind {
 /// let content = get_output_string(&output_port);
 /// assert_eq!(content, "hello");
 /// ```
-pub fn new_output_string_port() -> PortKind {
-    PortKind::StringPortOutput {
-        content: String::new(),
-    }
-}
+// pub fn new_output_string_port() -> PortKind {
+//     PortKind::StringPortOutput {
+//         content: String::new(),
+//     }
+// }
 
 /// Get the content from an output string port.
 ///
@@ -722,7 +721,7 @@ pub fn new_output_string_port() -> PortKind {
 /// ```
 pub fn get_output_string(port_kind: &PortKind) -> String {
     match &port_kind {
-        PortKind::StringPortOutput { content } => content.clone(),
+        // PortKind::StringPortOutput { content } => content.clone(),
         _ => String::new(),
     }
 }

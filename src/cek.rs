@@ -78,7 +78,7 @@ fn step(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> {
         Control::Values(vals) => {
             eprintln!("step::Values");
             *ec.depth -= 1;
-            dispatch_values_kont(state, ec, vals.clone(), Rc::clone(&state.kont))
+            dispatch_values_kont(state, vals.clone(), Rc::clone(&state.kont))
         }
         Control::Escape(val, kont) => {
             *ec.depth -= 1;
@@ -164,7 +164,6 @@ pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
 #[inline]
 fn dispatch_values_kont(
     state: &mut CEKState,
-    _ec: &mut RunTime,
     vals: Vec<GcRef>,
     kont: KontRef,
 ) -> Result<(), String> {
@@ -192,7 +191,7 @@ fn dispatch_kont(
 ) -> Result<(), String> {
     match &*kont {
         Kont::AndOr { kind, rest, next } => {
-            handle_and_or(state, ec, *kind, rest.clone(), Rc::clone(next))
+            handle_and_or(state, *kind, rest.clone(), Rc::clone(next))
         }
         Kont::ApplySpecial {
             proc,
@@ -233,16 +232,16 @@ fn dispatch_kont(
             env,
             phase,
             next,
-        } => handle_eval(state, ec, *expr, *env, *phase, Rc::clone(next)),
+        } => handle_eval(state, *expr, *env, *phase, Rc::clone(next)),
         Kont::If {
             then_branch,
             else_branch,
             next,
-        } => handle_if(state, ec, *then_branch, *else_branch, Rc::clone(next)),
+        } => handle_if(state, *then_branch, *else_branch, Rc::clone(next)),
         Kont::RestoreEnv { old_env, next } => {
-            handle_restore_env(state, ec, old_env.clone(), val, Rc::clone(next))
+            handle_restore_env(state, old_env.clone(), Rc::clone(next))
         }
-        Kont::Seq { rest, next } => handle_seq(state, ec, rest.clone(), Rc::clone(next)),
+        Kont::Seq { rest, next } => handle_seq(state, rest.clone(), Rc::clone(next)),
         Kont::Halt => Ok(()),
         _ => Err("unexpected continuation".to_string()),
     }
@@ -250,7 +249,6 @@ fn dispatch_kont(
 
 fn handle_and_or(
     state: &mut CEKState,
-    _ec: &mut RunTime,
     kind: AndOrKind,
     mut rest: Vec<GcRef>,
     next: KontRef,
@@ -419,7 +417,6 @@ fn handle_cond_clause(
 
 fn handle_eval(
     state: &mut CEKState,
-    _ec: &mut RunTime,
     expr: GcRef,
     env: Option<GcRef>,
     phase: EvalPhase,
@@ -477,12 +474,12 @@ fn handle_eval_arg(
     mut evaluated: Vec<GcRef>,
     original_call: GcRef,
     tail: bool,
-    env: EnvRef,
+    _env: EnvRef,
     next: KontRef,
 ) -> Result<(), String> {
     if proc.is_none() {
         // Evaluating operator (car of the call)
-        match ec.heap.get_value(val) {
+        match gc_value!(val) {
             Callable(Callable::SpecialForm { .. }) | Callable(Callable::Macro { .. }) => {
                 state.kont = Rc::new(Kont::ApplySpecial {
                     proc: val,
@@ -515,7 +512,7 @@ fn handle_eval_arg(
                             evaluated,
                             original_call,
                             tail,
-                            env,
+                            env: state.env.clone(),
                             next,
                         });
                     }
@@ -535,7 +532,7 @@ fn handle_eval_arg(
                 evaluated,
                 original_call,
                 tail,
-                env,
+                env: state.env.clone(),
                 next,
             });
         } else {
@@ -553,7 +550,6 @@ fn handle_eval_arg(
 
 fn handle_if(
     state: &mut CEKState,
-    _ec: &mut RunTime,
     then_branch: GcRef,
     else_branch: GcRef,
     next: KontRef,
@@ -574,32 +570,16 @@ fn handle_if(
     }
 }
 
-fn handle_restore_env(
-    state: &mut CEKState,
-    _ec: &mut RunTime,
-    old_env: EnvRef,
-    _val: GcRef,
-    next: Rc<Kont>,
-) -> Result<(), String> {
+fn handle_restore_env(state: &mut CEKState, old_env: EnvRef, next: Rc<Kont>) -> Result<(), String> {
     // Restore environment
-    //eprintln!("Restoring environment {:?}", old_env);
     state.env = old_env;
-    // Propagate the value
-    //state.control = Control::Value(val);
     // Pop this frame unconditionally
     state.kont = next;
-    // Reset tail because restoring the environment is not a tail position
-    //state.tail = false;
 
     Ok(())
 }
 
-fn handle_seq(
-    state: &mut CEKState,
-    _ec: &mut RunTime,
-    mut rest: Vec<GcRef>,
-    next: Rc<Kont>,
-) -> Result<(), String> {
+fn handle_seq(state: &mut CEKState, mut rest: Vec<GcRef>, next: Rc<Kont>) -> Result<(), String> {
     // Pop the next expression from the sequence
     let next_expr = rest.pop().unwrap(); // safe: Seq always has >=2 exprs
 

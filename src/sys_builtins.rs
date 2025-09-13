@@ -11,7 +11,7 @@ use crate::kont::{CEKState, Control, Kont, KontRef, insert_eval_eval};
 //use crate::printer::print_value;
 use crate::parser::{ParseError, parse};
 use crate::special_forms::create_callable;
-use crate::utilities::{dbg_cek, dbg_kont, post_error};
+use crate::utilities::post_error;
 
 //use crate::utilities::dump_cek;
 use std::rc::Rc;

@@ -121,12 +121,12 @@ pub fn eval_string(
 pub fn eval_macro(
     params: &[GcRef],
     body: GcRef,
-    env: EnvRef,
+    _env: EnvRef,
     args: &[GcRef],
     state: &mut CEKState,
     rt: &mut RunTime,
 ) -> Result<GcRef, String> {
-    let new_env = bind_params(params, args, &env, rt.heap)?;
+    let new_env = bind_params(params, args, &state.env, rt.heap)?;
     let original_env = state.env.clone();
     //println!("Before expansion: {}", print_value(&body));
     state.env = new_env;
