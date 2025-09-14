@@ -481,10 +481,9 @@
     result)
     "letrec with multiple body expressions")
 
- ;; Self-referencing non-function (should work but be undefined initially)
+ ;; Self-referencing non-function (should work but xyz should be undefined initially)
  (test-equal 42 (letrec ((xyz (if #f xyz 42))) xyz) "Self-referencing non-function")
 
- ;; Recursive list processing
  (test-equal 4 (letrec ((length (lambda (lst)
                     (if (null? lst)
                         0
@@ -498,12 +497,17 @@
                 (outer 3))
     "Nested letrec")
 
- ;; Variable shadowing with recursion
 (test-equal 3 (let ((x 100))
                 (letrec ((x 1)
                             (f (lambda () (+ x 2))))
                     (f)))
         "Variable shadowing with recursion")
+
+(test-equal 55 (let loop ((x 10) (acc 0))
+                    (if (= x 0)
+                        acc
+                        (loop (- x 1) (+ acc x))))
+    "Named let")
 
 (display "          === Testing read ===")
 (newline)

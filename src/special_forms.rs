@@ -315,33 +315,87 @@ pub fn cond_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<()
     Ok(())
 }
 
-/// let (basic version, without labels)
+/// let (basic version, with named let support)
 pub fn let_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let formvec = expect_at_least_n_args(&ec.heap, expr, 3)?;
-    let bindings = list_to_vec(&mut ec.heap, formvec[1])?; // (let bindings . body)
 
-    // Separate bindings into variables and expressions
-    let mut vars = get_nil(ec.heap);
-    let mut exprs = vars;
-    // Build them up as lists
-    for binding in bindings.into_iter().rev() {
-        match &ec.heap.get_value(binding) {
-            SchemeValue::Pair(var, binding_expr) => {
-                let var_sym = expect_symbol(&ec.heap, &var)?;
-                let binding_expr = car(*binding_expr)?;
-                vars = cons(var_sym, vars, ec.heap)?;
-                exprs = cons(binding_expr, exprs, ec.heap)?;
+    // Check if this is named let: (let name bindings body...)
+    // vs normal let: (let bindings body...)
+    match &ec.heap.get_value(formvec[1]) {
+        SchemeValue::Symbol(_) => {
+            // Named let: (let name bindings body...)
+            if formvec.len() < 4 {
+                return Err("Named let requires at least 4 arguments".to_string());
             }
-            _ => return Err("Invalid binding in let".to_string()),
+
+            let name = formvec[1];
+            let bindings = list_to_vec(&mut ec.heap, formvec[2])?;
+            let body_exprs = formvec[3..].to_vec();
+
+            // Extract parameters and initial values
+            let mut params = Vec::new();
+            let mut init_vals = Vec::new();
+
+            for binding in bindings.iter() {
+                match &ec.heap.get_value(*binding) {
+                    SchemeValue::Pair(var, binding_expr) => {
+                        let var_sym = expect_symbol(&ec.heap, &var)?;
+                        let binding_expr = car(*binding_expr)?;
+                        params.push(var_sym);
+                        init_vals.push(binding_expr);
+                    }
+                    _ => return Err("Invalid binding in named let".to_string()),
+                }
+            }
+
+            // Transform to: (letrec ((name (lambda (params...) body...))) (name init_vals...))
+            let lambda_sym = ec.heap.intern_symbol("lambda");
+            let params_list = list_from_slice(&params, ec.heap);
+            let body = wrap_body_in_begin(body_exprs, ec.heap);
+
+            let lambda_expr = list_from_slice(&[lambda_sym, params_list, body], ec.heap);
+            let name_binding = list_from_slice(&[name, lambda_expr], ec.heap);
+            let name_bindings = list_from_slice(&[name_binding], ec.heap);
+
+            let mut call_args = vec![name];
+            call_args.extend_from_slice(&init_vals);
+            let call_expr = list_from_slice(&call_args, ec.heap);
+
+            let letrec_sym = ec.heap.intern_symbol("letrec");
+            let letrec_expr = list_from_slice(&[letrec_sym, name_bindings, call_expr], ec.heap);
+
+            insert_eval(state, letrec_expr, false);
+            Ok(())
+        }
+        _ => {
+            // Normal let: (let bindings body...)
+            let bindings = list_to_vec(&mut ec.heap, formvec[1])?; // (let bindings . body)
+
+            // Separate bindings into variables and expressions
+            let mut vars = get_nil(ec.heap);
+            let mut exprs = vars;
+            // Build them up as lists
+            for binding in bindings.into_iter().rev() {
+                match &ec.heap.get_value(binding) {
+                    SchemeValue::Pair(var, binding_expr) => {
+                        let var_sym = expect_symbol(&ec.heap, &var)?;
+                        let binding_expr = car(*binding_expr)?;
+                        vars = cons(var_sym, vars, ec.heap)?;
+                        exprs = cons(binding_expr, exprs, ec.heap)?;
+                    }
+                    _ => return Err("Invalid binding in let".to_string()),
+                }
+            }
+            let (params, ptype) = params_to_vec(&mut ec.heap, vars);
+            let lambda_expr =
+                create_lambda_or_macro(&formvec, &params, ptype, ec, state.env.clone())?;
+            // cons the lambda to the list of values
+            let call = cons(lambda_expr, exprs, ec.heap)?;
+
+            insert_eval(state, call, false);
+            Ok(())
         }
     }
-    let (params, ptype) = params_to_vec(&mut ec.heap, vars);
-    let lambda_expr = create_lambda_or_macro(&formvec, &params, ptype, ec, state.env.clone())?;
-    // cons the lambda to the list of values
-    let call = cons(lambda_expr, exprs, ec.heap)?;
-
-    insert_eval(state, call, false);
-    Ok(())
 }
 
 /// let*
