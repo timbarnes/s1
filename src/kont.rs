@@ -321,21 +321,6 @@ pub fn insert_eval_eval(state: &mut CEKState, expr: GcRef, env: Option<GcRef>, t
     }
 }
 
-// pub fn insert_apply(
-//     state: &mut CEKState,
-//     _env: Option<GcRef>,
-//     proc: GcRef,
-//     evaluated_args: Vec<GcRef>,
-// ) {
-//     let prev = Rc::clone(&state.kont);
-//     state.kont = Rc::new(Kont::ApplyProc {
-//         proc,
-//         evaluated_args,
-//         next: prev,
-//     });
-//     state.tail = true;
-// }
-
 /// Bind a symbol to a value. This is installed before evaluation of the right hand side.
 /// The bind operation takes the value returned by the previous continuation.
 /// Supports both define and set! semantics.
@@ -350,6 +335,7 @@ pub fn insert_bind(state: &mut CEKState, symbol: GcRef, env: Option<EnvRef>) {
     });
 }
 
+/// Insert a continuation for a (cond ...) expression
 pub fn insert_cond(state: &mut CEKState, remaining: Vec<CondClause>) {
     let prev = Rc::clone(&state.kont);
     state.kont = Rc::new(Kont::Cond {
@@ -358,6 +344,7 @@ pub fn insert_cond(state: &mut CEKState, remaining: Vec<CondClause>) {
     });
 }
 
+/// Insert a continuation for a (if ...) expression
 pub fn insert_if(state: &mut CEKState, then_branch: GcRef, else_branch: GcRef) {
     let prev = Rc::clone(&state.kont);
     state.kont = Rc::new(Kont::If {
@@ -367,6 +354,7 @@ pub fn insert_if(state: &mut CEKState, then_branch: GcRef, else_branch: GcRef) {
     });
 }
 
+/// Insert a continuation for a (begin ...) expression
 pub fn insert_seq(state: &mut CEKState, mut exprs: Vec<GcRef>) {
     // exprs has length ≥ 2
     exprs.reverse();
@@ -377,6 +365,7 @@ pub fn insert_seq(state: &mut CEKState, mut exprs: Vec<GcRef>) {
     });
 }
 
+///Insert a continuation for an (and...) or (or ...) expression
 pub fn insert_and_or(state: &mut CEKState, kind: AndOrKind, mut exprs: Vec<GcRef>) {
     // exprs has length ≥ 2
     exprs.reverse();

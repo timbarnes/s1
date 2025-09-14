@@ -1,4 +1,3 @@
-use crate::cek::apply_proc;
 use crate::env::{EnvOps, EnvRef};
 use crate::eval::{RunTime, TraceType};
 use crate::gc::{
@@ -149,11 +148,9 @@ fn call_cc_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<
         },
         _ => return Err("call/cc: argument must be a function".to_string()),
     }
-    // 2. Capture the current continuation
-    // eprintln!("Entering with continuation:");
-    // crate::utilities::dump_kont(&state);
+    // Capture the current continuation
     let kont = new_continuation(ec.heap, capture_call_site_kont(&state.kont));
-    // 3. Build the escape call
+    // Build the escape call
     let sym_val = get_symbol(ec.heap, "val");
     let sym_lambda = get_symbol(ec.heap, "lambda");
     let sym_escape = get_symbol(ec.heap, "escape");

@@ -437,12 +437,73 @@
 (test-equal '(2 1) (let ((a 1) (b '(2))) (expand `(,@b ,a))) "expand macro expression")
 (test-equal '(1 2) (let ((a 1) (b '(2))) (expand `(,a ,@b))) "expand macro expression")
 
-(display "          === Testing let ===")
+(display "          === Testing let, let* and letrec ===")
 (newline)
 
 (test-equal 6 (let ((x 2) (y 3)) (* x y)) "Two binding let with single body expression")
 (test-equal 9 (let ((x 3)) (* x x)) "Single binding let with single body expression")
 (test-equal 42 (let ((x 6)) (let ((y (+ x 1))) (* x y))) "Nested let expression")
+(test-equal 3 (let* ((x 1) (y (+ x 1))) (+ x y)) "let* with sequential dependency")
+(test-equal 3  (let ((x 10)) (let* ((x 1) (y (+ x 1))) (+ x y))) "let* with parameter shadowing")
+(test-equal 42 (let* () 42) "let* with no bindings")
+(test-equal 25 (let* ((x 5)) (* x x)) "let* with single binding")
+(test-equal 25 (let* ((x 2) (y 3)) (define z (+ x y)) (* z z)) "Multiple body expressions")
+(test-equal 4 (let* ((x 1) (y (let* ((a x) (b (+ a 1))) (+ a b)))) (+ x y)) "Nested let* expressions")
+(test-equal '(3 (2 4 6))
+    (let* ((lst '(1 2 3)) (len (length lst)) (doubled (map (lambda (x) (* x 2)) lst))) (list len doubled))
+    "let* using previous bindings in complex expression")
+(test-equal 120
+ (letrec ((fact (lambda (n)
+                  (if (= n 0)
+                      1
+                      (* n (fact (- n 1)))))))
+   (fact 5)) "letrec factorial")
+
+(test-equal '(#t #f #f #t)
+ (letrec ((even? (lambda (n)
+                   (if (= n 0)
+                       #t
+                       (odd? (- n 1)))))
+          (odd? (lambda (n)
+                  (if (= n 0)
+                      #f
+                      (even? (- n 1))))))
+   (list (even? 4) (odd? 4) (even? 3) (odd? 3)))
+   "Mutually recursive functions")
+
+ (test-equal 42 (letrec () 42) "letrec with no bindings")
+
+ (test-equal 49 (letrec ((square (lambda (x) (* x x))))
+   (square 7)) "letrec with single binding")
+ (test-equal 10
+    (letrec ((double (lambda (x) (* x 2))))
+    (define result (double 5))
+    result)
+    "letrec with multiple body expressions")
+
+ ;; Self-referencing non-function (should work but be undefined initially)
+ (test-equal 42 (letrec ((xyz (if #f xyz 42))) xyz) "Self-referencing non-function")
+
+ ;; Recursive list processing
+ (test-equal 4 (letrec ((length (lambda (lst)
+                    (if (null? lst)
+                        0
+                        (+ 1 (length (cdr lst)))))))
+                (length '(a b c d)))
+    "Recursive list processing")
+
+(test-equal 8 (letrec ((outer (lambda (n)
+                                (letrec ((inner (lambda (m) (+ n m))))
+                                    (inner 5)))))
+                (outer 3))
+    "Nested letrec")
+
+ ;; Variable shadowing with recursion
+(test-equal 3 (let ((x 100))
+                (letrec ((x 1)
+                            (f (lambda () (+ x 2))))
+                    (f)))
+        "Variable shadowing with recursion")
 
 (display "          === Testing read ===")
 (newline)

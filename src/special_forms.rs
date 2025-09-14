@@ -8,8 +8,8 @@ use crate::cek::eval_main;
 use crate::env::{EnvOps, EnvRef};
 use crate::eval::{RunTime, expect_at_least_n_args, expect_n_args, expect_symbol};
 use crate::gc::{
-    GcHeap, GcRef, SchemeValue, car, cdr, cons, get_nil, list_from_slice, list_to_vec, matches_sym,
-    new_float, new_macro, new_special_form,
+    GcHeap, GcRef, SchemeValue, car, cdr, cons, get_nil, list_from_slice, list_to_vec, list2,
+    matches_sym, new_float, new_macro, new_pair, new_special_form,
 };
 use crate::kont::{
     AndOrKind, CEKState, CondClause, insert_and_or, insert_bind, insert_cond, insert_eval,
@@ -49,6 +49,8 @@ pub fn register_special_forms(heap: &mut GcHeap, env: EnvRef) {
         "define" => define_sf,
         "set!" => set_sf,
         "let" => let_sf,
+        "let*" => let_star_sf,
+        "letrec" => letrec_sf,
         "if" => if_sf,
         "cond" => cond_sf,
         "begin" => begin_sf,
@@ -339,6 +341,99 @@ pub fn let_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(),
     let call = cons(lambda_expr, exprs, ec.heap)?;
 
     insert_eval(state, call, false);
+    Ok(())
+}
+
+/// let*
+pub fn let_star_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
+    let formvec = expect_at_least_n_args(&ec.heap, expr, 3)?;
+    let bindings = list_to_vec(&mut ec.heap, formvec[1])?; // (let* bindings . body)
+
+    if bindings.is_empty() {
+        // No bindings, just evaluate the body in sequence
+        let body_exprs = formvec[2..].to_vec();
+        let wrapped_body = wrap_body_in_begin(body_exprs, ec.heap);
+        insert_eval(state, wrapped_body, false);
+        return Ok(());
+    }
+
+    // Transform (let* ((v1 e1) (v2 e2) ...) body) into nested lets:
+    // (let ((v1 e1)) (let* ((v2 e2) ...) body))
+    let first_binding = bindings[0];
+    let remaining_bindings = list_from_slice(&bindings[1..], ec.heap);
+
+    // Create the inner let* or body
+    let inner_expr = if bindings.len() == 1 {
+        // Last binding, just use the body
+        wrap_body_in_begin(formvec[2..].to_vec(), ec.heap)
+    } else {
+        // More bindings, create nested let*
+        let let_star_sym = ec.heap.intern_symbol("let*");
+        let wrapped_body = wrap_body_in_begin(formvec[2..].to_vec(), ec.heap);
+        list_from_slice(&[let_star_sym, remaining_bindings, wrapped_body], ec.heap)
+    };
+
+    // Create the outer let with first binding
+    let let_sym = ec.heap.intern_symbol("let");
+    let first_binding_list = list_from_slice(&[first_binding], ec.heap);
+    let outer_let = list_from_slice(&[let_sym, first_binding_list, inner_expr], ec.heap);
+
+    insert_eval(state, outer_let, false);
+    Ok(())
+}
+
+/// letrec (recursive binding version)
+pub fn letrec_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
+    let formvec = expect_at_least_n_args(&ec.heap, expr, 3)?;
+    let bindings = list_to_vec(&mut ec.heap, formvec[1])?; // (letrec bindings . body)
+
+    if bindings.is_empty() {
+        // No bindings, just evaluate the body in sequence
+        let body_exprs = formvec[2..].to_vec();
+        let wrapped_body = wrap_body_in_begin(body_exprs, ec.heap);
+        insert_eval(state, wrapped_body, false);
+        return Ok(());
+    }
+
+    // Transform (letrec ((v1 e1) (v2 e2) ...) body) into:
+    // (let ((v1 #f) (v2 #f) ...) (set! v1 e1) (set! v2 e2) ... body)
+
+    // Create initial bindings with #f values
+    let mut init_bindings = Vec::new();
+    let mut set_exprs = Vec::new();
+    let false_val = ec.heap.false_s();
+    let set_sym = ec.heap.intern_symbol("set!");
+
+    for binding in bindings.iter() {
+        match &ec.heap.get_value(*binding) {
+            SchemeValue::Pair(var, binding_expr) => {
+                let var_sym = expect_symbol(&ec.heap, &var)?;
+                let binding_expr = car(*binding_expr)?;
+
+                // Create (var #f) binding
+                let init_binding = list2(var_sym, false_val, ec.heap)?;
+                init_bindings.push(init_binding);
+
+                // Create (set! var expr)
+                let set_expr = list_from_slice(&[set_sym, var_sym, binding_expr], ec.heap);
+                set_exprs.push(set_expr);
+            }
+            _ => return Err("Invalid binding in letrec".to_string()),
+        }
+    }
+
+    // Build the complete expression
+    let let_sym = ec.heap.intern_symbol("let");
+    let init_bindings_list = list_from_slice(&init_bindings[..], ec.heap);
+
+    // Combine set! expressions with body
+    let mut all_exprs = set_exprs;
+    all_exprs.extend_from_slice(&formvec[2..]);
+
+    let let_body = wrap_body_in_begin(all_exprs, ec.heap);
+    let letrec_as_let = list_from_slice(&[let_sym, init_bindings_list, let_body], ec.heap);
+
+    insert_eval(state, letrec_as_let, false);
     Ok(())
 }
 
