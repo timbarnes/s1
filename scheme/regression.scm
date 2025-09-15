@@ -509,6 +509,118 @@
                         (loop (- x 1) (+ acc x))))
     "Named let")
 
+(display "          === Testing do ===")
+(newline)
+
+;; Basic counting loop
+(test-equal 55
+    (do ((i 1 (+ i 1))
+         (sum 0 (+ sum i)))
+        ((> i 10) sum))
+    "do: sum 1 to 10")
+
+;; Simple countdown
+(test-equal 0
+    (do ((n 5 (- n 1)))
+        ((= n 0) n))
+    "do: countdown to zero")
+
+;; Factorial calculation
+(test-equal 120
+    (do ((n 5 (- n 1))
+         (fact 1 (* fact n)))
+        ((= n 0) fact))
+    "do: factorial of 5")
+
+;; List length calculation
+(test-equal 4
+    (do ((lst '(a b c d) (cdr lst))
+         (len 0 (+ len 1)))
+        ((null? lst) len))
+    "do: calculate list length")
+
+;; List reversal
+(test-equal '(d c b a)
+    (do ((lst '(a b c d) (cdr lst))
+         (rev '() (cons (car lst) rev)))
+        ((null? lst) rev))
+    "do: reverse list")
+
+;; Empty bindings
+(test-equal 42
+    (do () (#t 42))
+    "do: empty bindings")
+
+;; Single variable, no step (variable unchanged)
+(test-equal 10
+    (do ((x 10))
+        (#t x))
+    "do: single variable no step")
+
+;; Multiple result expressions
+(test-equal 3
+    (do ((i 0 (+ i 1)))
+        ((= i 3) (+ i 1) (- i 1) i))
+    "do: multiple result expressions returns last")
+
+;; Commands executed during iteration
+(test-equal 6
+    (let ((result 0))
+      (do ((i 1 (+ i 1)))
+          ((> i 3) result)
+        (set! result (+ result i))))
+    "do: commands executed each iteration")
+
+;; No result expressions (returns unspecified, test for not crashing)
+(test-equal #t
+    (let ((x #f))
+      (do ((i 0 (+ i 1)))
+          ((= i 1) (set! x #t)))
+      x)
+    "do: no result expressions")
+
+;; Nested do loops
+(test-equal 10
+    (do ((i 1 (+ i 1))
+         (total 0))
+        ((> i 3) total)
+      (do ((j 1 (+ j 1)))
+          ((> j i))
+        (set! total (+ total j))))
+    "do: nested do loops")
+
+;; Variable shadowing
+(test-equal 10
+    (let ((x 100))
+      (do ((x 0 (+ x 1))
+           (sum 0 (+ sum x)))
+          ((= x 5) sum)))
+    "do: variable shadowing")
+
+;; Complex step expressions
+(test-equal '(1 2 4 8 16)
+    (do ((n 16 (quotient n 2))
+         (powers '() (cons n powers)))
+        ((= n 0) powers))
+    "do: complex step expressions")
+
+;; Zero iterations (test immediately true)
+(test-equal 42
+    (do ((i 0 (+ i 1)))
+        (#t 42)
+      (error "should not execute"))
+    "do: zero iterations")
+
+;; Multiple commands in body
+(test-equal '(3 2 1)
+    (let ((result '()))
+      (do ((i 1 (+ i 1)))
+          ((> i 3) result)
+        (set! result (cons i result))
+        (set! result (reverse result))
+        (set! result (reverse result))))
+    "do: multiple commands in body")
+
 (display "          === Testing read ===")
 (newline)
 (test-equal '(list a 2 3) (read) "Reading a list")

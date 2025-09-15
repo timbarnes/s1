@@ -51,6 +51,7 @@ pub fn register_special_forms(heap: &mut GcHeap, env: EnvRef) {
         "let" => let_sf,
         "let*" => let_star_sf,
         "letrec" => letrec_sf,
+        "do" => do_sf,
         "if" => if_sf,
         "cond" => cond_sf,
         "begin" => begin_sf,
@@ -548,6 +549,100 @@ fn with_timer_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
     let elapsed_time = timer.elapsed().as_secs_f64();
     let time = new_float(&mut ec.heap, elapsed_time);
     insert_value(state, time);
+    Ok(())
+}
+
+/// do (iterative loop construct)
+/// Syntax: (do ((var1 init1 step1) (var2 init2 step2) ...) (test expr ...) command ...)
+pub fn do_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
+    let formvec = expect_at_least_n_args(&ec.heap, expr, 3)?;
+
+    let bindings = list_to_vec(&mut ec.heap, formvec[1])?;
+    let test_clause = list_to_vec(&mut ec.heap, formvec[2])?;
+    let commands = formvec[3..].to_vec();
+
+    if test_clause.is_empty() {
+        return Err("do: test clause cannot be empty".to_string());
+    }
+
+    let test_expr = test_clause[0];
+    let result_exprs = test_clause[1..].to_vec();
+
+    // Extract variables, initial values, and step expressions
+    let mut vars = Vec::new();
+    let mut init_vals = Vec::new();
+    let mut step_exprs = Vec::new();
+
+    for binding in bindings.iter() {
+        let binding_parts = list_to_vec(&mut ec.heap, *binding)?;
+
+        if binding_parts.len() < 2 || binding_parts.len() > 3 {
+            return Err("do: binding must have 2 or 3 elements (var init [step])".to_string());
+        }
+
+        let var = expect_symbol(&ec.heap, &binding_parts[0])?;
+        let init = binding_parts[1];
+        let step = if binding_parts.len() == 3 {
+            binding_parts[2]
+        } else {
+            var // If no step, use the variable itself (no change)
+        };
+
+        vars.push(var);
+        init_vals.push(init);
+        step_exprs.push(step);
+    }
+
+    // Transform to: (let loop ((var1 init1) (var2 init2) ...)
+    //                 (if test
+    //                     (begin result_expr ...)
+    //                     (begin command ... (loop step1 step2 ...))))
+
+    let let_sym = ec.heap.intern_symbol("let");
+    let loop_sym = ec.heap.intern_symbol("loop");
+    let if_sym = ec.heap.intern_symbol("if");
+    let begin_sym = ec.heap.intern_symbol("begin");
+
+    // Create initial bindings: ((var1 init1) (var2 init2) ...)
+    let mut init_bindings = Vec::new();
+    for (var, init) in vars.iter().zip(init_vals.iter()) {
+        init_bindings.push(list_from_slice(&[*var, *init], ec.heap));
+    }
+    let init_bindings_list = list_from_slice(&init_bindings, ec.heap);
+
+    // Create result expression: (begin result_expr ...) or unspecified if empty
+    let result_expr = if result_exprs.is_empty() {
+        ec.heap.unspecified()
+    } else if result_exprs.len() == 1 {
+        result_exprs[0]
+    } else {
+        let mut begin_exprs = vec![begin_sym];
+        begin_exprs.extend_from_slice(&result_exprs);
+        list_from_slice(&begin_exprs, ec.heap)
+    };
+
+    // Create loop call: (loop step1 step2 ...)
+    let mut loop_call = vec![loop_sym];
+    loop_call.extend_from_slice(&step_exprs);
+    let loop_call_expr = list_from_slice(&loop_call, ec.heap);
+
+    // Create loop body: (begin command ... (loop step1 step2 ...))
+    let loop_body = if commands.is_empty() {
+        loop_call_expr
+    } else {
+        let mut body_exprs = vec![begin_sym];
+        body_exprs.extend_from_slice(&commands);
+        body_exprs.push(loop_call_expr);
+        list_from_slice(&body_exprs, ec.heap)
+    };
+
+    // Create if expression: (if test result_expr loop_body)
+    let if_expr = list_from_slice(&[if_sym, test_expr, result_expr, loop_body], ec.heap);
+
+    // Create the complete named let: (let loop ((var1 init1) ...) (if ...))
+    let named_let = list_from_slice(&[let_sym, loop_sym, init_bindings_list, if_expr], ec.heap);
+
+    insert_eval(state, named_let, false);
     Ok(())
 }
 
