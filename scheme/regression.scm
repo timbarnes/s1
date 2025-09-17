@@ -302,6 +302,9 @@
 (test-equal '(2) (cdar '((1 2) (3 4))) "cdar of nested list")
 (test-equal '(3 4) (cadr '((1 2) (3 4))) "cadr of nested list")
 (test-equal 3 (list-ref '(0 1 2 3) 3) "list-ref last item")
+(test-equal 0 (length '()) "zero-length list")
+(test-equal 3 (length '(3 2 1)) "single level list")
+(test-equal 1 (length '((1 2 3))) "nested list")
 
 (display "          === Testing List Construction ===")
 (newline)

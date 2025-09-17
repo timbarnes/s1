@@ -1,7 +1,33 @@
 use crate::env::{EnvOps, EnvRef};
-use crate::gc::{GcHeap, GcRef, SchemeValue, get_nil, new_pair, set_car, set_cdr};
+use crate::gc::{GcHeap, GcRef, SchemeValue, get_nil, new_int, new_pair, set_car, set_cdr};
 use crate::gc_value;
 use num_traits::ToPrimitive;
+
+macro_rules! register_builtin_family {
+    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
+        $(
+            $env.define($heap.intern_symbol($name),
+                crate::gc::new_builtin($heap, $func,
+                    concat!($name, ": builtin function").to_string()));
+        )*
+    };
+}
+
+pub fn register_list_builtins(heap: &mut GcHeap, env: EnvRef) {
+    register_builtin_family!(heap, env,
+        "car" => car_builtin,
+        "cdr" => cdr_builtin,
+        "set-car!" => set_car_builtin,
+        "set-cdr!" => set_cdr_builtin,
+        "cons" => cons_builtin,
+        "list" => list_builtin,
+        "append" => append_builtin,
+        "reverse" => reverse_builtin,
+        "list-tail" => list_tail_builtin,
+        "list-ref" => list_ref_builtin,
+        "length" => length_builtin,
+    );
+}
 
 /// Builtin function: (car pair)
 ///
@@ -201,6 +227,29 @@ pub fn list_ref_builtin(_heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, Str
     }
 }
 
+pub fn length_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 1 {
+        return Err("length: wrong number of arguments".to_string());
+    }
+
+    let list = args[0];
+
+    match gc_value!(list) {
+        SchemeValue::Pair(_, _) => {}
+        SchemeValue::Nil => return Ok(new_int(heap, num_bigint::BigInt::from(0))),
+        _ => return Err("length: argument must be a list".to_string()),
+    }
+    let mut current = list;
+    let mut length = 0;
+    while let SchemeValue::Pair(_, cdr) = &gc_value!(current) {
+        length += 1;
+        current = *cdr;
+    }
+    let result = num_bigint::BigInt::from(length);
+
+    Ok(new_int(heap, result))
+}
+
 pub fn set_car_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 2 {
         return Err("set-car!: wrong number of arguments".to_string());
@@ -219,31 +268,6 @@ pub fn set_cdr_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, Strin
     let new_cdr = args[1];
     set_cdr(pair_ref, new_cdr).unwrap();
     Ok(heap.nil_s())
-}
-
-macro_rules! register_builtin_family {
-    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
-        $(
-            $env.define($heap.intern_symbol($name),
-                crate::gc::new_builtin($heap, $func,
-                    concat!($name, ": builtin function").to_string()));
-        )*
-    };
-}
-
-pub fn register_list_builtins(heap: &mut GcHeap, env: EnvRef) {
-    register_builtin_family!(heap, env,
-        "car" => car_builtin,
-        "cdr" => cdr_builtin,
-        "set-car!" => set_car_builtin,
-        "set-cdr!" => set_cdr_builtin,
-        "cons" => cons_builtin,
-        "list" => list_builtin,
-        "append" => append_builtin,
-        "reverse" => reverse_builtin,
-        "list-tail" => list_tail_builtin,
-        "list-ref" => list_ref_builtin,
-    );
 }
 
 mod tests {

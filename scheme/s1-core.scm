@@ -14,21 +14,57 @@
 (define macro? (lambda (x) (eq? (type-of x) 'macro)))
 (define boolean? (lambda (x) (eq? (type-of x) 'boolean)))
 (define char? (lambda (x) (eq? (type-of x) 'char)))
-(define primitive? (lambda (x) (eq? (type-of x) 'primitive)))
-(define procedure? (lambda (x)
-    (let ((type (type-of x)))
-        (or (eq? type 'builtin)
-            (eq? type 'closure)
-            (eq? type 'sys-builtin)))))
-(define env-frame? (lambda (x) (eq? (type-of x) 'env-frame)))
-(define null? (lambda (x) (eq? x '())))
 
 (define procedure? (lambda (x)
     (let ((type (type-of x)))
         (or (eq? type 'builtin)
             (eq? type 'closure)
-            (eq? type 'special-form)
-            (eq? type 'macro)))))
+            (eq? type 'sys-builtin)))))
+
+(define env-frame? (lambda (x) (eq? (type-of x) 'env-frame)))
+(define null? (lambda (x) (eq? x '())))
+
+(define memq
+  (lambda (v l)
+    (cond ((null? l) #f)
+	  ((eq? v (car l)) l)
+	  (else (memq v (cdr l))))))
+
+(define memv
+  (lambda (v l)
+    (cond ((null? l) #f)
+	  ((eqv? v (car l)) l)
+	  (else (memv v (cdr l))))))
+
+(define member
+  (lambda (v l)
+    (cond ((null? l) #f)
+	  ((equal? v (car l)) l)
+	  (else (member v (cdr l))))))
+
+(define assoc
+    (lambda (key alist)
+        (cond ((null? alist) #f)
+              ((equal? key (caar alist)) (car alist))
+              (else (assoc key (cdr alist))))))
+
+(define assv
+    (lambda (key alist)
+        (cond ((null? alist) #f)
+              ((eqv? key (caar alist)) (car alist))
+              (else (assv key (cdr alist))))))
+
+(define assq
+    (lambda (key alist)
+        (cond ((null? alist) #f)
+              ((eq? key (caar alist)) (car alist))
+              (else (assq key (cdr alist))))))
+
+(define procedure? (lambda (x)
+    (let ((type (type-of x)))
+        (or (eq? type 'builtin)
+            (eq? type 'closure)
+            (eq? type 'sys-builtin)))))
 
 (define eqv? (lambda (x y)
     (cond ((eq? x y) #t)
@@ -144,11 +180,6 @@
 (define top (lambda (s) (if (empty? s) #f (car s))))
 (define push! (macro (val var) `(set! ,var (cons ,val ,var))))
 (define pop! (macro (var) `(let ((result (car ,var))) (set! ,var (cdr ,var)) result)))
-
-(define length (lambda (lst)
-    (cond ((null? lst) 0)
-       ((not (pair? lst)) (error "length: not a well-formed list"))
-       (else (+ 1 (length (cdr lst)))))))
 
 ; (define map (lambda (f . lists)
 ;     (display "Fn:") (displayln f)
