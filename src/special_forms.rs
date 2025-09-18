@@ -137,11 +137,9 @@ fn create_lambda_or_macro(
             }
         }
     }
-    // Process body
-    let body_exprs = form[2..].to_vec();
 
     // Wrap the body expressions in (begin ...) if needed
-    let wrapped_body = wrap_body_in_begin(body_exprs, ec.heap);
+    let wrapped_body = wrap_body_in_begin(&form[2..], ec.heap);
 
     // Intern and preserve parameter symbols
     let mut param_map = HashMap::new();
@@ -254,7 +252,7 @@ pub fn define_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
             let params = cdr(signature)?;
 
             let lambda_sym = ec.heap.intern_symbol("lambda");
-            let body_expr = wrap_body_in_begin(body.to_vec(), &mut ec.heap);
+            let body_expr = wrap_body_in_begin(&body, &mut ec.heap);
 
             let lambda_list = list_from_slice(&[lambda_sym, params, body_expr], &mut ec.heap);
 
@@ -318,7 +316,7 @@ pub fn cond_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<()
             let body = if parts.len() == 1 {
                 None
             } else {
-                Some(wrap_body_in_begin(parts[1..].to_vec(), ec.heap))
+                Some(wrap_body_in_begin(&parts[1..], ec.heap))
             };
             clauses.push(CondClause::Normal {
                 test: ec.heap.true_s(),
@@ -333,7 +331,7 @@ pub fn cond_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<()
             let body = if parts.len() == 1 {
                 Some(parts[0])
             } else {
-                Some(wrap_body_in_begin(parts[1..].to_vec(), ec.heap))
+                Some(wrap_body_in_begin(&parts[1..], ec.heap))
             };
             clauses.push(CondClause::Normal {
                 test: parts[0],
@@ -382,7 +380,7 @@ pub fn let_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(),
             // Transform to: (letrec ((name (lambda (params...) body...))) (name init_vals...))
             let lambda_sym = ec.heap.intern_symbol("lambda");
             let params_list = list_from_slice(&params, ec.heap);
-            let body = wrap_body_in_begin(body_exprs, ec.heap);
+            let body = wrap_body_in_begin(&body_exprs[..], ec.heap);
 
             let lambda_expr = list_from_slice(&[lambda_sym, params_list, body], ec.heap);
             let name_binding = list_from_slice(&[name, lambda_expr], ec.heap);
@@ -436,8 +434,7 @@ pub fn let_star_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Resul
 
     if bindings.is_empty() {
         // No bindings, just evaluate the body in sequence
-        let body_exprs = formvec[2..].to_vec();
-        let wrapped_body = wrap_body_in_begin(body_exprs, ec.heap);
+        let wrapped_body = wrap_body_in_begin(&formvec[2..], ec.heap);
         insert_eval(state, wrapped_body, false);
         return Ok(());
     }
@@ -450,11 +447,11 @@ pub fn let_star_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Resul
     // Create the inner let* or body
     let inner_expr = if bindings.len() == 1 {
         // Last binding, just use the body
-        wrap_body_in_begin(formvec[2..].to_vec(), ec.heap)
+        wrap_body_in_begin(&formvec[2..], ec.heap)
     } else {
         // More bindings, create nested let*
         let let_star_sym = ec.heap.intern_symbol("let*");
-        let wrapped_body = wrap_body_in_begin(formvec[2..].to_vec(), ec.heap);
+        let wrapped_body = wrap_body_in_begin(&formvec[2..], ec.heap);
         list_from_slice(&[let_star_sym, remaining_bindings, wrapped_body], ec.heap)
     };
 
@@ -474,8 +471,7 @@ pub fn letrec_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
 
     if bindings.is_empty() {
         // No bindings, just evaluate the body in sequence
-        let body_exprs = formvec[2..].to_vec();
-        let wrapped_body = wrap_body_in_begin(body_exprs, ec.heap);
+        let wrapped_body = wrap_body_in_begin(&formvec[2..], ec.heap);
         insert_eval(state, wrapped_body, false);
         return Ok(());
     }
@@ -515,7 +511,7 @@ pub fn letrec_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
     let mut all_exprs = set_exprs;
     all_exprs.extend_from_slice(&formvec[2..]);
 
-    let let_body = wrap_body_in_begin(all_exprs, ec.heap);
+    let let_body = wrap_body_in_begin(&all_exprs[..], ec.heap);
     let letrec_as_let = list_from_slice(&[let_sym, init_bindings_list, let_body], ec.heap);
 
     insert_eval(state, letrec_as_let, false);
@@ -679,15 +675,14 @@ pub fn do_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), 
 /// Utility functions
 ///
 
-pub fn wrap_body_in_begin(body_exprs: Vec<GcRef>, heap: &mut GcHeap) -> GcRef {
+pub fn wrap_body_in_begin(body_exprs: &[GcRef], heap: &mut GcHeap) -> GcRef {
     if body_exprs.len() == 1 {
         body_exprs[0]
     } else {
         // Create (begin expr1 expr2 ...)
         let begin_sym = heap.intern_symbol("begin");
-        let mut exprs = body_exprs;
-        exprs.insert(0, begin_sym);
-        list_from_slice(&exprs[..], heap)
+        let exprs = list_from_slice(body_exprs, heap);
+        cons(begin_sym, exprs, heap).unwrap()
     }
 }
 
