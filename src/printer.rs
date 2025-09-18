@@ -7,7 +7,7 @@ pub fn display_value(obj: &GcRef) -> String {
     let val = gc_value!(*obj);
     match val {
         Str(s) => s.clone(),
-        Char(c) => format!("{c}"),
+        // Char(c) => format!("{c}"),
         _ => print_value(obj),
     }
 }
@@ -68,7 +68,16 @@ pub fn print_value(obj: &GcRef) -> String {
         }
         Bool(true) => "#t".to_string(),
         Bool(false) => "#f".to_string(),
-        Char(c) => format!("#\\{}", c),
+        Char(c) => {
+            let mut ch = String::new();
+            match c {
+                '\n' => ch.push_str("newline"),
+                '\t' => ch.push_str("tab"),
+                '\r' => ch.push_str("return"),
+                _ => ch.push(*c),
+            };
+            format!("#\\{}", ch)
+        }
         Nil => "()".to_string(),
         Void => "".to_string(),
         //Void => "#<void>".to_string(),

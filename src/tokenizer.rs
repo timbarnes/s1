@@ -231,6 +231,19 @@ impl<'a> Tokenizer<'a> {
                         self.unread_char('e');
                         Some(Token::Character('s'))
                     }
+                    Some('t') => {
+                        // Check for #\tab
+                        if let Some('a') = self.read_char() {
+                            if let Some('b') = self.read_char() {
+                                return Some(Token::Character('\t'));
+                            }
+                        }
+                        // Put back characters if not "space"
+                        self.unread_char('a');
+                        self.unread_char('b');
+
+                        Some(Token::Character('t'))
+                    }
                     Some('n') => {
                         // Check for #\newline
                         if let Some('e') = self.read_char() {

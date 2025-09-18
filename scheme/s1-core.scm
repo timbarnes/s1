@@ -22,6 +22,41 @@
             (eq? type 'sys-builtin)))))
 
 (define env-frame? (lambda (x) (eq? (type-of x) 'env-frame)))
+
+(define char<=?
+  (lambda (c1 c2)
+    (or (char<? c1 c2)
+        (char=? c1 c2))))
+
+(define char>=?
+  (lambda (c1 c2)
+    (or (char>? c1 c2)
+        (char=? c1 c2))))
+
+(define char-alphabetic?
+  (lambda (c)
+    (or (and (char>=? c #\a) (char<=? c #\z))
+        (and (char>=? c #\A) (char<=? c #\Z)))))
+
+(define char-numeric?
+  (lambda (c)
+    (and (char>=? c #\0) (char<=? c #\9))))
+
+(define char-whitespace?
+  (lambda (c)
+    (or (char=? c #\space)
+        (char=? c #\newline)
+        (char=? c #\tab))))
+
+(define char-upper-case?
+  (lambda (c)
+    (and (char>=? c #\A) (char<=? c #\Z))))
+
+(define char-lower-case?
+  (lambda (c)
+    (and (char>=? c #\a) (char<=? c #\z))))
+
+
 (define null? (lambda (x) (eq? x '())))
 
 (define memq
@@ -59,12 +94,6 @@
         (cond ((null? alist) #f)
               ((eq? key (caar alist)) (car alist))
               (else (assq key (cdr alist))))))
-
-(define procedure? (lambda (x)
-    (let ((type (type-of x)))
-        (or (eq? type 'builtin)
-            (eq? type 'closure)
-            (eq? type 'sys-builtin)))))
 
 (define eqv? (lambda (x y)
     (cond ((eq? x y) #t)

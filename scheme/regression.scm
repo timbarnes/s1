@@ -376,6 +376,25 @@
 (test-false (char>? #\a #\a) "char>? same chars")
 (test-equal 97 (char->integer #\a) "char->integer")
 (test-equal #\a (integer->char 97) "integer->char")
+
+(test-true (char-alphabetic? #\a) "char-alphabetic? lower")
+(test-true (char-alphabetic? #\Z) "char-alphabetic? upper")
+(test-false (char-alphabetic? #\5) "char-alphabetic? numeric")
+(test-false (char-alphabetic? #\space) "char-alphabetic? whitespace")
+
+(test-true (char-numeric? #\1) "char-numeric? numeric")
+(test-false (char-numeric? #\a) "char-numeric? alphabetic")
+
+(test-true (char-whitespace? #\space) "char-whitespace? space")
+(test-true (char-whitespace? #\newline) "char-whitespace? newline")
+(test-true (char-whitespace? #\tab) "char-whitespace? tab")
+(test-false (char-whitespace? #\a) "char-whitespace? alphabetic")
+
+(test-true (char-upper-case? #\A) "char-upper-case? upper")
+(test-false (char-upper-case? #\a) "char-upper-case? lower")
+
+(test-true (char-lower-case? #\a) "char-lower-case? lower")
+(test-false (char-lower-case? #\A) "char-lower-case? upper")
 (test-equal "aaaaa" (make-string 5 #\a) "make-string with char")
 (test-equal "     " (make-string 5) "make-string without char")
 (test-equal '(#\a #\b #\c) (string->list "abc") "string->list")
