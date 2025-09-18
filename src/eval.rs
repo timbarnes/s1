@@ -150,23 +150,31 @@ pub fn bind_params(
     let captured_env = parent_env.clone();
     let new_env = captured_env.extend();
     match params.len() {
-        0 => (),
+        0 => {
+            if !args.is_empty() {
+                return Err("too many arguments".to_string());
+            }
+        }
         1 => {
             let arglist = list_from_slice(args, heap);
             new_env.define(params[0], arglist);
         }
         _ => {
-            for (param, arg) in params[1..].iter().zip(args.iter()) {
-                new_env.define(*param, *arg);
+            let num_required = params.len() - 1;
+            if args.len() < num_required {
+                return Err("not enough arguments".to_string());
             }
-            let delta = args.len().saturating_sub(params.len() - 1);
-            if delta > 0 {
-                if let SchemeValue::Symbol(_) = &heap.get_value(params[0]) {
-                    let rest_args = &args[(params.len() - 1)..];
-                    let arglist = list_from_slice(rest_args, heap);
-                    new_env.define(params[0], arglist);
-                }
+
+            // Bind the required parameters.
+            // The first param is the rest arg, so we skip it.
+            for i in 0..num_required {
+                new_env.define(params[i + 1], args[i]);
             }
+
+            // Bind the rest parameter.
+            let rest_args = &args[num_required..];
+            let arglist = list_from_slice(rest_args, heap);
+            new_env.define(params[0], arglist);
         }
     }
     Ok(new_env)

@@ -292,6 +292,19 @@
     (f n 1)))
 (test-equal 720 (fac-acc 6) "Factorial test with nested define and accumulator")
 
+(display "          === Testing Define Forms ====")
+(newline)
+(define (add a b) (+ a b))
+(test-equal 5 (add 2 3) "define standard function")
+
+(define (sum . nums) (apply + nums))
+(test-equal 10 (sum 1 2 3 4) "define variadic function")
+(test-equal 0 (sum) "define variadic function with no args")
+
+(define (mixed a b . rest) (list a b rest))
+(test-equal '(1 2 (3 4)) (mixed 1 2 3 4) "define mixed-arity function")
+(test-equal '(1 2 ()) (mixed 1 2) "define mixed-arity function with no rest args")
+
 (display "          === Testing List Accessors ===")
 (newline)
 (test-equal 1 (car '(1 2 3)) "car of list")
