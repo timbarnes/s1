@@ -51,7 +51,7 @@ fn main() {
     let mut rt = RunTime::from_eval(&mut runtime);
     // Set up ports and builtin functions and variables
     match initialize_scheme_globals(&mut rt, env.clone()) {
-        Ok(_val) => {}
+        Ok(_val) => {} // Ignore success value
         Err(msg) => {
             println!("Runtime initialization failed: {}", msg);
             std::process::exit(1);
@@ -61,33 +61,25 @@ fn main() {
 
     let mut state = CEKState::new(env.clone());
 
-    // Execute startup commands as Scheme code
     let mut startup_commands = Vec::new();
 
-    if args.quit {
-        startup_commands.push(format!("(eval-string \"(exit))\"))"));
+    // Load core file unless --no-core
+    if !args.no_core {
+        startup_commands.push(format!("(push-port! (open-input-file \"scheme/s1-core.scm\"))"));
     }
+
+    // Run regression tests if --regression is specified
+    if args.regression {
+        startup_commands.push(format!("(push-port! (open-input-file \"scheme/regression.scm\"))"));
+    }
+
     // Load each file in order
     for filename in &args.file {
         startup_commands.push(format!("(push-port! (open-input-file \"{}\"))", filename));
     }
 
-    // Run regression tests if --regression is specified
-    if args.regression {
-        startup_commands.push(format!(
-            "(push-port! (open-input-file \"scheme/regression.scm\"))"
-        ));
-    }
-
-    // Load core file unless --no-core
-    if !args.no_core {
-        startup_commands.push(format!(
-            "(push-port! (open-input-file \"scheme/s1-core.scm\"))"
-        ));
-    }
-
-    // Execute startup commands
-    for command in startup_commands {
+    // Execute startup commands in reverse to build the port stack correctly
+    for command in startup_commands.into_iter().rev() {
         if let Err(e) = eval_string(&command, &mut state, &mut rt) {
             eprintln!("Error executing startup command '{}': {}", command, e);
             std::process::exit(1);
@@ -95,10 +87,10 @@ fn main() {
     }
 
     // Drop into the REPL
-    repl(&mut rt, &mut state);
+    repl(&mut rt, &mut state, args.quit);
 }
 
-fn repl(rt: &mut RunTime, state: &mut CEKState) {
+fn repl(rt: &mut RunTime, state: &mut CEKState, quit_after_load: bool) {
     use crate::io::PortKind;
     use crate::parser::parse;
     use std::io as stdio;
@@ -114,7 +106,7 @@ fn repl(rt: &mut RunTime, state: &mut CEKState) {
         let current_port = rt.port_stack.last_mut();
         match current_port {
             Some(port_kind) => current_port_val = port_kind,
-            None => continue,
+            None => break, // No more ports, exit repl
         }
 
         interactive = matches!(current_port_val, PortKind::Stdin);
@@ -136,20 +128,19 @@ fn repl(rt: &mut RunTime, state: &mut CEKState) {
             },
             Err(crate::parser::ParseError::Eof) => {
                 // Pop the port stack on EOF
-                let port = rt.port_stack.pop(); // Pop and set new port
-                match &port {
-                    Some(_) => {}
-                    None => println!("Error popping port stack"),
+                rt.port_stack.pop();
+                if quit_after_load && rt.port_stack.len() == 1 {
+                    break;
+                }
+                if rt.port_stack.is_empty() {
+                    break;
                 }
                 continue;
             }
             Err(crate::parser::ParseError::Syntax(e)) => {
                 println!("Parse error: {}", e);
                 continue;
-            } // Err(crate::parser::ParseError::Other(e)) => {
-              //     println!("Other error: {}", e);
-              //     continue;
-              // }
+            }
         }
     }
 }
