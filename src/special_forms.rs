@@ -227,13 +227,43 @@ fn begin_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), S
 
 /// (define sym expr)
 pub fn define_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
-    // (define symbol expr)
-    let args = expect_n_args(&ec.heap, expr, 3)?; // including 'define
-    let sym = expect_symbol(&mut ec.heap, &args[1])?;
+    let args = list_to_vec(&ec.heap, expr)?;
+    if args.len() < 3 {
+        return Err("define: requires at least 2 arguments".to_string());
+    }
 
-    insert_bind(state, sym, None);
-    insert_eval(state, args[2], false);
-    Ok(())
+    match ec.heap.get_value(args[1]) {
+        SchemeValue::Symbol(_) => {
+            // (define symbol expr)
+            if args.len() != 3 {
+                return Err("define: variable definition requires exactly 2 arguments".to_string());
+            }
+            let sym = args[1];
+            let value_expr = args[2];
+
+            insert_bind(state, sym, None);
+            insert_eval(state, value_expr, false);
+            Ok(())
+        }
+        SchemeValue::Pair(_, _) => {
+            // (define (name params...) body...)
+            let signature = args[1];
+            let body = &args[2..];
+
+            let name = car(signature)?;
+            let params = cdr(signature)?;
+
+            let lambda_sym = ec.heap.intern_symbol("lambda");
+            let body_expr = wrap_body_in_begin(body.to_vec(), &mut ec.heap);
+
+            let lambda_list = list_from_slice(&[lambda_sym, params, body_expr], &mut ec.heap);
+
+            insert_bind(state, name, None);
+            insert_eval(state, lambda_list, false);
+            Ok(())
+        }
+        _ => Err("define: invalid syntax".to_string()),
+    }
 }
 
 /// (set! sym expr)
