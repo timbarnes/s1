@@ -2,7 +2,10 @@
 //
 //
 use crate::env::{EnvOps, EnvRef};
-use crate::gc::{GcHeap, GcRef, get_integer, get_string, new_bool, new_char, new_int, new_string};
+use crate::gc::{
+    get_integer, get_string, new_bool, new_char, new_int, new_pair, new_string, GcHeap, GcRef,
+    SchemeValue,
+};
 use crate::printer::display_value;
 use num_bigint::BigInt;
 
@@ -11,6 +14,38 @@ use num_bigint::BigInt;
 // fn string(ec: &mut EvalContext, args) {
 
 // }
+
+/////////////////////////////////////////////////
+/// Builtin registration for string functions
+///
+macro_rules! register_builtin_family {
+    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
+        $(
+            $env.define($heap.intern_symbol($name),
+                crate::gc::new_builtin($heap, $func,
+                    concat!($name, ": builtin function").to_string()));
+        )*
+    };
+}
+
+pub fn register_string_builtins(heap: &mut GcHeap, env: EnvRef) {
+    register_builtin_family!(heap, env,
+        ">string" => to_string,
+        "string-upcase" => string_upcase,
+        "string-downcase" => string_downcase,
+        "substring" => substring,
+        "string-copy" => string_copy,
+        "string-append" => string_append,
+        "string-length" => string_length,
+        "string-ref" => string_ref,
+        "string=?"=>string_equal,
+        "string>?"=>string_greater_than,
+        "string<?"=>string_less_than,
+        "make-string" => make_string,
+        "string-set!" => string_set,
+        "string->list" => string_to_list,
+    );
+}
 
 /// (>string arg)
 /// Convert a lisp object to a string
@@ -108,7 +143,7 @@ fn string_copy(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
 fn string_length(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() == 1 {
         let arg = get_string(heap, args[0])?;
-        let result = new_int(heap, BigInt::from(arg.len()));
+        let result = new_int(heap, BigInt::from(arg.chars().count()));
         Ok(result)
     } else {
         Err("to-string expects exactly one argument".to_string())
@@ -121,7 +156,7 @@ fn string_ref(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() == 2 {
         let s = get_string(heap, args[0]).unwrap();
         let k = get_integer(heap, args[1]).unwrap() as usize;
-        if k < s.len() {
+        if k < s.chars().count() {
             let result = new_char(heap, s.chars().nth(k).unwrap());
             Ok(result)
         } else {
@@ -168,31 +203,68 @@ fn string_equal(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     }
 }
 
-/////////////////////////////////////////////////
-/// Builtin registration for string functions
-///
-macro_rules! register_builtin_family {
-    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
-        $(
-            $env.define($heap.intern_symbol($name),
-                crate::gc::new_builtin($heap, $func,
-                    concat!($name, ": builtin function").to_string()));
-        )*
-    };
+fn get_char(heap: &mut GcHeap, val: GcRef) -> Result<char, String> {
+    match heap.get_value(val) {
+        SchemeValue::Char(val) => Ok(*val),
+        _ => Err("Expected char value".to_string()),
+    }
 }
 
-pub fn register_string_builtins(heap: &mut GcHeap, env: EnvRef) {
-    register_builtin_family!(heap, env,
-        ">string" => to_string,
-        "string-upcase" => string_upcase,
-        "string-downcase" => string_downcase,
-        "substring" => substring,
-        "string-copy" => string_copy,
-        "string-append" => string_append,
-        "string-length" => string_length,
-        "string-ref" => string_ref,
-        "string=?"=>string_equal,
-        "string>?"=>string_greater_than,
-        "string<?"=>string_less_than,
-    );
+/// (make-string k [char])
+/// Returns a newly allocated string of length k.
+/// If char is given, then all elements of the string are initialized to char,
+/// otherwise the contents of the string are unspecified.
+fn make_string(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() == 1 {
+        let k = get_integer(heap, args[0])? as usize;
+        let s: String = std::iter::repeat(' ').take(k).collect();
+        Ok(new_string(heap, &s))
+    } else if args.len() == 2 {
+        let k = get_integer(heap, args[0])? as usize;
+        let c = get_char(heap, args[1])?;
+        let s: String = std::iter::repeat(c).take(k).collect();
+        Ok(new_string(heap, &s))
+    } else {
+        Err("make-string expects one or two arguments".to_string())
+    }
+}
+
+/// (string-set! string k char)
+/// Stores char in element k of string and returns an unspecified value.
+fn string_set(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() == 3 {
+        let str_ref = args[0];
+        let k = get_integer(heap, args[1])? as usize;
+        let c = get_char(heap, args[2])?;
+
+        match heap.get_value_mut(str_ref) {
+            SchemeValue::Str(s) => {
+                if let Some((byte_index, old_char)) = s.char_indices().nth(k) {
+                    s.replace_range(byte_index..byte_index + old_char.len_utf8(), &c.to_string());
+                    Ok(heap.unspecified())
+                } else {
+                    Err("string-set!: index out of bounds".to_string())
+                }
+            }
+            _ => Err("string-set!: not a string".to_string()),
+        }
+    } else {
+        Err("string-set! expects three arguments".to_string())
+    }
+}
+
+/// (string->list string)
+/// Returns a newly allocated list of the characters that make up the given string.
+fn string_to_list(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() == 1 {
+        let s = get_string(heap, args[0])?;
+        let mut list = heap.nil_s();
+        for c in s.chars().rev() {
+            let char_ref = new_char(heap, c);
+            list = new_pair(heap, char_ref, list);
+        }
+        Ok(list)
+    } else {
+        Err("string->list expects exactly one argument".to_string())
+    }
 }

@@ -363,6 +363,13 @@
 (test-true (string<? "apple" "chinook") "string<?")
 (test-false (string>? "apple" "banana") "string>?")
 (test-false (string>? "apple" "apple") "string>?")
+(test-equal "aaaaa" (make-string 5 #\a) "make-string with char")
+(test-equal "     " (make-string 5) "make-string without char")
+(test-equal '(#\a #\b #\c) (string->list "abc") "string->list")
+(test-equal '() (string->list "") "string->list with empty string")
+(define s (string-copy "abc"))
+(string-set! s 1 #\z)
+(test-equal "azc" s "string-set!")
 
 (display "          === Testing Equality ===")
 (newline)
