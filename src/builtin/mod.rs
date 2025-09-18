@@ -1,3 +1,4 @@
+pub mod char;
 pub mod display;
 pub mod fileio;
 pub mod list;
@@ -68,6 +69,7 @@ fn help(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
 
 /// Register all builtin functions in the environment
 pub fn register_builtins(heap: &mut GcHeap, env: EnvRef) {
+    char::register_char_builtins(heap, env.clone());
     display::register_display_builtins(heap, env.clone());
     list::register_list_builtins(heap, env.clone());
     fileio::register_fileio_builtins(heap, env.clone());
