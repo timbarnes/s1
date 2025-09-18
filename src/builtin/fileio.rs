@@ -1,5 +1,24 @@
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{GcHeap, GcRef, SchemeValue, new_port};
+use std::io::Write;
+
+macro_rules! register_builtin_family {
+    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
+        $(
+            $env.define($heap.intern_symbol($name),
+                crate::gc::new_builtin($heap, $func,
+                    concat!($name, ": builtin function").to_string()));
+        )*
+    };
+}
+
+pub fn register_fileio_builtins(heap: &mut GcHeap, env: EnvRef) {
+    register_builtin_family!(heap, env,
+        "open-input-file" => open_input_file,
+        "eof-object?" => eof_object_q,
+        "flush-output" => flush_output,
+    );
+}
 
 /// (eof-object? obj) -> #t or #f
 /// Tests the result of a read operation to determine if it reached the end of the file.
@@ -48,21 +67,9 @@ fn open_input_file(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     }
 }
 
-macro_rules! register_builtin_family {
-    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
-        $(
-            $env.define($heap.intern_symbol($name),
-                crate::gc::new_builtin($heap, $func,
-                    concat!($name, ": builtin function").to_string()));
-        )*
-    };
-}
-
-pub fn register_fileio_builtins(heap: &mut GcHeap, env: EnvRef) {
-    register_builtin_family!(heap, env,
-        "open-input-file" => open_input_file,
-        "eof-object?" => eof_object_q,
-    );
+fn flush_output(heap: &mut GcHeap, _args: &[GcRef]) -> Result<GcRef, String> {
+    std::io::stdout().flush().ok();
+    Ok(heap.void())
 }
 
 #[cfg(test)]
