@@ -1,12 +1,10 @@
-use std::vec;
-
-use crate::env::{EnvOps, EnvRef};
-use crate::gc::GcHeap;
 /// Vector functions
 ///
-use crate::gc::{GcRef, SchemeValue, new_int, new_vector};
+use crate::env::{EnvOps, EnvRef};
+use crate::gc::{GcHeap, GcRef, SchemeValue, new_int, new_vector};
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
+use std::vec;
 
 /// Creates a new vector from a list of arguments.
 /// (vector arg1 arg2 ...)
@@ -25,7 +23,7 @@ pub fn make_vector(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     match args.len() {
         0 => Err("make-vector: length parameter required.".to_string()),
         1 | 2 => {
-            let mut init = crate::gc::get_nil(heap);
+            let mut init = heap.nil_s();
             if args.len() == 2 {
                 init = args[1];
             }

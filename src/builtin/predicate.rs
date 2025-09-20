@@ -292,8 +292,8 @@ mod tests {
         ));
 
         // Test with equal nil
-        let nil1 = crate::gc::get_nil(ec.heap);
-        let nil2 = crate::gc::get_nil(ec.heap);
+        let nil1 = ec.heap.nil_s();
+        let nil2 = ec.heap.nil_s();
         let result = eq_q(&mut ec.heap, &[nil1, nil2]);
         assert!(result.is_ok());
         assert!(matches!(
@@ -302,7 +302,7 @@ mod tests {
         ));
 
         // Test with unequal nil
-        let nil3 = crate::gc::get_nil(ec.heap);
+        let nil3 = ec.heap.nil_s();
         let nil4 = crate::gc::new_int(ec.heap, num_bigint::BigInt::from(1));
         let result = eq_q(&mut ec.heap, &[nil3, nil4]);
         assert!(result.is_ok());
@@ -390,7 +390,7 @@ mod tests {
         assert_eq!(as_type(&result.unwrap()), "char");
 
         // Test with nil
-        let nil_val = crate::gc::get_nil(ec.heap);
+        let nil_val = ec.heap.nil_s();
         let result = type_of(&mut ec.heap, &[nil_val]);
         assert!(result.is_ok());
         assert_eq!(as_type(&result.unwrap()), "null");

@@ -62,6 +62,9 @@ fn run_cek(mut state: &mut CEKState, rt: &mut RunTime) -> Result<Vec<GcRef>, Str
 fn step(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> {
     //dump_cek("  step", &state);
     debugger("step", &state, ec);
+    if ec.heap.needs_gc() {
+        //ec.heap.garbage_collect(&state);
+    }
 
     let control = std::mem::replace(&mut state.control, Control::Empty);
     match control {

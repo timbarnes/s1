@@ -8,8 +8,8 @@ use crate::cek::eval_main;
 use crate::env::{EnvOps, EnvRef};
 use crate::eval::{RunTime, expect_at_least_n_args, expect_n_args, expect_symbol};
 use crate::gc::{
-    GcHeap, GcRef, SchemeValue, car, cdr, cons, get_nil, list_from_slice, list_to_vec, list2,
-    matches_sym, new_float, new_macro, new_pair, new_special_form,
+    GcHeap, GcRef, SchemeValue, car, cdr, cons, list_from_slice, list_to_vec, list2, matches_sym,
+    new_float, new_macro, new_special_form,
 };
 use crate::kont::{
     AndOrKind, CEKState, CondClause, insert_and_or, insert_bind, insert_cond, insert_eval,
@@ -102,7 +102,7 @@ fn create_lambda_or_macro(
     match ptype {
         Ptype::Empty => { /* no params */ }
         Ptype::List => {
-            let nil = get_nil(heap);
+            let nil = heap.nil_s();
             args.push(nil);
 
             for arg in params.iter() {
@@ -252,7 +252,7 @@ pub fn define_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
             let params = cdr(signature)?;
 
             let lambda_sym = ec.heap.intern_symbol("lambda");
-            let body_expr = wrap_body_in_begin(&body, &mut ec.heap);
+            let body_expr = wrap_body_in_begin(body, &mut ec.heap);
 
             let lambda_list = list_from_slice(&[lambda_sym, params, body_expr], &mut ec.heap);
 
@@ -401,7 +401,7 @@ pub fn let_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(),
             let bindings = list_to_vec(&mut ec.heap, formvec[1])?; // (let bindings . body)
 
             // Separate bindings into variables and expressions
-            let mut vars = get_nil(ec.heap);
+            let mut vars = ec.heap.nil_s();
             let mut exprs = vars;
             // Build them up as lists
             for binding in bindings.into_iter().rev() {

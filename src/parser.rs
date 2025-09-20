@@ -19,8 +19,8 @@
 //! ```
 
 use crate::gc::{
-    GcHeap, GcRef, get_nil, get_symbol, new_bool, new_char, new_float, new_int, new_pair,
-    new_string, new_vector,
+    GcHeap, GcRef, get_symbol, new_bool, new_char, new_float, new_int, new_pair, new_string,
+    new_vector,
 };
 use crate::io::PortKind;
 use crate::tokenizer::{Token, Tokenizer};
@@ -64,7 +64,7 @@ fn parse_quoted_expression(
     let next_token = tokenizer.next_token();
     let quoted = parse_from_token(heap, next_token, tokenizer)?;
     let quote_sym = get_symbol(heap, sym.as_str());
-    let nil = get_nil(heap);
+    let nil = heap.nil_s();
     let quoted_list = new_pair(heap, quoted, nil);
     Ok(new_pair(heap, quote_sym, quoted_list))
 }
@@ -92,7 +92,7 @@ fn parse_number_token(heap: &mut GcHeap, s: &str) -> Result<GcRef, ParseError> {
 
 fn parse_symbol_token(heap: &mut GcHeap, s: &str) -> Result<GcRef, ParseError> {
     if s == "nil" || s == "()" {
-        Ok(get_nil(heap))
+        Ok(heap.nil_s())
     } else if s.starts_with("#\\") {
         let ch = match &s[2..] {
             "space" => Some(' '),
@@ -168,7 +168,7 @@ fn parse_list(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<GcRef, Par
         match token {
             Some(Token::RightParen) => {
                 // End of list
-                let mut list = get_nil(heap);
+                let mut list = heap.nil_s();
                 for elem in elements.into_iter().rev() {
                     list = new_pair(heap, elem, list);
                 }

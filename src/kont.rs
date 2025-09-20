@@ -276,6 +276,14 @@ impl CEKState {
     }
 }
 
+// impl mark for CEKState {
+//     fn mark(&self) {
+//         self.control.mark();
+//         self.env.mark();
+//         self.kont.mark();
+//     }
+// }
+
 /// Install `expr` into the existing CEKState and return immediately.
 /// If `replace_next` is true, the installed EvalArg (if any) will have `next = Halt`
 /// (i.e., it will replace the current continuation); otherwise the existing kont chain is preserved.

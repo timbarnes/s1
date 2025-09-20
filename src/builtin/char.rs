@@ -1,5 +1,5 @@
 use crate::env::{EnvOps, EnvRef};
-use crate::gc::{new_bool, new_char, new_int, GcHeap, GcRef, SchemeValue};
+use crate::gc::{GcHeap, GcRef, SchemeValue, new_bool, new_char, new_int};
 use num_bigint::BigInt;
 
 fn get_char(heap: &mut GcHeap, val: GcRef) -> Result<char, String> {

@@ -1,5 +1,5 @@
 use crate::env::{EnvOps, EnvRef};
-use crate::gc::{GcHeap, GcRef, SchemeValue, get_nil, new_int, new_pair, set_car, set_cdr};
+use crate::gc::{GcHeap, GcRef, SchemeValue, new_int, new_pair, set_car, set_cdr};
 use crate::gc_value;
 use num_traits::ToPrimitive;
 
@@ -75,11 +75,11 @@ pub fn cons_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> 
 /// Creates a list from the given arguments.
 pub fn list_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.is_empty() {
-        return Ok(get_nil(heap));
+        return Ok(heap.nil_s());
     }
 
     // Build the list from right to left
-    let mut result = get_nil(heap);
+    let mut result = heap.nil_s();
     for &arg in args.iter().rev() {
         result = new_pair(heap, arg, result);
     }
@@ -405,7 +405,7 @@ mod tests {
         ));
 
         // Test appending empty list
-        let empty_list = get_nil(ec.heap);
+        let empty_list = ec.heap.nil_s();
         let result = append_builtin(&mut ec.heap, &[list1, empty_list]).unwrap();
         assert!(matches!(
             &ec.heap.get_value(result),
@@ -428,7 +428,7 @@ mod tests {
         assert!(matches!(&ec.heap.get_value(third), SchemeValue::Symbol(s) if s == "a"));
 
         // (append '() 'a)
-        let empty_list = get_nil(ec.heap);
+        let empty_list = ec.heap.nil_s();
         let result = append_builtin(&mut ec.heap, &[empty_list, sym_a]).unwrap();
         assert!(matches!(&ec.heap.get_value(result), SchemeValue::Symbol(s) if s == "a"));
 

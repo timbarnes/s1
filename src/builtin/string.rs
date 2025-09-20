@@ -3,8 +3,8 @@
 //
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{
-    get_integer, get_string, new_bool, new_char, new_int, new_pair, new_string, GcHeap, GcRef,
-    SchemeValue,
+    GcHeap, GcRef, SchemeValue, get_integer, get_string, new_bool, new_char, new_int, new_pair,
+    new_string,
 };
 use crate::printer::display_value;
 use num_bigint::BigInt;

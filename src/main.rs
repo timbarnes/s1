@@ -65,12 +65,16 @@ fn main() {
 
     // Load core file unless --no-core
     if !args.no_core {
-        startup_commands.push(format!("(push-port! (open-input-file \"scheme/s1-core.scm\"))"));
+        startup_commands.push(format!(
+            "(push-port! (open-input-file \"scheme/s1-core.scm\"))"
+        ));
     }
 
     // Run regression tests if --regression is specified
     if args.regression {
-        startup_commands.push(format!("(push-port! (open-input-file \"scheme/regression.scm\"))"));
+        startup_commands.push(format!(
+            "(push-port! (open-input-file \"scheme/regression.scm\"))"
+        ));
     }
 
     // Load each file in order
