@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use super::{GcObject, GcRef, Mark, SchemeValue};
+use super::{Callable, GcObject, GcRef, Mark, SchemeValue};
 use crate::io::PortKind;
 use std::collections::HashMap;
 
@@ -182,41 +182,61 @@ impl GcHeap {
         self.symbol_table.len()
     }
 
-    /// Perform garbage collection (placeholder for future implementation).
-    pub fn garbage_collect<T: Mark>(&mut self, roots: &T) {
-        //self.mark_from(|f| roots.mark(f));
-        //self.sweep();
+    /// Perform garbage collection.
+    pub fn collect_garbage(&mut self, roots: &impl Mark) {
+        // 1. Clear mark bits
+        for obj in &self.objects {
+            crate::gc::unmark(*obj);
+        }
+        // 2. Mark
+        self.mark_from(roots);
+        // 3. Sweep
+        self.sweep();
     }
 
-    fn mark_from<F>(&mut self, mut mark_fn: F)
-    where
-        F: FnMut(GcRef),
-    {
-        //mark_fn(self.root);
-        //self.marked = true;
+    fn mark_from(&mut self, roots: &impl Mark) {
+        roots.mark(&mut |gcref| self.mark_reachable(gcref));
+    }
+
+    fn mark_reachable(&mut self, start: GcRef) {
+        let mut worklist = vec![start];
+
+        while let Some(gcref) = worklist.pop() {
+            if unsafe { (*gcref).marked } {
+                continue;
+            }
+
+            crate::gc::mark(gcref);
+
+            match unsafe { &(*gcref).value } {
+                SchemeValue::Pair(car, cdr) => {
+                    worklist.push(*car);
+                    worklist.push(*cdr);
+                }
+                SchemeValue::Vector(vec) => {
+                    for item in vec {
+                        worklist.push(*item);
+                    }
+                }
+                SchemeValue::Callable(Callable::Closure { body, env, .. }) => {
+                    worklist.push(*body);
+                    env.mark(&mut |gcref| worklist.push(gcref));
+                }
+                _ => {}
+            }
+        }
     }
 
     fn sweep(&mut self) {
-        //let mut next_free = None;
-        //let mut prev = None;
-        /*
-                for (i, obj) in self.objects.iter_mut().enumerate() {
-                    if obj.marked {
-                        obj.marked = false;
-                        if let Some(prev) = prev {
-                            self.objects[prev].next = Some(i);
-                        }
-                        prev = Some(i);
-                    } else {
-                        if let Some(next_free) = next_free {
-                            self.objects[next_free].next = Some(i);
-                        }
-                        next_free = Some(i);
-                    }
+        self.objects.retain(|obj| {
+            let marked = unsafe { (**obj).marked };
+            if !marked {
+                unsafe {
+                    Box::from_raw(*obj);
                 }
-
-                self.free_list = next_free;
-        */
+            }
+            marked
+        });
     }
 
     pub fn needs_gc(&self) -> bool {

@@ -123,6 +123,18 @@ impl EnvOps for EnvRef {
     }
 }
 
+impl crate::gc::Mark for EnvRef {
+    fn mark(&self, visit: &mut dyn FnMut(GcRef)) {
+        let frame = self.borrow();
+        for val in frame.bindings.values() {
+            visit(*val);
+        }
+        if let Some(parent) = &frame.parent {
+            parent.mark(visit);
+        }
+    }
+}
+
 // /// Set a binding in this frame using a symbol key
 // pub fn set_local(&mut self, symbol: GcRef, value: GcRef) {
 //     self.bindings.insert(symbol, value);
