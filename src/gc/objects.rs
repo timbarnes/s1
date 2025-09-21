@@ -1,10 +1,9 @@
 #![allow(dead_code)]
 
 use super::{Callable, GcObject, GcRef, SchemeValue};
-use crate::eval::RunTime;
+use crate::eval::{CEKState, KontRef, RunTime};
 use crate::gc::heap::GcHeap;
 use crate::gc_value;
-use crate::kont::{CEKState, KontRef};
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 use std::cell::RefCell;

@@ -10,7 +10,7 @@ pub struct GcHeap {
     pub nil_obj: Option<GcRef>,
     pub true_obj: Option<GcRef>,
     pub false_obj: Option<GcRef>,
-    pub tail_call_obj: Option<GcRef>,
+    // pub tail_call_obj: Option<GcRef>,
     pub eof_obj: Option<GcRef>,
     pub undefined_obj: Option<GcRef>,
     pub void_obj: Option<GcRef>,
@@ -29,7 +29,7 @@ impl GcHeap {
             nil_obj: None,
             true_obj: None,
             false_obj: None,
-            tail_call_obj: None,
+            // tail_call_obj: None,
             eof_obj: None,
             undefined_obj: None,
             void_obj: None,
@@ -86,13 +86,6 @@ impl GcHeap {
             marked: false,
         };
         self.undefined_obj = Some(self.alloc(undefined_obj));
-
-        // Allocate tail_call
-        let tail_call_obj = GcObject {
-            value: SchemeValue::TailCallScheduled,
-            marked: false,
-        };
-        self.tail_call_obj = Some(self.alloc(tail_call_obj));
     }
 
     /// Allocate a new object on the heap.
@@ -151,9 +144,9 @@ impl GcHeap {
     }
 
     /// Get the tail call object.
-    pub fn tail_call_s(&self) -> GcRef {
-        self.tail_call_obj.unwrap()
-    }
+    // pub fn tail_call_s(&self) -> GcRef {
+    //     self.tail_call_obj.unwrap()
+    // }
 
     /// Get statistics about the simple heap.
     pub fn simple_stats(&self) -> (usize, usize) {

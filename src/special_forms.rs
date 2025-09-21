@@ -4,16 +4,15 @@
 /// Special forms are given the full expression, including the name of the form.
 /// This is required for lambda and macro differentiation.
 ///
-use crate::cek::eval_main;
 use crate::env::{EnvOps, EnvRef};
-use crate::eval::{RunTime, expect_at_least_n_args, expect_n_args, expect_symbol};
+use crate::eval::{
+    AndOrKind, CEKState, CondClause, RunTime, eval_main, expect_at_least_n_args, expect_n_args,
+    expect_symbol, insert_and_or, insert_bind, insert_cond, insert_eval, insert_if, insert_seq,
+    insert_value,
+};
 use crate::gc::{
     GcHeap, GcRef, SchemeValue, car, cdr, cons, list_from_slice, list_to_vec, list2, matches_sym,
     new_float, new_macro, new_special_form,
-};
-use crate::kont::{
-    AndOrKind, CEKState, CondClause, insert_and_or, insert_bind, insert_cond, insert_eval,
-    insert_if, insert_seq, insert_value,
 };
 use crate::macros::expand_macro;
 use crate::utilities::post_error;

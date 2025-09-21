@@ -1,10 +1,8 @@
-use crate::cek::eval_main;
-use crate::eval::RunTime;
+use crate::eval::{CEKState, RunTime, eval_main};
 /// Modular macro expansion engine for Scheme
 use crate::gc::{
     GcRef, SchemeValue, car, cdr, heap_list_iter, list_from_slice, list_to_vec, new_pair,
 };
-use crate::kont::CEKState;
 
 #[derive(Debug)]
 enum Expanded {

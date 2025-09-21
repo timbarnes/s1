@@ -1,10 +1,8 @@
 pub mod heap;
 pub mod objects;
 
-use crate::env::EnvRef;
-use crate::eval::RunTime;
+use crate::eval::{CEKState, KontRef, RunTime};
 use crate::io::PortKind;
-use crate::kont::{CEKState, KontRef};
 use num_bigint::BigInt;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -88,7 +86,6 @@ pub enum SchemeValue {
     Nil,
     TailCallScheduled,
     Port(PortKind),
-    Env(EnvRef),
     Continuation(KontRef),
     Eof,
     Void,

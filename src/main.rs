@@ -1,10 +1,8 @@
 mod builtin;
-mod cek;
 mod env;
 mod eval;
 mod gc;
 mod io;
-mod kont;
 mod macros;
 mod parser;
 mod printer;
@@ -13,16 +11,15 @@ mod sys_builtins;
 mod tokenizer;
 mod utilities;
 
-use crate::cek::eval_main;
 use crate::env::Frame;
-use crate::eval::{RunTimeStruct, eval_string, initialize_scheme_globals};
-use crate::kont::CEKState;
+use crate::eval::{
+    CEKState, RunTime, RunTimeStruct, eval_main, eval_string, initialize_scheme_globals,
+};
 use crate::printer::print_value;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use argh::FromArgs;
-use eval::RunTime;
 use std::io as stdio;
 
 #[derive(FromArgs)]

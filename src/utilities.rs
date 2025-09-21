@@ -1,9 +1,9 @@
 /// Internal utility functions
 ///
 use crate::env::{EnvOps, EnvRef};
+use crate::eval::{AndOrKind, CEKState, Control, Kont, KontRef};
 use crate::eval::{RunTime, TraceType};
 use crate::gc_value;
-use crate::kont::{AndOrKind, CEKState, Control, Kont, KontRef};
 use crate::printer::print_value;
 use std::rc::Rc;
 

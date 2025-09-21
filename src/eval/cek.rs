@@ -1,3 +1,6 @@
+use super::kont::{
+    AndOrKind, CEKState, CondClause, Control, EvalPhase, Kont, KontRef, insert_eval,
+};
 /// Continuation-Passing Style (CPS) evaluator.
 ///
 use crate::env::{EnvOps, EnvRef};
@@ -5,9 +8,6 @@ use crate::eval::{RunTime, bind_params, eval_macro};
 use crate::gc::SchemeValue::*;
 use crate::gc::{Callable, GcRef, cons, is_false, list_to_vec};
 use crate::gc_value;
-use crate::kont::{
-    AndOrKind, CEKState, CondClause, Control, EvalPhase, Kont, KontRef, insert_eval,
-};
 use crate::printer::print_value;
 use crate::utilities::{debugger, post_error};
 use std::rc::Rc;

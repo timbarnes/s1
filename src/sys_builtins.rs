@@ -1,4 +1,5 @@
 use crate::env::{EnvOps, EnvRef};
+use crate::eval::{CEKState, Control, Kont, KontRef, insert_eval_eval};
 use crate::eval::{RunTime, TraceType};
 use crate::gc::{
     Callable, GcHeap, GcRef, SchemeValue, get_symbol, list, list_to_vec, list3, new_continuation,
@@ -6,7 +7,6 @@ use crate::gc::{
 };
 use crate::gc_value;
 use crate::io::{PortKind, port_kind_from_scheme_port};
-use crate::kont::{CEKState, Control, Kont, KontRef, insert_eval_eval};
 //use crate::printer::print_value;
 use crate::parser::{ParseError, parse};
 use crate::special_forms::create_callable;
@@ -98,7 +98,7 @@ fn apply_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
                         post_error(state, ec, &err);
                     }
                     Ok(value) => {
-                        state.control = crate::kont::Control::Value(*value);
+                        state.control = Control::Value(*value);
                     }
                 }
                 return Ok(());
@@ -128,7 +128,7 @@ fn apply_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
 /// (debug-stack)
 /// Prints the stack
 fn debug_stack_sp(ec: &mut RunTime, _args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
-    state.control = crate::kont::Control::Value(ec.heap.void());
+    state.control = Control::Value(ec.heap.void());
     Ok(())
 }
 
@@ -188,7 +188,7 @@ fn escape_sp(_ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<
             //state.kont = Rc::clone(new_kont);
             let result = args[1];
             // Return the second argument
-            state.control = crate::kont::Control::Escape(result, Rc::clone(new_kont));
+            state.control = Control::Escape(result, Rc::clone(new_kont));
             //eprintln!("Escaping to continuation:");
             //crate::utilities::dump_kont(Rc::clone(new_kont));
             Ok(())

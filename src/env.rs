@@ -339,7 +339,7 @@ mod tests {
         assert!(env.lookup_local(local_sym).is_some());
 
         // Create an extended environment (new frame)
-        let mut extended_env = env.extend();
+        let extended_env = env.extend();
 
         // Set a binding in the new frame using symbol
         let extended_val = new_int(ec.heap, BigInt::from(99));
