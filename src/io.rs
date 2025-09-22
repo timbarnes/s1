@@ -1,34 +1,6 @@
-//! Input/Output system for the Scheme interpreter.
-//!
-//! This module provides:
-//! - Port management (stdin, stdout, files, string ports)
-//! - Port stack for nested file loading with fallback to REPL
-//! - File table for managing open file handles
-//! - I/O operations (read/write lines and characters)
-//!
-//! # Examples
-//!
-//! ```rust
-//! use s1::io::{FileTable, read_line, write_line, Port, PortKind};
-//!
-//! let stdin_port = Port { kind: PortKind::Stdin };
-//! let mut file_table = FileTable::new();
-//!
-//! // Read from current port (stdin)
-//! let line = read_line(&stdin_port, &mut file_table);
-//!
-//! // Write to current port (stdout)
-//! write_line(&stdin_port, &mut file_table, "Hello, World!");
-//! ```
-
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{
-    self,
-    //BufRead, BufReader, BufWriter,
-    Read,
-    Write,
-};
+use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 
 // use std::io::BufReader as StdBufReader;
 use crate::eval::RunTime;
@@ -50,17 +22,21 @@ pub enum PortKind {
     /// Standard error stream
     Stderr,
     /// File-based port with read/write mode and optional file ID
-    // File {
-    //     name: String,
-    //     write: bool,
-    //     file_id: Option<usize>,
-    //     buf: Vec<u8>,
-    //     pos: Cell<usize>,
-    // },
+    File {
+        name: String,
+        id: usize,        // ID from FileTable
+        write: bool,      // true if output, false if input
+        pos: Cell<usize>, // Current position in the file
+    },
     /// In-memory string port for input with content and current position
-    StringPortInput { content: String, pos: Cell<usize> },
+    StringPortInput {
+        content: String,
+        pos: Cell<usize>,
+    },
     // In-memory string port for output with accumulating content
-    //StringPortOutput { content: String },
+    StringPortOutput {
+        content: String,
+    },
 }
 
 impl Clone for PortKind {
@@ -69,52 +45,27 @@ impl Clone for PortKind {
             PortKind::Stdin => PortKind::Stdin,
             PortKind::Stdout => PortKind::Stdout,
             PortKind::Stderr => PortKind::Stderr,
-            // PortKind::File {
-            //     name,
-            //     write,
-            //     file_id,
-            //     buf,
-            //     pos,
-            // } => PortKind::File {
-            //     name: name.clone(),
-            //     write: *write,
-            //     file_id: *file_id,
-            //     buf: buf.clone(),
-            //     pos: Cell::new(pos.get()),
-            // },
+            PortKind::File {
+                name,
+                id,
+                write,
+                pos,
+            } => PortKind::File {
+                name: name.clone(),
+                id: *id,
+                write: *write,
+                pos: Cell::new(pos.get()),
+            },
             PortKind::StringPortInput { content, pos } => PortKind::StringPortInput {
                 content: content.clone(),
                 pos: Cell::new(pos.get()),
             },
-            // PortKind::StringPortOutput { content } => PortKind::StringPortOutput {
-            //     content: content.clone(),
-            // },
+            PortKind::StringPortOutput { content } => PortKind::StringPortOutput {
+                content: content.clone(),
+            },
         }
     }
 }
-
-// impl std::fmt::Debug for PortKind {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         match self {
-//             PortKind::StringPortInput { content, pos } => {
-//                 let l = if content.len() < 20 {
-//                     content.len()
-//                 } else {
-//                     20
-//                 };
-//                 let substring = content[..len];
-//                 write!(f, "StringPortInput: {:?}", content[..l]);
-//             }
-//             PortKind::StringPortOutput { content } => {
-//                 write!(f, "StringPortOutput: {}", content[..l]);
-//             }
-//             PortKind::Stdin => write!(f, "StdIn"),
-//             PortKind::Stdout => write!(f, "StdOut"),
-//             PortKind::Stderr => write!(f, "StdErr"),
-//             _ => write!(f, "unrecognized port type"),
-//         }
-//     }
-// }
 
 impl PartialEq for PortKind {
     fn eq(&self, other: &Self) -> bool {
@@ -122,22 +73,20 @@ impl PartialEq for PortKind {
             (PortKind::Stdin, PortKind::Stdin) => true,
             (PortKind::Stdout, PortKind::Stdout) => true,
             (PortKind::Stderr, PortKind::Stderr) => true,
-            // (
-            //     PortKind::File {
-            //         name: n1,
-            //         write: w1,
-            //         file_id: f1,
-            //         buf: b1,
-            //         pos: p1,
-            //     },
-            //     PortKind::File {
-            //         name: n2,
-            //         write: w2,
-            //         file_id: f2,
-            //         buf: b2,
-            //         pos: p2,
-            //     },
-            // ) => n1 == n2 && w1 == w2 && f1 == f2 && b1 == b2 && p1.get() == p2.get(),
+            (
+                PortKind::File {
+                    name: n1,
+                    id: i1,
+                    write: w1,
+                    pos: p1,
+                },
+                PortKind::File {
+                    name: n2,
+                    id: i2,
+                    write: w2,
+                    pos: p2,
+                },
+            ) => n1 == n2 && i1 == i2 && w1 == w2 && p1.get() == p2.get(),
             (
                 PortKind::StringPortInput {
                     content: c1,
@@ -148,10 +97,10 @@ impl PartialEq for PortKind {
                     pos: p2,
                 },
             ) => c1 == c2 && p1.get() == p2.get(),
-            // (
-            //     PortKind::StringPortOutput { content: c1 },
-            //     PortKind::StringPortOutput { content: c2 },
-            // ) => c1 == c2,
+            (
+                PortKind::StringPortOutput { content: c1 },
+                PortKind::StringPortOutput { content: c2 },
+            ) => c1 == c2,
             _ => false,
         }
     }
@@ -215,29 +164,6 @@ fn utf8_char_width(first: u8) -> usize {
 /// allowing multiple file ports to reference the same underlying file
 /// and ensuring proper cleanup when files are closed.
 ///
-/// # Examples
-///
-/// ```rust
-/// use s1::io::FileTable;
-/// use std::fs::File;
-/// use std::io::Write;
-///
-/// let mut table = FileTable::new();
-///
-/// // Create a test file
-/// {
-///     let mut file = File::create("test.txt").unwrap();
-///     writeln!(file, "hello").unwrap();
-/// }
-///
-/// // Open the file for reading
-/// let id = table.open_file("test.txt", false).unwrap();
-/// assert!(table.get(id).is_some());
-///
-/// // Close the file
-/// table.close_file(id);
-/// assert!(table.get(id).is_none());
-/// ```
 pub struct FileTable {
     /// Next available file ID
     next_id: usize,
@@ -247,14 +173,6 @@ pub struct FileTable {
 
 impl FileTable {
     /// Create a new empty file table.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use s1::io::FileTable;
-    ///
-    /// let table = FileTable::new();
-    /// ```
     pub fn new() -> Self {
         Self {
             next_id: 1,
@@ -267,38 +185,6 @@ impl FileTable {
     /// The file ID can be used to create file ports and access the file handle.
     /// Files are opened in read mode if `write` is `false`, or write mode if `write` is `true`.
     ///
-    /// # Arguments
-    ///
-    /// * `name` - The filename to open
-    /// * `write` - Whether to open in write mode (true) or read mode (false)
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(file_id)` on success, or `Err` if the file cannot be opened.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use s1::io::FileTable;
-    /// use std::fs::File;
-    /// use std::io::Write;
-    ///
-    /// let mut table = FileTable::new();
-    ///
-    /// // Create a test file
-    /// {
-    ///     let mut file = File::create("test.txt").unwrap();
-    ///     writeln!(file, "hello").unwrap();
-    /// }
-    ///
-    /// // Open for reading
-    /// let read_id = table.open_file("test.txt", false).unwrap();
-    /// assert!(table.get(read_id).is_some());
-    ///
-    /// // Open for writing
-    /// let write_id = table.open_file("output.txt", true).unwrap();
-    /// assert!(table.get(write_id).is_some());
-    /// ```
     pub fn open_file(&mut self, name: &str, write: bool) -> io::Result<usize> {
         let file = if write {
             File::create(name)?
@@ -315,31 +201,6 @@ impl FileTable {
     ///
     /// The file handle is removed from the table and the underlying file is closed.
     ///
-    /// # Arguments
-    ///
-    /// * `id` - The file ID to close
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use s1::io::FileTable;
-    /// use std::fs::File;
-    /// use std::io::Write;
-    ///
-    /// let mut table = FileTable::new();
-    ///
-    /// // Create and open a test file
-    /// {
-    ///     let mut file = File::create("test.txt").unwrap();
-    ///     writeln!(file, "hello").unwrap();
-    /// }
-    ///
-    /// let id = table.open_file("test.txt", false).unwrap();
-    /// assert!(table.get(id).is_some());
-    ///
-    /// table.close_file(id);
-    /// assert!(table.get(id).is_none());
-    /// ```
     pub fn close_file(&mut self, id: usize) {
         self.files.remove(&id);
     }
@@ -348,56 +209,43 @@ impl FileTable {
     ///
     /// Returns `None` if the file ID is not found in the table.
     ///
-    /// # Arguments
-    ///
-    /// * `id` - The file ID to look up
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use s1::io::FileTable;
-    /// use std::fs::File;
-    /// use std::io::Write;
-    ///
-    /// let mut table = FileTable::new();
-    ///
-    /// // Create and open a test file
-    /// {
-    ///     let mut file = File::create("test.txt").unwrap();
-    ///     writeln!(file, "hello").unwrap();
-    /// }
-    ///
-    /// let id = table.open_file("test.txt", false).unwrap();
-    /// assert!(table.get(id).is_some());
-    ///
-    /// table.close_file(id);
-    /// assert!(table.get(id).is_none());
-    /// ```
     pub fn get(&mut self, id: usize) -> Option<&mut File> {
         self.files.get_mut(&id)
     }
 }
 
 /// Helper function to read a line from a string port and update its position
-fn read_line_from_string_port(port_kind: &PortKind) -> Option<(String, PortKind)> {
-    if let PortKind::StringPortInput { content, .. } = &port_kind {
-        let current_pos = get_string_port_pos(port_kind).unwrap();
-        let mut lines = content.lines();
-        // Skip to the current position
-        for _ in 0..current_pos {
-            lines.next();
-        }
+fn read_line_from_string_port(
+    port_kind: &mut PortKind,
+    file_table: &mut FileTable,
+) -> Option<(String, PortKind)> {
+    if let PortKind::StringPortInput { content, pos } = port_kind {
+        let current_pos = pos.get();
+        let mut lines = content[current_pos..].lines();
         if let Some(line) = lines.next() {
-            let new_pos = current_pos + 1;
-            let new_port = PortKind::StringPortInput {
-                content: content.clone(),
-                pos: Cell::new(new_pos),
-            };
-            Some((line.to_string() + "\n", new_port))
+            let new_pos = current_pos + line.len() + 1; // +1 for the newline character
+            pos.set(new_pos);
+            Some((line.to_string() + "\n", port_kind.clone()))
         } else {
             None
         }
-    } else {
+    }
+    else if let PortKind::File { id, pos, .. } = port_kind {
+        if let Some(file) = file_table.get(*id) {
+            let mut reader = std::io::BufReader::new(file);
+            let mut buf = String::new();
+            let n = reader.read_line(&mut buf).ok()?;
+            if n == 0 {
+                None
+            } else {
+                pos.set(pos.get() + n);
+                Some((buf, port_kind.clone()))
+            }
+        } else {
+            None
+        }
+    }
+    else {
         None
     }
 }
@@ -407,54 +255,19 @@ fn read_line_from_string_port(port_kind: &PortKind) -> Option<(String, PortKind)
 /// This function reads from the current port. If the current
 /// port is exhausted (EOF), it returns None.
 ///
-/// # Arguments
-///
-/// * `port` - The current port to read from
-/// * `file_table` - The file table for file port operations
-///
-/// # Returns
-///
-/// Returns `Some(line)` if a line was successfully read, or `None` if
-/// the port is exhausted.
-///
-/// # Examples
-///
-/// ```rust
-/// use s1::io::{FileTable, read_line, Port, PortKind};
-///
-/// let port = Port { kind: PortKind::Stdin };
-/// let mut file_table = FileTable::new();
-///
-/// // Read from stdin (in a real scenario, this would block for user input)
-/// let line = read_line(&port, &mut file_table);
-/// ```
-pub fn read_line(port_kind: &PortKind, _file_table: &mut FileTable) -> Option<String> {
+pub fn read_line(port_kind: &mut PortKind, file_table: &mut FileTable) -> Option<String> {
     // Handle StringPort case separately to avoid borrow checker issues
-    if let Some((line, _)) = read_line_from_string_port(port_kind) {
+    if let Some((line, _)) = read_line_from_string_port(port_kind, file_table) {
         return Some(line);
     }
 
     // Handle other port types
-    match &port_kind {
+    match port_kind {
         PortKind::Stdin => {
             let mut buf = String::new();
             let n = io::stdin().read_line(&mut buf).ok()?;
             if n == 0 { None } else { Some(buf) }
         }
-        // PortKind::File { file_id, .. } => {
-        //     if let Some(file_id) = file_id {
-        //         if let Some(file) = file_table.get(*file_id) {
-        //             let mut reader = BufReader::new(file);
-        //             let mut buf = String::new();
-        //             let n = reader.read_line(&mut buf).ok()?;
-        //             if n == 0 { None } else { Some(buf) }
-        //         } else {
-        //             None
-        //         }
-        //     } else {
-        //         None
-        //     }
-        // }
         _ => None,
     }
 }
@@ -465,51 +278,25 @@ pub fn read_line(port_kind: &PortKind, _file_table: &mut FileTable) -> Option<St
 /// the line is printed to the console. For file ports, the line is written to
 /// the file.
 ///
-/// # Arguments
-///
-/// * `port` - The current port to write to
-/// * `file_table` - The file table for file port operations
-/// * `line` - The line to write
-///
-/// # Returns
-///
-/// Returns `true` if the write was successful, `false` otherwise.
-///
-/// # Examples
-///
-/// ```rust
-/// use s1::io::{FileTable, write_line, Port, PortKind};
-///
-/// let port = Port { kind: PortKind::Stdout };
-/// let mut file_table = FileTable::new();
-///
-/// // Write to stdout
-/// write_line(&port, &mut file_table, "Hello, World!");
-/// ```
-pub fn write_line(port_kind: &PortKind, _file_table: &mut FileTable, line: &str) -> bool {
-    match &port_kind {
+pub fn write_line(port_kind: &mut PortKind, file_table: &mut FileTable, line: &str) -> bool {
+    match port_kind {
         PortKind::Stdout => {
             print!("{}", line);
             io::stdout().flush().ok();
             true
         }
-        // PortKind::File { file_id, .. } => {
-        //     if let Some(file_id) = file_id {
-        //         if let Some(file) = file_table.get(*file_id) {
-        //             let mut writer = BufWriter::new(file);
-        //             writer.write_all(line.as_bytes()).is_ok()
-        //         } else {
-        //             false
-        //         }
-        //     } else {
-        //         false
-        //     }
-        // }
-        // PortKind::StringPortOutput { .. } => {
-        // We need to modify the content, so we need a mutable reference
-        // This is a limitation of the current design - we'll need to handle this differently
-        //     false
-        // }
+        PortKind::File { id, .. } => {
+            if let Some(file) = file_table.get(*id) {
+                let mut writer = std::io::BufWriter::new(file);
+                writer.write_all(line.as_bytes()).is_ok()
+            } else {
+                false
+            }
+        }
+        PortKind::StringPortOutput { content } => {
+            content.push_str(line);
+            true
+        }
         _ => false,
     }
 }
@@ -519,29 +306,8 @@ pub fn write_line(port_kind: &PortKind, _file_table: &mut FileTable, line: &str)
 /// This function reads one character from the current port.
 /// For string ports, it advances the position pointer after reading.
 ///
-/// # Arguments
-///
-/// * `port` - The current port to read from
-/// * `file_table` - The file table for file port operations
-///
-/// # Returns
-///
-/// Returns `Some(char)` if a character was successfully read, or `None` if
-/// the port is exhausted or an error occurred.
-///
-/// # Examples
-///
-/// ```rust
-/// use s1::io::{FileTable, read_char, Port, PortKind};
-///
-/// let port = Port { kind: PortKind::Stdin };
-/// let mut file_table = FileTable::new();
-///
-/// // Read a character from stdin (in a real scenario, this would block for user input)
-/// let ch = read_char(&port, &mut file_table);
-/// ```
-pub fn read_char(port_kind: &PortKind, _file_table: &mut FileTable) -> Option<char> {
-    match &port_kind {
+pub fn read_char(port_kind: &PortKind, file_table: &mut FileTable) -> Option<char> {
+    match port_kind {
         PortKind::Stdin => {
             let mut buf = [0u8; 1];
             match std::io::stdin().read_exact(&mut buf) {
@@ -551,84 +317,93 @@ pub fn read_char(port_kind: &PortKind, _file_table: &mut FileTable) -> Option<ch
         }
         PortKind::Stdout => None,
         PortKind::Stderr => None,
-        // PortKind::File { file_id, .. } => {
-        //     if let Some(file_id) = file_id {
-        //         if let Some(file) = file_table.get(*file_id) {
-        //             let mut buf = [0u8; 1];
-        //             match file.read_exact(&mut buf) {
-        //                 Ok(_) => Some(buf[0] as char),
-        //                 Err(_) => None,
-        //             }
-        //         } else {
-        //             None
-        //         }
-        //     } else {
-        //         None
-        //     }
-        // }
-        PortKind::StringPortInput { content, .. } => {
-            let current_pos = get_string_port_pos(port_kind).unwrap();
+        PortKind::File { id, pos, .. } => {
+            if let Some(file) = file_table.get(*id) {
+                let mut reader = std::io::BufReader::new(file);
+                let mut buf = [0u8; 1];
+                match reader.read_exact(&mut buf) {
+                    Ok(_) => {
+                        pos.set(pos.get() + 1);
+                        Some(buf[0] as char)
+                    }
+                    Err(_) => None,
+                }
+            } else {
+                None
+            }
+        }
+        PortKind::StringPortInput { content, pos } => {
+            let current_pos = pos.get();
             if current_pos < content.len() {
-                let ch = content.chars().nth(current_pos).unwrap();
+                let ch = content[current_pos..].chars().next().unwrap();
+                pos.set(current_pos + ch.len_utf8());
                 Some(ch)
             } else {
                 None
             }
-        } // PortKind::StringPortOutput { .. } => None,
+        }
+        PortKind::StringPortOutput { .. } => None,
     }
 }
 
 /// Write a single character to the current output port.
 ///
 /// This function writes one character to the current port.
-/// For stdout ports, the character is printed to the console. For file ports,
-/// the character is written to the file.
+/// For stdout ports, the character is printed to the console.
+/// For file ports, the character is written to the file.
 ///
-/// # Arguments
-///
-/// * `port` - The current port to write to
-/// * `file_table` - The file table for file port operations
-/// * `ch` - The character to write
-///
-/// # Returns
-///
-/// Returns `true` if the write was successful, `false` otherwise.
-///
-/// # Examples
-///
-/// ```rust
-/// use s1::io::{FileTable, write_char, Port, PortKind};
-///
-/// let port = Port { kind: PortKind::Stdout };
-/// let mut file_table = FileTable::new();
-///
-/// // Write a character to stdout
-/// write_char(&port, &mut file_table, 'A');
-/// ```
-pub fn write_char(port_kind: &PortKind, _file_table: &mut FileTable, ch: char) -> bool {
-    match &port_kind {
+pub fn write_char(port_kind: &mut PortKind, file_table: &mut FileTable, ch: char) -> bool {
+    match port_kind {
         PortKind::Stdout => {
             print!("{}", ch);
             io::stdout().flush().ok();
             true
         }
-        // PortKind::File { file_id, .. } => {
-        //     if let Some(file_id) = file_id {
-        //         if let Some(file) = file_table.get(*file_id) {
-        //             let mut writer = BufWriter::new(file);
-        //             writer.write_all(&[ch as u8]).is_ok()
-        //         } else {
-        //             false
-        //         }
-        //     } else {
-        //         false
-        //     }
-        // }
-        // PortKind::StringPortOutput { .. } => {
-        //     // We need to modify the content, so we need a mutable reference
-        //     // This is a limitation of the current design - we'll need to handle this differently
-        //     false
-        // }
+        PortKind::File { id, .. } => {
+            if let Some(file) = file_table.get(*id) {
+                let mut writer = std::io::BufWriter::new(file);
+                writer.write_all(ch.to_string().as_bytes()).is_ok()
+            } else {
+                false
+            }
+        }
+        PortKind::StringPortOutput { content } => {
+            content.push(ch);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Peek at the next character from the input port without consuming it.
+///
+/// This function returns the next character that would be read by `read_char`,
+/// but it does not advance the port's position.
+///
+/// Currently only supported for String ports.
+pub fn peek_char(port_kind: &PortKind, _file_table: &mut FileTable) -> Option<char> {
+    match port_kind {
+        PortKind::StringPortInput { content, pos } => {
+            let p = pos.get();
+            if p >= content.len() {
+                None
+            } else {
+                content[p..].chars().next()
+            }
+        }
+        _ => None, // Not supported for other types yet
+    }
+}
+
+/// Check if a character is ready on the input port.
+///
+/// Returns `true` if a character is available for reading without blocking,
+/// and `false` otherwise.
+pub fn char_ready(port_kind: &PortKind) -> bool {
+    match port_kind {
+        PortKind::StringPortInput { content, pos } => pos.get() < content.len(),
+        PortKind::File { .. } => true, // Assume file is always ready until EOF
+        PortKind::Stdin => false, // Stdin blocking check not supported
         _ => false,
     }
 }
@@ -638,30 +413,9 @@ pub fn write_char(port_kind: &PortKind, _file_table: &mut FileTable, ch: char) -
 /// String ports allow reading from a string as if it were a file, with
 /// an internal position pointer that advances as characters are read.
 ///
-/// # Arguments
-///
-/// * `s` - The string to create a port from
-///
-/// # Returns
-///
-/// Returns a new string port.
-///
-/// # Examples
-///
-/// ```rust
-/// use s1::io::{new_string_port, FileTable, read_char, Port, PortKind};
-///
-/// let string_port = new_string_port("hello");
-/// let mut file_table = FileTable::new();
-///
-/// // Read characters from the string
-/// assert_eq!(read_char(&string_port, &mut file_table), Some('h'));
-/// assert_eq!(read_char(&string_port, &mut file_table), Some('e'));
-/// assert_eq!(read_char(&string_port, &mut file_table), Some('l'));
-/// ```
-pub fn new_string_port(s: &str) -> PortKind {
+pub fn new_string_port_input(content: &str) -> PortKind {
     PortKind::StringPortInput {
-        content: s.to_string(),
+        content: content.to_string(),
         pos: Cell::new(0),
     }
 }
@@ -671,65 +425,28 @@ pub fn new_string_port(s: &str) -> PortKind {
 /// Output string ports allow writing to a string as if it were a file,
 /// accumulating content that can be retrieved later.
 ///
-/// # Returns
-///
-/// Returns a new output string port.
-///
-/// # Examples
-///
-/// ```rust
-/// use s1::io::{new_output_string_port, FileTable, write_line, get_output_string, Port, PortKind};
-///
-/// let output_port = new_output_string_port();
-/// let mut file_table = FileTable::new();
-///
-/// // Write to the string port
-/// write_line(&output_port, &mut file_table, "hello");
-///
-/// // Get the accumulated content
-/// let content = get_output_string(&output_port);
-/// assert_eq!(content, "hello");
-/// ```
-// pub fn new_output_string_port() -> PortKind {
-//     PortKind::StringPortOutput {
-//         content: String::new(),
-//     }
-// }
+pub fn new_output_string_port() -> PortKind {
+    PortKind::StringPortOutput {
+        content: String::new(),
+    }
+}
 
 /// Get the content from an output string port.
 ///
 /// This function retrieves the accumulated content from a string output port.
 /// It should only be called on ports that are output string ports.
 ///
-/// # Arguments
-///
-/// * `port` - The port to get content from
-///
-/// # Returns
-///
-/// Returns the accumulated content as a string, or an empty string if the port
-/// is not an output string port.
-///
-/// # Examples
-///
-/// ```rust
-/// use s1::io::{new_output_string_port, get_output_string, Port, PortKind};
-///
-/// let port = new_output_string_port();
-/// let content = get_output_string(&port);
-/// assert_eq!(content, "");
-/// ```
-pub fn get_output_string(port_kind: &PortKind) -> String {
-    match &port_kind {
-        // PortKind::StringPortOutput { content } => content.clone(),
+pub fn get_output_string(port_kind: &mut PortKind) -> String {
+    match port_kind {
+        PortKind::StringPortOutput { content } => content.clone(),
         _ => String::new(),
     }
 }
 
 /// Get the current position of a string port safely.
 /// This function should be called through the GC heap accessor.
-pub fn get_string_port_pos(port_kind: &PortKind) -> Option<usize> {
-    match &port_kind {
+pub fn get_string_port_pos(port_kind: &mut PortKind) -> Option<usize> {
+    match port_kind {
         PortKind::StringPortInput { pos, .. } => Some(pos.get()),
         _ => None,
     }
@@ -737,21 +454,13 @@ pub fn get_string_port_pos(port_kind: &PortKind) -> Option<usize> {
 
 /// Update the position of a string port safely.
 /// This function should be called through the GC heap accessor.
-pub fn update_string_port_pos(port_kind: &PortKind, new_pos: usize) -> bool {
-    match &port_kind {
+pub fn update_string_port_pos(port_kind: &mut PortKind, new_pos: usize) -> bool {
+    match port_kind {
         PortKind::StringPortInput { pos, .. } => {
             pos.set(new_pos);
             true
         }
         _ => false,
-    }
-}
-
-/// Create a new input string port from a &str.
-pub fn new_string_port_input(content: &str) -> PortKind {
-    PortKind::StringPortInput {
-        content: content.to_string(),
-        pos: Cell::new(0),
     }
 }
 

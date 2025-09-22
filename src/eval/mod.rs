@@ -1,22 +1,23 @@
 pub mod cek;
 pub mod kont;
 
+use crate::env::{EnvOps, EnvRef};
+use crate::gc::{GcHeap, GcRef, SchemeValue, list_from_slice, list_to_vec, new_port};
+use crate::io::{FileTable, PortKind};
+use crate::macros::expand_macro;
+use crate::parser::parse;
 pub use cek::eval_main;
 pub use kont::{
     AndOrKind, CEKState, CondClause, Control, Kont, KontRef, insert_and_or, insert_bind,
     insert_cond, insert_eval, insert_eval_eval, insert_if, insert_seq, insert_value,
 };
 
-use crate::env::{EnvOps, EnvRef};
-use crate::gc::{GcHeap, GcRef, SchemeValue, list_from_slice, list_to_vec, new_port};
-use crate::io::PortKind;
-use crate::macros::expand_macro;
-use crate::parser::parse;
-
 /// Evaluator that owns both heap and environment
 pub struct RunTimeStruct {
-    pub heap: GcHeap,              // The global heap for scheme data
-    pub port_stack: Vec<PortKind>, // Stack of ports for input/output operations
+    pub heap: GcHeap,                  // The global heap for scheme data
+    pub port_stack: Vec<PortKind>,     // Stack of ports for input/output operations
+    pub file_table: FileTable,         // Table of open files
+    pub current_output_port: PortKind, // The current output port
     pub trace: TraceType,
     pub depth: i32,
 }
@@ -24,6 +25,8 @@ pub struct RunTimeStruct {
 pub struct RunTime<'a> {
     pub heap: &'a mut GcHeap,
     pub port_stack: &'a mut Vec<PortKind>,
+    pub file_table: &'a mut FileTable,
+    pub current_output_port: &'a mut PortKind,
     pub trace: &'a mut TraceType,
     pub depth: &'a mut i32,
 }
@@ -33,6 +36,8 @@ impl<'a> RunTime<'a> {
         RunTime {
             heap: &mut eval.heap,
             port_stack: &mut eval.port_stack,
+            file_table: &mut eval.file_table,
+            current_output_port: &mut eval.current_output_port,
             trace: &mut eval.trace,
             depth: &mut eval.depth,
         }
@@ -55,6 +60,8 @@ impl RunTimeStruct {
         Self {
             heap: GcHeap::new(),
             port_stack: port_vec,
+            file_table: FileTable::new(),
+            current_output_port: PortKind::Stdout,
             trace: TraceType::Reset,
             depth: 0,
         }

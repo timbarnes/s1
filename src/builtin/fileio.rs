@@ -1,5 +1,5 @@
 use crate::env::{EnvOps, EnvRef};
-use crate::gc::{GcHeap, GcRef, SchemeValue, new_port};
+use crate::gc::{GcHeap, GcRef, SchemeValue, new_bool, new_port};
 use std::io::Write;
 
 macro_rules! register_builtin_family {
@@ -15,24 +15,54 @@ macro_rules! register_builtin_family {
 pub fn register_fileio_builtins(heap: &mut GcHeap, env: EnvRef) {
     register_builtin_family!(heap, env,
         "open-input-file" => open_input_file,
+        "open-output-file" => open_output_file,
         "eof-object?" => eof_object_q,
+        "input-port?" => input_port_q,
+        "output-port?" => output_port_q,
+        "close-input-port" => close_input_port,
         "flush-output" => flush_output,
+        "close-output-port" => close_output_port,
     );
+}
+
+fn output_port_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 1 {
+        return Err("output-port?: expected 1 argument".to_string());
+    }
+    let is_output_port = match &heap.get_value(args[0]) {
+        SchemeValue::Port(kind) => match kind {
+            crate::io::PortKind::Stdout | crate::io::PortKind::Stderr | crate::io::PortKind::StringPortOutput { .. } => true,
+            crate::io::PortKind::File { write, .. } => *write,
+            _ => false,
+        },
+        _ => false,
+    };
+    Ok(new_bool(heap, is_output_port))
 }
 
 /// (eof-object? obj) -> #t or #f
 /// Tests the result of a read operation to determine if it reached the end of the file.
 fn eof_object_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 1 {
-        return Err("eof-object: expected exactly 0 arguments".to_string());
+        return Err("eof-object?: expected exactly 1 argument".to_string());
     }
-    let result;
-    if crate::gc::eq(&heap, heap.eof(), args[0]) {
-        result = heap.true_s();
-    } else {
-        result = heap.false_s();
+    let is_eof = matches!(&heap.get_value(args[0]), SchemeValue::Eof);
+    Ok(new_bool(heap, is_eof))
+}
+
+fn input_port_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 1 {
+        return Err("input-port?: expected 1 argument".to_string());
     }
-    Ok(result)
+    let is_input_port = match &heap.get_value(args[0]) {
+        SchemeValue::Port(kind) => match kind {
+            crate::io::PortKind::Stdin | crate::io::PortKind::StringPortInput { .. } => true,
+            crate::io::PortKind::File { write, .. } => !*write,
+            _ => false,
+        },
+        _ => false,
+    };
+    Ok(new_bool(heap, is_input_port))
 }
 
 /// (open-input-file filename) -> port
@@ -64,6 +94,74 @@ fn open_input_file(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
             "open-input-file: could not open file '{}': {}",
             filename, e
         )),
+    }
+}
+
+/// (open-output-file filename) -> port
+fn open_output_file(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 1 {
+        return Err("open-output-file: expected exactly 1 argument".to_string());
+    }
+    let filename = match &heap.get_value(args[0]) {
+        SchemeValue::Str(s) => s,
+        _ => return Err("open-output-file: argument must be a string".to_string()),
+    };
+    // Try to open the file
+    match crate::io::FileTable::new().open_file(filename, true) {
+        Ok(id) => {
+            let port = new_port(
+                heap,
+                crate::io::PortKind::File {
+                    name: filename.to_string(),
+                    id,
+                    write: true,
+                    pos: std::cell::Cell::new(0),
+                },
+            );
+            Ok(port)
+        }
+        Err(e) => Err(format!(
+            "open-output-file: could not open file '{}': {}",
+            filename, e
+        )),
+    }
+}
+
+fn close_input_port(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 1 {
+        return Err("close-input-port: expected exactly 1 argument".to_string());
+    }
+    let port = args[0];
+    match heap.get_value(port) {
+        SchemeValue::Port(kind) => {
+            if let crate::io::PortKind::File { id, write: false, .. } = kind {
+                crate::io::FileTable::new().close_file(*id);
+                Ok(heap.void())
+            } else {
+                // Closing non-file input ports is a no-op.
+                Ok(heap.void())
+            }
+        }
+        _ => Err("close-input-port: argument must be a port".to_string()),
+    }
+}
+
+/// (close-output-port port)
+fn close_output_port(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 1 {
+        return Err("close-output-port: expected exactly 1 argument".to_string());
+    }
+    let port = args[0];
+    match heap.get_value(port) {
+        SchemeValue::Port(kind) => {
+            if let crate::io::PortKind::File { id, write: true, .. } = kind {
+                crate::io::FileTable::new().close_file(*id);
+                Ok(heap.void())
+            } else {
+                Err("close-output-port: argument must be an output file port".to_string())
+            }
+        }
+        _ => Err("close-output-port: argument must be a port".to_string()),
     }
 }
 

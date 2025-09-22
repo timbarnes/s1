@@ -416,6 +416,26 @@
 (string-set! s 1 #\z)
 (test-equal "azc" s "string-set!")
 
+(display "          === Testing Character I/O ===")
+(newline)
+(define char-port (open-input-file "tests/char_test.txt"))
+
+(test-true (input-port? char-port) "Port is an input port")
+(test-true (char-ready? char-port) "char-ready? on open port")
+(test-equal #\a (peek-char char-port) "peek-char on fresh port")
+(test-equal #\a (peek-char char-port) "peek-char again does not advance")
+(test-equal #\a (read-char char-port) "read-char reads first char")
+(test-equal #\b (read-char char-port) "read-char reads second char")
+(test-true (char-ready? char-port) "char-ready? after reading")
+(test-equal #\c (peek-char char-port) "peek-char on last char")
+(test-equal #\c (read-char char-port) "read-char reads last char")
+
+;; Test End of File
+(test-true (eof-object? (peek-char char-port)) "peek-char at EOF")
+(test-true (eof-object? (read-char char-port)) "read-char at EOF")
+
+(close-input-port char-port)
+
 (display "          === Testing Equality ===")
 (newline)
 (test-true (eq? 'foo 'foo) "Equal symbols")

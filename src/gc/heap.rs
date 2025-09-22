@@ -287,7 +287,7 @@ impl GcHeap {
     }
 
     /// Update the position of a StringPortInput in a SchemeValue::Port
-    pub fn update_string_port_pos(&mut self, port_ref: &PortKind, new_pos: usize) -> bool {
+    pub fn update_string_port_pos(&mut self, port_ref: &mut PortKind, new_pos: usize) -> bool {
         crate::io::update_string_port_pos(port_ref, new_pos)
     }
 }

@@ -2,8 +2,8 @@ use crate::env::{EnvOps, EnvRef};
 use crate::eval::{CEKState, Control, Kont, KontRef, insert_eval_eval};
 use crate::eval::{RunTime, TraceType};
 use crate::gc::{
-    Callable, GcHeap, GcRef, SchemeValue, get_symbol, list, list_to_vec, list3, new_continuation,
-    new_port, new_sys_builtin,
+    Callable, GcHeap, GcRef, SchemeValue, get_symbol, list, list_to_vec, list3, new_bool,
+    new_continuation, new_port, new_sys_builtin,
 };
 use crate::gc_value;
 use crate::io::{PortKind, port_kind_from_scheme_port};
@@ -46,8 +46,16 @@ pub fn register_sys_builtins(runtime: &mut RunTime, env: EnvRef) {
         "trace" => trace_sp,
         "trace-env" => trace_env_sp,
         "read" => read_sp,
+        "read-char" => read_char_sp,
+        "peek-char" => peek_char_sp,
+        "char-ready?" => char_ready_sp,
+        "current-input-port" => current_input_port_sp,
+        "current-output-port" => current_output_port_sp,
         "push-port!" => push_port_sp,
         "pop-port!" => pop_port_sp,
+        "write" => write_sp,
+        "display" => display_sp,
+        "newline" => newline_sp,
         "garbage-collect" => garbage_collect_sp,
         "gc" => garbage_collect_sp,
     );
@@ -299,35 +307,37 @@ fn read_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(),
     if args.len() > 1 {
         return Err("read: expected at most 1 argument".to_string());
     }
-    let mut port_kind = ec.port_stack.last_mut().unwrap().clone();
-    if args.len() == 1 {
-        match args.get(0) {
-            Some(port) => port_kind = port_kind_from_scheme_port(ec, *port),
-            None => {
-                return Err("read: invalid port argument".to_string());
-            }
-        }
-    }
 
-    match port_kind {
-        PortKind::Stdin | PortKind::StringPortInput { .. } /* | PortKind::File { .. } */ => {
-            let result = parse(ec.heap, &mut port_kind);
-            match result {
-                Ok(expr) => {
-                    state.control = Control::Value(expr);
-                    Ok(())
-                }
-                Err(err) => match err {
-                    ParseError::Eof => {
-                        state.control = Control::Value(ec.heap.eof());
-                        Ok(())
-                    },
-                    ParseError::Syntax(err) => Err(format!("read: syntax error:{}", err)),
-                    //ParseError::Other(err) => Err(format!("read: other error:{}", err)),
-                }
+    let result = if args.is_empty() {
+        let port_kind = ec.port_stack.last_mut().unwrap();
+        match port_kind {
+            PortKind::Stdin | PortKind::StringPortInput { .. } /* | PortKind::File { .. } */ => {
+                parse(ec.heap, port_kind)
             }
+            _ => return Err("read: port must be a string port or file port".to_string()),
         }
-        _ => Err("read: port must be a string port or file port".to_string()),
+    } else {
+        let mut port_kind = port_kind_from_scheme_port(ec, args[0]);
+        match port_kind {
+            PortKind::Stdin | PortKind::StringPortInput { .. } /* | PortKind::File { .. } */ => {
+                parse(ec.heap, &mut port_kind)
+            }
+            _ => return Err("read: port must be a string port or file port".to_string()),
+        }
+    };
+
+    match result {
+        Ok(expr) => {
+            state.control = Control::Value(expr);
+            Ok(())
+        }
+        Err(err) => match err {
+            ParseError::Eof => {
+                state.control = Control::Value(ec.heap.eof());
+                Ok(())
+            }
+            ParseError::Syntax(err) => Err(format!("read: syntax error:{}", err)),
+        },
     }
 }
 
@@ -365,6 +375,86 @@ pub fn pop_port_sp(ec: &mut RunTime, _args: &[GcRef], state: &mut CEKState) -> R
     }
 }
 
+fn write_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+    if args.len() < 1 || args.len() > 2 {
+        return Err("write: expected 1 or 2 arguments".to_string());
+    }
+    let s = crate::printer::print_value(&args[0]);
+
+    if args.len() == 2 {
+        let mut port_kind = crate::io::port_kind_from_scheme_port(rt, args[1]);
+        match port_kind {
+            PortKind::Stdout | PortKind::Stderr | PortKind::StringPortOutput { .. } => {}
+            PortKind::File { write, .. } => {
+                if !write {
+                    return Err("write: provided port is not an output port".to_string());
+                }
+            }
+            _ => return Err("write: provided port is not an output port".to_string()),
+        }
+        crate::io::write_line(&mut port_kind, rt.file_table, &s);
+    } else {
+        crate::io::write_line(rt.current_output_port, rt.file_table, &s);
+    };
+
+    state.control = Control::Value(rt.heap.void());
+    Ok(())
+}
+
+fn display_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+    if args.len() < 1 || args.len() > 2 {
+        return Err("display: expected 1 or 2 arguments".to_string());
+    }
+    let s = crate::printer::display_value(&args[0]);
+
+    let mut port_kind = if args.len() == 2 {
+        let pk = crate::io::port_kind_from_scheme_port(rt, args[1]);
+        match pk {
+            PortKind::Stdout | PortKind::Stderr | PortKind::StringPortOutput { .. } => pk,
+            PortKind::File { write, .. } => {
+                if write {
+                    pk
+                } else {
+                    return Err("display: provided port is not an output port".to_string());
+                }
+            }
+            _ => return Err("display: provided port is not an output port".to_string()),
+        }
+    } else {
+        PortKind::Stdout
+    };
+
+    crate::io::write_line(&mut port_kind, rt.file_table, &s);
+    state.control = Control::Value(rt.heap.void());
+    Ok(())
+}
+
+fn newline_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+    if args.len() > 1 {
+        return Err("newline: expected 0 or 1 arguments".to_string());
+    }
+
+    let mut port_kind = if args.len() == 1 {
+        let pk = crate::io::port_kind_from_scheme_port(rt, args[0]);
+        match pk {
+            PortKind::Stdout | PortKind::Stderr | PortKind::StringPortOutput { .. } => pk,
+            PortKind::File { write, .. } => {
+                if write {
+                    pk
+                } else {
+                    return Err("newline: provided port is not an output port".to_string());
+                }
+            }
+            _ => return Err("newline: provided port is not an output port".to_string()),
+        }
+    } else {
+        PortKind::Stdout
+    };
+
+    crate::io::write_char(&mut port_kind, rt.file_table, '\n');
+    state.control = Control::Value(rt.heap.void());
+    Ok(())
+}
 /// Utility functions
 ///
 fn capture_call_site_kont(k: &KontRef) -> KontRef {
@@ -386,4 +476,123 @@ fn apply_arg_list(args: &[GcRef], heap: &mut GcHeap) -> GcRef {
             list
         }
     }
+}
+
+fn read_char_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+    if args.len() > 1 {
+        return Err("read-char: expected 0 or 1 arguments".to_string());
+    }
+
+    let result_char = if args.is_empty() {
+        let port_kind = rt.port_stack.last_mut().unwrap();
+        crate::io::read_char(port_kind, rt.file_table)
+    } else {
+        let port = args[0];
+        if let SchemeValue::Port(port_kind) = rt.heap.get_value(port) {
+            match port_kind {
+                PortKind::Stdin | PortKind::StringPortInput { .. } => {}
+                PortKind::File { write, .. } => {
+                    if *write {
+                        return Err("read-char: provided port is not an input port".to_string());
+                    }
+                }
+                _ => return Err("read-char: provided port is not an input port".to_string()),
+            }
+            crate::io::read_char(port_kind, rt.file_table)
+        } else {
+            return Err("read-char: argument must be a port".to_string());
+        }
+    };
+
+    let result_val = match result_char {
+        Some(c) => crate::gc::new_char(rt.heap, c),
+        None => rt.heap.eof(),
+    };
+
+    state.control = Control::Value(result_val);
+    Ok(())
+}
+
+fn peek_char_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+    if args.len() > 1 {
+        return Err("peek-char: expected 0 or 1 arguments".to_string());
+    }
+
+    let result_char = if args.is_empty() {
+        let port_kind = rt.port_stack.last().unwrap();
+        crate::io::peek_char(port_kind, rt.file_table)
+    } else {
+        let port_kind = crate::io::port_kind_from_scheme_port(rt, args[0]);
+        match port_kind {
+            PortKind::Stdin | PortKind::StringPortInput { .. } => {}
+            PortKind::File { write, .. } => {
+                if write {
+                    return Err("peek-char: provided port is not an input port".to_string());
+                }
+            }
+            _ => return Err("peek-char: provided port is not an input port".to_string()),
+        }
+        crate::io::peek_char(&port_kind, rt.file_table)
+    };
+
+    let result_val = match result_char {
+        Some(c) => crate::gc::new_char(rt.heap, c),
+        None => rt.heap.eof(),
+    };
+
+    state.control = Control::Value(result_val);
+    Ok(())
+}
+
+fn char_ready_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+    if args.len() > 1 {
+        return Err("char-ready?: expected 0 or 1 arguments".to_string());
+    }
+
+    let is_ready = if args.is_empty() {
+        let port_kind = rt.port_stack.last().unwrap();
+        crate::io::char_ready(port_kind)
+    } else {
+        let port_kind = crate::io::port_kind_from_scheme_port(rt, args[0]);
+        match port_kind {
+            PortKind::Stdin | PortKind::StringPortInput { .. } => {}
+            PortKind::File { write, .. } => {
+                if write {
+                    return Err("char-ready?: provided port is not an input port".to_string());
+                }
+            }
+            _ => return Err("char-ready?: provided port is not an input port".to_string()),
+        }
+        crate::io::char_ready(&port_kind)
+    };
+
+    state.control = Control::Value(new_bool(rt.heap, is_ready));
+    Ok(())
+}
+
+fn current_input_port_sp(
+    rt: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+) -> Result<(), String> {
+    if !args.is_empty() {
+        return Err("current-input-port: expected 0 arguments".to_string());
+    }
+    let port_kind = rt.port_stack.last().unwrap().clone();
+    let port = new_port(rt.heap, port_kind);
+    state.control = Control::Value(port);
+    Ok(())
+}
+
+fn current_output_port_sp(
+    rt: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+) -> Result<(), String> {
+    if !args.is_empty() {
+        return Err("current-output-port: expected 0 arguments".to_string());
+    }
+    let port = new_port(rt.heap, PortKind::Stdout);
+    state.control = Control::Value(port);
+    Ok(())
 }
