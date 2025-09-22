@@ -122,6 +122,9 @@ fn repl(rt: &mut RunTime, state: &mut CEKState, quit_after_load: bool) {
                     if interactive {
                         for v in result.iter() {
                             println!("=> {}", print_value(&v));
+                            if rt.heap.needs_gc() {
+                                rt.heap.collect_garbage(state);
+                            }
                         }
                     }
                 }

@@ -194,6 +194,7 @@ impl GcHeap {
 
     /// Perform garbage collection.
     pub fn collect_garbage(&mut self, roots: &impl Mark) {
+        //println!("gc..");
         self.allocations = 0;
         for obj in &self.objects {
             crate::gc::unmark(*obj);
