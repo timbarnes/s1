@@ -48,6 +48,8 @@ pub fn register_sys_builtins(runtime: &mut RunTime, env: EnvRef) {
         "read" => read_sp,
         "push-port!" => push_port_sp,
         "pop-port!" => pop_port_sp,
+        "garbage-collect" => garbage_collect_sp,
+        "gc" => garbage_collect_sp,
     );
 }
 
@@ -123,6 +125,16 @@ fn apply_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
         },
         _ => return Err("apply: first argument must be a function".to_string()),
     }
+}
+
+fn garbage_collect_sp(
+    ec: &mut RunTime,
+    _args: &[GcRef],
+    state: &mut CEKState,
+) -> Result<(), String> {
+    ec.heap.collect_garbage(state);
+    state.control = Control::Value(ec.heap.void());
+    Ok(())
 }
 
 /// (debug-stack)

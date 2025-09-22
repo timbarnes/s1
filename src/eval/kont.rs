@@ -276,13 +276,137 @@ impl CEKState {
     }
 }
 
-// impl mark for CEKState {
-//     fn mark(&self) {
-//         self.control.mark();
-//         self.env.mark();
-//         self.kont.mark();
-//     }
-// }
+impl crate::gc::Mark for Control {
+    fn mark(&self, visit: &mut dyn FnMut(GcRef)) {
+        match self {
+            Control::Expr(expr) => visit(*expr),
+            Control::Value(val) => visit(*val),
+            Control::Values(vals) => {
+                for val in vals {
+                    visit(*val);
+                }
+            }
+            Control::Escape(val, kont) => {
+                visit(*val);
+                kont.mark(visit);
+            }
+            Control::Empty => {}
+        }
+    }
+}
+
+impl crate::gc::Mark for KontRef {
+    fn mark(&self, visit: &mut dyn FnMut(GcRef)) {
+        let mut worklist = vec![Rc::clone(self)];
+
+        while let Some(kont_ref) = worklist.pop() {
+            let kont = &*kont_ref;
+            match kont {
+                Kont::Halt => {}
+                Kont::AndOr { rest, next, .. } => {
+                    for item in rest {
+                        visit(*item);
+                    }
+                    worklist.push(Rc::clone(next));
+                }
+                Kont::ApplyProc { proc, evaluated_args, next } => {
+                    visit(*proc);
+                    for arg in evaluated_args.iter() {
+                        visit(*arg);
+                    }
+                    worklist.push(Rc::clone(next));
+                }
+                Kont::ApplySpecial { proc, original_call, next } => {
+                    visit(*proc);
+                    visit(*original_call);
+                    worklist.push(Rc::clone(next));
+                }
+                Kont::Bind { symbol, env, next } => {
+                    visit(*symbol);
+                    if let Some(env) = env {
+                        env.mark(visit);
+                    }
+                    worklist.push(Rc::clone(next));
+                }
+                Kont::CallWithValues { consumer, next } => {
+                    visit(*consumer);
+                    worklist.push(Rc::clone(next));
+                }
+                Kont::Cond { remaining, next } => {
+                    for clause in remaining {
+                        clause.mark(visit);
+                    }
+                    worklist.push(Rc::clone(next));
+                }
+                Kont::CondClause { clause, next } => {
+                    clause.mark(visit);
+                    worklist.push(Rc::clone(next));
+                }
+                Kont::Eval { expr, env, next, .. } => {
+                    visit(*expr);
+                    if let Some(env) = env {
+                        visit(*env);
+                    }
+                    worklist.push(Rc::clone(next));
+                }
+                Kont::EvalArg { proc, remaining, evaluated, original_call, env, next, .. } => {
+                    if let Some(proc) = proc {
+                        visit(*proc);
+                    }
+                    for item in remaining {
+                        visit(*item);
+                    }
+                    for item in evaluated {
+                        visit(*item);
+                    }
+                    visit(*original_call);
+                    env.mark(visit);
+                    worklist.push(Rc::clone(next));
+                }
+                Kont::If { then_branch, else_branch, next } => {
+                    visit(*then_branch);
+                    visit(*else_branch);
+                    worklist.push(Rc::clone(next));
+                }
+                Kont::RestoreEnv { old_env, next } => {
+                    old_env.mark(visit);
+                    worklist.push(Rc::clone(next));
+                }
+                Kont::Seq { rest, next } => {
+                    for item in rest {
+                        visit(*item);
+                    }
+                    worklist.push(Rc::clone(next));
+                }
+            }
+        }
+    }
+}
+
+impl crate::gc::Mark for CondClause {
+    fn mark(&self, visit: &mut dyn FnMut(GcRef)) {
+        match self {
+            CondClause::Normal { test, body } => {
+                visit(*test);
+                if let Some(body) = body {
+                    visit(*body);
+                }
+            }
+            CondClause::Arrow { test, arrow_proc } => {
+                visit(*test);
+                visit(*arrow_proc);
+            }
+        }
+    }
+}
+
+impl crate::gc::Mark for CEKState {
+    fn mark(&self, visit: &mut dyn FnMut(GcRef)) {
+        self.control.mark(visit);
+        self.env.mark(visit);
+        self.kont.mark(visit);
+    }
+}
 
 /// Install `expr` into the existing CEKState and return immediately.
 /// If `replace_next` is true, the installed EvalArg (if any) will have `next = Halt`

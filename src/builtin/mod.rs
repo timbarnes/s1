@@ -8,7 +8,8 @@ pub mod string;
 pub mod vector;
 
 use crate::env::{EnvOps, EnvRef};
-use crate::gc::{GcHeap, GcRef, SchemeValue, new_string};
+use crate::gc::{GcHeap, GcRef, SchemeValue, new_int, new_string};
+use num_traits::ToPrimitive;
 
 /// Macro to register builtin functions in the environment
 ///
@@ -67,6 +68,23 @@ fn help(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     }
 }
 
+fn gc_threshold(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    match args.len() {
+        0 => Ok(new_int(heap, num_bigint::BigInt::from(heap.threshold))),
+        1 => {
+            let new_threshold = match heap.get_value(args[0]) {
+                SchemeValue::Int(i) => {
+                    i.to_usize().ok_or("threshold must be a positive integer")?
+                }
+                _ => return Err("threshold must be an integer".to_string()),
+            };
+            heap.threshold = new_threshold;
+            Ok(new_int(heap, num_bigint::BigInt::from(new_threshold)))
+        }
+        _ => Err("gc-threshold: expected 0 or 1 arguments".to_string()),
+    }
+}
+
 /// Register all builtin functions in the environment
 pub fn register_builtins(heap: &mut GcHeap, env: EnvRef) {
     char::register_char_builtins(heap, env.clone());
@@ -81,5 +99,6 @@ pub fn register_builtins(heap: &mut GcHeap, env: EnvRef) {
         "help" => help,
         "exit" => exit,
         "void" => void,
+        "gc-threshold" => gc_threshold,
     );
 }

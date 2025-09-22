@@ -18,8 +18,13 @@ pub struct GcHeap {
     free_list: Vec<GcObject>,
     // All allocated GcRef objects (for potential future GC)
     objects: Vec<GcRef>,
+    // For objects allocated since the last GC
+    nursery: Vec<GcRef>,
     // Symbol table for interning symbols (name -> symbol object)
     symbol_table: HashMap<String, GcRef>,
+    // Number of allocations since last GC
+    allocations: usize,
+    pub threshold: usize,
 }
 
 impl GcHeap {
@@ -35,7 +40,10 @@ impl GcHeap {
             void_obj: None,
             free_list: Vec::new(),
             objects: Vec::new(),
+            nursery: Vec::new(),
             symbol_table: HashMap::new(),
+            allocations: 0,
+            threshold: 100000,
         };
 
         // Pre-allocate singleton objects
@@ -90,11 +98,13 @@ impl GcHeap {
 
     /// Allocate a new object on the heap.
     pub fn alloc(&mut self, obj: GcObject) -> GcRef {
+        self.allocations += 1;
         // For now, we'll use a simple approach: allocate on the heap and leak it
         // In a real implementation, you'd want proper memory management
         let boxed = Box::new(obj);
         let raw = Box::into_raw(boxed);
         self.objects.push(raw);
+        self.nursery.push(raw);
         raw
     }
 
@@ -184,18 +194,50 @@ impl GcHeap {
 
     /// Perform garbage collection.
     pub fn collect_garbage(&mut self, roots: &impl Mark) {
-        // 1. Clear mark bits
+        self.allocations = 0;
         for obj in &self.objects {
             crate::gc::unmark(*obj);
         }
-        // 2. Mark
         self.mark_from(roots);
-        // 3. Sweep
         self.sweep();
+        self.nursery.clear();
     }
 
     fn mark_from(&mut self, roots: &impl Mark) {
-        roots.mark(&mut |gcref| self.mark_reachable(gcref));
+        let mut root_set: Vec<GcRef> = Vec::new();
+        roots.mark(&mut |gcref| root_set.push(gcref));
+
+        // Add singleton objects to the root set
+        if let Some(nil_obj) = self.nil_obj {
+            root_set.push(nil_obj);
+        }
+        if let Some(true_obj) = self.true_obj {
+            root_set.push(true_obj);
+        }
+        if let Some(false_obj) = self.false_obj {
+            root_set.push(false_obj);
+        }
+        if let Some(void_obj) = self.void_obj {
+            root_set.push(void_obj);
+        }
+        if let Some(eof_obj) = self.eof_obj {
+            root_set.push(eof_obj);
+        }
+        if let Some(undefined_obj) = self.undefined_obj {
+            root_set.push(undefined_obj);
+        }
+        // Add symbols from the symbol table to the root set
+        for symbol in self.symbol_table.values() {
+            root_set.push(*symbol);
+        }
+        // Add objects in the nursery to the root set
+        for obj in &self.nursery {
+            root_set.push(*obj);
+        }
+        // Now, mark all reachable objects from the collected roots
+        for root in root_set {
+            self.mark_reachable(root);
+        }
     }
 
     fn mark_reachable(&mut self, start: GcRef) {
@@ -206,7 +248,9 @@ impl GcHeap {
                 continue;
             }
 
-            crate::gc::mark(gcref);
+            unsafe {
+                (*gcref).marked = true;
+            }
 
             match unsafe { &(*gcref).value } {
                 SchemeValue::Pair(car, cdr) => {
@@ -231,16 +275,14 @@ impl GcHeap {
         self.objects.retain(|obj| {
             let marked = unsafe { (**obj).marked };
             if !marked {
-                unsafe {
-                    Box::from_raw(*obj);
-                }
+                let _ = unsafe { Box::from_raw(*obj) };
             }
             marked
         });
     }
 
     pub fn needs_gc(&self) -> bool {
-        self.free_list.len() < 1000
+        self.allocations > self.threshold
     }
 
     /// Update the position of a StringPortInput in a SchemeValue::Port
