@@ -3,7 +3,7 @@ use crate::eval::{CEKState, Control, Kont, KontRef, insert_eval_eval};
 use crate::eval::{RunTime, TraceType};
 use crate::gc::{
     Callable, GcHeap, GcRef, SchemeValue, get_symbol, list, list_to_vec, list3, new_bool,
-    new_continuation, new_sys_builtin,
+    new_continuation, new_float, new_port, new_sys_builtin,
 };
 use crate::gc_value;
 use crate::io::{PortKind, port_kind_from_scheme_port};
@@ -12,8 +12,8 @@ use crate::parser::{ParseError, parse};
 use crate::special_forms::create_callable;
 use crate::utilities::post_error;
 
-//use crate::utilities::dump_cek;
 use std::rc::Rc;
+use std::time::Instant;
 
 /// System Builtin Functions
 ///
@@ -45,6 +45,10 @@ pub fn register_sys_builtins(runtime: &mut RunTime, env: EnvRef) {
         "call-with-values" => call_with_values_sp,
         "trace" => trace_sp,
         "trace-env" => trace_env_sp,
+        "open-input-file" => open_input_file_sp,
+        "open-output-file" => open_output_file_sp,
+        "close-input-port" => close_input_port_sp,
+        "close-output-port" => close_output_port_sp,
         "read" => read_sp,
         "read-char" => read_char_sp,
         "peek-char" => peek_char_sp,
@@ -140,8 +144,12 @@ fn garbage_collect_sp(
     _args: &[GcRef],
     state: &mut CEKState,
 ) -> Result<(), String> {
-    ec.heap.collect_garbage(state, *ec.current_output_port, ec.port_stack);
-    state.control = Control::Value(ec.heap.void());
+    let timer = Instant::now();
+    ec.heap
+        .collect_garbage(state, *ec.current_output_port, ec.port_stack);
+    let elapsed_time = timer.elapsed().as_secs_f64();
+    let time = new_float(&mut ec.heap, elapsed_time);
+    state.control = Control::Value(time);
     Ok(())
 }
 
@@ -292,9 +300,136 @@ fn trace_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
 /// Prints the environment, optionally including the global env.
 fn trace_env_sp(ec: &mut RunTime, _args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
     *ec.depth -= 1;
-
     state.control = Control::Value(ec.heap.void());
     Ok(())
+}
+
+/// (open-input-file filename) -> port
+fn open_input_file_sp(
+    ec: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+) -> Result<(), String> {
+    if args.len() != 1 {
+        return Err("open-input-file: expected exactly 1 argument".to_string());
+    }
+    let filename = match &gc_value!(args[0]) {
+        SchemeValue::Str(s) => s,
+        _ => return Err("open-input-file: argument must be a string".to_string()),
+    };
+    // Try to open the file
+    match std::fs::File::open(filename) {
+        Ok(file) => {
+            // Read the file into a string (for now, use StringPortInput for simplicity)
+            use std::io::Read;
+            let mut content = String::new();
+            let mut reader = std::io::BufReader::new(file);
+            if let Err(e) = reader.read_to_string(&mut content) {
+                return Err(format!(
+                    "open-input-file: could not read file '{}': {}",
+                    filename, e
+                ));
+            }
+            let port = new_port(ec.heap, crate::io::new_string_port_input(&content));
+            state.control = Control::Value(port);
+            Ok(())
+        }
+        Err(e) => Err(format!(
+            "open-input-file: could not open file '{}': {}",
+            filename, e
+        )),
+    }
+}
+
+/// (open-output-file filename) -> port
+fn open_output_file_sp(
+    ec: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+) -> Result<(), String> {
+    if args.len() != 1 {
+        return Err("open-output-file: expected exactly 1 argument".to_string());
+    }
+    let filename = match &gc_value!(args[0]) {
+        SchemeValue::Str(s) => s,
+        _ => return Err("open-output-file: argument must be a string".to_string()),
+    };
+    // Try to open the file
+    let result = ec.file_table.open_file(filename, true);
+    match result {
+        Ok(id) => {
+            let port = new_port(
+                ec.heap,
+                crate::io::PortKind::File {
+                    name: filename.to_string(),
+                    id,
+                    write: true,
+                    pos: std::cell::Cell::new(0),
+                },
+            );
+            state.control = Control::Value(port);
+            Ok(())
+        }
+        Err(e) => Err(format!(
+            "open-output-file: could not open file '{}': {}",
+            filename, e
+        )),
+    }
+}
+
+fn close_input_port_sp(
+    ec: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+) -> Result<(), String> {
+    if args.len() != 1 {
+        return Err("close-input-port: expected exactly 1 argument".to_string());
+    }
+    let port = args[0];
+    match &gc_value!(port) {
+        SchemeValue::Port(kind) => {
+            if let crate::io::PortKind::File {
+                id, write: false, ..
+            } = kind
+            {
+                ec.file_table.close_file(*id);
+                state.control = Control::Value(ec.heap.void());
+                Ok(())
+            } else {
+                // Closing non-file input ports is a no-op.
+                state.control = Control::Value(ec.heap.void());
+                Ok(())
+            }
+        }
+        _ => Err("close-input-port: argument must be a port".to_string()),
+    }
+}
+
+/// (close-output-port port)
+fn close_output_port_sp(
+    ec: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+) -> Result<(), String> {
+    if args.len() != 1 {
+        return Err("close-output-port: expected exactly 1 argument".to_string());
+    }
+    let port = args[0];
+    match &gc_value!(port) {
+        SchemeValue::Port(kind) => {
+            if let crate::io::PortKind::File {
+                id, write: true, ..
+            } = kind
+            {
+                ec.file_table.close_file(*id);
+                state.control = Control::Value(ec.heap.void());
+                Ok(())
+            } else {
+                Err("close-output-port: argument must be an output file port".to_string())
+            }
+        }
+        _ => Err("close-output-port: argument must be a port".to_string()),
+    }
 }
 
 /// (read [port])
@@ -396,10 +531,13 @@ fn write_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
         }
         _ => return Err("write: provided port is not an output port".to_string()),
     }
-    crate::io::write_line(&mut port_kind, rt.file_table, &s);
-
-    state.control = Control::Value(rt.heap.void());
-    Ok(())
+    let success = crate::io::write_line(&mut port_kind, rt.file_table, &s);
+    if success {
+        state.control = Control::Value(rt.heap.void());
+        return Ok(());
+    } else {
+        return Err("write: failed to write to port".to_string());
+    };
 }
 
 fn display_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
@@ -620,3 +758,55 @@ fn apply_arg_list(args: &[GcRef], heap: &mut GcHeap) -> GcRef {
         }
     }
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     use crate::eval::RunTimeStruct;
+//     use crate::gc::{SchemeValue, new_int, new_string};
+//     use std::io::Write;
+//     use tempfile::NamedTempFile;
+
+//     #[test]
+//     fn test_open_input_file_success() {
+//         let mut ev = RunTimeStruct::new();
+//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+//         // Create a temp file with some content
+//         let mut tmpfile = NamedTempFile::new().unwrap();
+//         write!(tmpfile, "hello world").unwrap();
+//         let path = tmpfile.path().to_str().unwrap().to_string();
+//         let filename = new_string(&mut ec.heap, &path);
+//         let result = open_input_file_sp(&mut ec, &[filename], &mut state);
+//         assert!(result.is_ok());
+//         let port = result.unwrap();
+//         match &ec.heap.get_value(port) {
+//             SchemeValue::Port(kind) => match kind {
+//                 crate::io::PortKind::StringPortInput { content, .. } => {
+//                     assert_eq!(content, "hello world");
+//                 }
+//                 _ => panic!("Expected StringPortInput"),
+//             },
+//             _ => panic!("Expected Port"),
+//         }
+//     }
+
+//     #[test]
+//     fn test_open_input_file_nonexistent() {
+//         let mut ev = RunTimeStruct::new();
+//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+//         let filename = new_string(&mut ec.heap, "/no/such/file/hopefully.txt");
+//         let result = open_input_file(&mut ec.heap, &[filename]);
+//         assert!(result.is_err());
+//         assert!(result.unwrap_err().contains("could not open file"));
+//     }
+
+//     #[test]
+//     fn test_open_input_file_nonstring_arg() {
+//         let mut ev = RunTimeStruct::new();
+//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+//         let not_a_string = new_int(&mut ec.heap, 42.into());
+//         let result = open_input_file(&mut ec.heap, &[not_a_string]);
+//         assert!(result.is_err());
+//         assert!(result.unwrap_err().contains("argument must be a string"));
+//     }
+// }

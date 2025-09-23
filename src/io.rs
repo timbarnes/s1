@@ -229,8 +229,7 @@ fn read_line_from_string_port(
         } else {
             None
         }
-    }
-    else if let PortKind::File { id, pos, .. } = port_kind {
+    } else if let PortKind::File { id, pos, .. } = port_kind {
         if let Some(file) = file_table.get(*id) {
             let mut reader = std::io::BufReader::new(file);
             let mut buf = String::new();
@@ -244,8 +243,7 @@ fn read_line_from_string_port(
         } else {
             None
         }
-    }
-    else {
+    } else {
         None
     }
 }
@@ -290,6 +288,7 @@ pub fn write_line(port_kind: &mut PortKind, file_table: &mut FileTable, line: &s
                 let mut writer = std::io::BufWriter::new(file);
                 writer.write_all(line.as_bytes()).is_ok()
             } else {
+                eprintln!("write: failed to write to port");
                 false
             }
         }
@@ -403,7 +402,7 @@ pub fn char_ready(port_kind: &PortKind) -> bool {
     match port_kind {
         PortKind::StringPortInput { content, pos } => pos.get() < content.len(),
         PortKind::File { .. } => true, // Assume file is always ready until EOF
-        PortKind::Stdin => false, // Stdin blocking check not supported
+        PortKind::Stdin => false,      // Stdin blocking check not supported
         _ => false,
     }
 }
