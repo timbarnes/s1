@@ -15,7 +15,7 @@ pub use kont::{
 /// Evaluator that owns both heap and environment
 pub struct RunTimeStruct {
     pub heap: GcHeap,               // The global heap for scheme data
-    pub port_stack: Vec<PortKind>,  // Stack of ports for input/output operations
+    pub port_stack: Vec<GcRef>,  // Stack of ports for input/output operations
     pub file_table: FileTable,      // Table of open files
     pub current_output_port: GcRef, // The current output port
     pub trace: TraceType,
@@ -24,7 +24,7 @@ pub struct RunTimeStruct {
 
 pub struct RunTime<'a> {
     pub heap: &'a mut GcHeap,
-    pub port_stack: &'a mut Vec<PortKind>,
+    pub port_stack: &'a mut Vec<GcRef>,
     pub file_table: &'a mut FileTable,
     pub current_output_port: &'a mut GcRef,
     pub trace: &'a mut TraceType,
@@ -57,7 +57,8 @@ impl RunTimeStruct {
     pub fn new() -> Self {
         let mut heap = GcHeap::new();
         let mut port_vec = Vec::new();
-        port_vec.push(PortKind::Stdin);
+        let stdin_port = new_port(&mut heap, PortKind::Stdin);
+        port_vec.push(stdin_port);
         let stdout_port = new_port(&mut heap, PortKind::Stdout);
         Self {
             heap,

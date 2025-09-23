@@ -15,6 +15,8 @@ use crate::env::Frame;
 use crate::eval::{
     CEKState, RunTime, RunTimeStruct, eval_main, eval_string, initialize_scheme_globals,
 };
+use crate::gc::SchemeValue;
+use crate::parser::parse;
 use crate::printer::print_value;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -93,7 +95,6 @@ fn main() {
 
 fn repl(rt: &mut RunTime, state: &mut CEKState, quit_after_load: bool) {
     use crate::io::PortKind;
-    use crate::parser::parse;
     use std::io as stdio;
     use stdio::Write;
 
@@ -103,19 +104,34 @@ fn repl(rt: &mut RunTime, state: &mut CEKState, quit_after_load: bool) {
     loop {
         *rt.depth = 0;
         // Check the port. Each parse-eval needs to be sure the port hasn't changed.
-        let current_port_val: &mut PortKind;
-        let current_port = rt.port_stack.last_mut();
-        match current_port {
-            Some(port_kind) => current_port_val = port_kind,
+        let current_port_ref = match rt.port_stack.last() {
+            Some(port_ref) => *port_ref,
             None => break, // No more ports, exit repl
-        }
+        };
 
-        interactive = matches!(current_port_val, PortKind::Stdin);
+        // Check if interactive before parsing
+        interactive = {
+            let port_kind = rt.heap.get_value(current_port_ref);
+            if let SchemeValue::Port(port_kind) = port_kind {
+                matches!(port_kind, PortKind::Stdin)
+            } else {
+                false
+            }
+        };
+
         if interactive {
             print!("s1> ");
             stdio::stdout().flush().unwrap();
         }
-        let expr = parse(rt.heap, current_port_val);
+
+        // Parse using direct access to the port similar to gc_value! macro pattern
+        let expr = {
+            if let SchemeValue::Port(port_kind) = unsafe { &mut (*current_port_ref).value } {
+                parse(rt.heap, port_kind)
+            } else {
+                Err(crate::parser::ParseError::Syntax("Expected port on port stack".to_string()))
+            }
+        };
         match expr {
             Ok(expr) => {
                 let returned = eval_main(expr, state, rt);
@@ -124,7 +140,7 @@ fn repl(rt: &mut RunTime, state: &mut CEKState, quit_after_load: bool) {
                         if interactive {
                             for v in result.iter() {
                                 println!("=> {}", print_value(&v));
-                                rt.heap.collect_garbage(state, *rt.current_output_port);
+                                // rt.heap.collect_garbage(state, *rt.current_output_port); // Temporarily disabled
                             }
                         }
                     }

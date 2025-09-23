@@ -3,7 +3,7 @@ use crate::eval::{CEKState, Control, Kont, KontRef, insert_eval_eval};
 use crate::eval::{RunTime, TraceType};
 use crate::gc::{
     Callable, GcHeap, GcRef, SchemeValue, get_symbol, list, list_to_vec, list3, new_bool,
-    new_continuation, new_port, new_sys_builtin,
+    new_continuation, new_sys_builtin,
 };
 use crate::gc_value;
 use crate::io::{PortKind, port_kind_from_scheme_port};
@@ -305,12 +305,17 @@ fn read_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(),
     }
 
     let result = if args.is_empty() {
-        let port_kind = ec.port_stack.last_mut().unwrap();
-        match port_kind {
-            PortKind::Stdin | PortKind::StringPortInput { .. } /* | PortKind::File { .. } */ => {
-                parse(ec.heap, port_kind)
+        let port_ref = *ec.port_stack.last().unwrap();
+        // Parse directly using unsafe access like gc_value! macro pattern
+        if let SchemeValue::Port(port_kind) = unsafe { &mut (*port_ref).value } {
+            match port_kind {
+                PortKind::Stdin | PortKind::StringPortInput { .. } /* | PortKind::File { .. } */ => {
+                    parse(ec.heap, port_kind)
+                }
+                _ => return Err("read: port must be a string port or file port".to_string()),
             }
-            _ => return Err("read: port must be a string port or file port".to_string()),
+        } else {
+            return Err("Expected port on port stack".to_string());
         }
     } else {
         let mut port_kind = port_kind_from_scheme_port(ec, args[0]);
@@ -352,19 +357,17 @@ pub fn push_port_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> R
     if args.len() != 1 {
         return Err("push_port!: expected exactly 1 argument".to_string());
     }
-    let port_kind = port_kind_from_scheme_port(ec, args[0]);
-    ec.port_stack.push(port_kind);
+    ec.port_stack.push(args[0]);
     state.control = Control::Value(ec.heap.void());
     Ok(())
 }
 
 pub fn pop_port_sp(ec: &mut RunTime, _args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
     // (pop-port!)
-    let port_kind = ec.port_stack.pop();
-    match port_kind {
-        Some(port_kind) => {
-            let port = new_port(&mut ec.heap, port_kind);
-            state.control = Control::Value(port);
+    let port_ref = ec.port_stack.pop();
+    match port_ref {
+        Some(port_ref) => {
+            state.control = Control::Value(port_ref);
             Ok(())
         }
         None => Err("Port Stack is empty".to_string()),
@@ -456,36 +459,16 @@ fn newline_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<
     state.control = Control::Value(rt.heap.void());
     Ok(())
 }
-/// Utility functions
-///
-fn capture_call_site_kont(k: &KontRef) -> KontRef {
-    match &**k {
-        Kont::EvalArg { next, .. } | Kont::ApplyProc { next, .. } => capture_call_site_kont(next),
-        _ => Rc::clone(k),
-    }
-}
 
-fn apply_arg_list(args: &[GcRef], heap: &mut GcHeap) -> GcRef {
-    match args.len() {
-        0 => heap.nil_s(),
-        1 => args[0],
-        _ => {
-            let mut list = *args.last().unwrap();
-            for arg in args[..args.len() - 1].iter().rev() {
-                list = crate::gc::cons(*arg, list, heap).unwrap();
-            }
-            list
-        }
-    }
-}
-
+/// (read-char [input-port]) -> Character | EOF
 fn read_char_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
     if args.len() > 1 {
         return Err("read-char: expected 0 or 1 arguments".to_string());
     }
 
     let result_char = if args.is_empty() {
-        let port_kind = rt.port_stack.last_mut().unwrap();
+        let port_ref = *rt.port_stack.last().unwrap();
+        let port_kind = rt.heap.get_port_mut(port_ref);
         crate::io::read_char(port_kind, rt.file_table)
     } else {
         let port = args[0];
@@ -514,14 +497,21 @@ fn read_char_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Resul
     Ok(())
 }
 
+/// (peek-char [input port]) -> Character | EOF
+/// Returns the next character from the current input port without consuming it.
 fn peek_char_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
     if args.len() > 1 {
         return Err("peek-char: expected 0 or 1 arguments".to_string());
     }
 
     let result_char = if args.is_empty() {
-        let port_kind = rt.port_stack.last().unwrap();
-        crate::io::peek_char(port_kind, rt.file_table)
+        let port_ref = *rt.port_stack.last().unwrap();
+        let port_kind = rt.heap.get_value(port_ref);
+        if let SchemeValue::Port(port_kind) = port_kind {
+            crate::io::peek_char(port_kind, rt.file_table)
+        } else {
+            return Err("Expected port on port stack".to_string());
+        }
     } else {
         let port_kind = crate::io::port_kind_from_scheme_port(rt, args[0]);
         match port_kind {
@@ -545,14 +535,21 @@ fn peek_char_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Resul
     Ok(())
 }
 
+/// (char-ready? [input-port]) -> Boolean
+/// Returns true if there is a character available to be read from the current input port.
 fn char_ready_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
     if args.len() > 1 {
         return Err("char-ready?: expected 0 or 1 arguments".to_string());
     }
 
     let is_ready = if args.is_empty() {
-        let port_kind = rt.port_stack.last().unwrap();
-        crate::io::char_ready(port_kind)
+        let port_ref = *rt.port_stack.last().unwrap();
+        let port_kind = rt.heap.get_value(port_ref);
+        if let SchemeValue::Port(port_kind) = port_kind {
+            crate::io::char_ready(port_kind)
+        } else {
+            return Err("Expected port on port stack".to_string());
+        }
     } else {
         let port_kind = crate::io::port_kind_from_scheme_port(rt, args[0]);
         match port_kind {
@@ -571,6 +568,9 @@ fn char_ready_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Resu
     Ok(())
 }
 
+/// (current-input-port) -> Port
+/// Returns the port currently used for input - typically stdin for the repl, but more
+/// specifically the port that is on the top of the port stack.
 fn current_input_port_sp(
     rt: &mut RunTime,
     args: &[GcRef],
@@ -579,12 +579,13 @@ fn current_input_port_sp(
     if !args.is_empty() {
         return Err("current-input-port: expected 0 arguments".to_string());
     }
-    let port_kind = rt.port_stack.last().unwrap().clone();
-    let port = new_port(rt.heap, port_kind);
+    let port = *rt.port_stack.last().unwrap();
     state.control = Control::Value(port);
     Ok(())
 }
 
+/// (current-output-port) -> Port
+/// Returns the port currently used for output - typically stdout for the repl.
 fn current_output_port_sp(
     rt: &mut RunTime,
     args: &[GcRef],
@@ -595,4 +596,27 @@ fn current_output_port_sp(
     }
     state.control = Control::Value(*rt.current_output_port);
     Ok(())
+}
+
+/// Utility functions
+///
+fn capture_call_site_kont(k: &KontRef) -> KontRef {
+    match &**k {
+        Kont::EvalArg { next, .. } | Kont::ApplyProc { next, .. } => capture_call_site_kont(next),
+        _ => Rc::clone(k),
+    }
+}
+
+fn apply_arg_list(args: &[GcRef], heap: &mut GcHeap) -> GcRef {
+    match args.len() {
+        0 => heap.nil_s(),
+        1 => args[0],
+        _ => {
+            let mut list = *args.last().unwrap();
+            for arg in args[..args.len() - 1].iter().rev() {
+                list = crate::gc::cons(*arg, list, heap).unwrap();
+            }
+            list
+        }
+    }
 }
