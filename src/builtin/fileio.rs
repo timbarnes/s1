@@ -1,5 +1,6 @@
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{GcHeap, GcRef, SchemeValue, new_bool};
+use crate::gc_value;
 use std::io::Write;
 
 macro_rules! register_builtin_family {
@@ -61,12 +62,4 @@ fn input_port_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
         _ => false,
     };
     Ok(new_bool(heap, is_input_port))
-}
-
-/// (flush-output [port]) -> #<void>
-/// TODO: Implement flush-output for other ports than stdout
-fn flush_output(heap: &mut GcHeap, _args: &[GcRef]) -> Result<GcRef, String> {
-    
-    std::io::stdout().flush().ok();
-    Ok(heap.void())
 }

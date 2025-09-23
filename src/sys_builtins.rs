@@ -12,6 +12,7 @@ use crate::parser::{ParseError, parse};
 use crate::special_forms::create_callable;
 use crate::utilities::post_error;
 
+use std::io::Write;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -60,6 +61,7 @@ pub fn register_sys_builtins(runtime: &mut RunTime, env: EnvRef) {
         "write" => write_sp,
         "display" => display_sp,
         "newline" => newline_sp,
+        "flush-output" => flush_output_sp,
         "garbage-collect" => garbage_collect_sp,
         "gc" => garbage_collect_sp,
     );
@@ -733,6 +735,40 @@ fn current_output_port_sp(
         return Err("current-output-port: expected 0 arguments".to_string());
     }
     state.control = Control::Value(*rt.current_output_port);
+    Ok(())
+}
+
+/// (flush-output [port]) -> #<void>
+///    If no arg, flush the current output port;
+///    otherwise flush the given port if it's an output file port.
+fn flush_output_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+    let port = if args.len() == 0 {
+        *rt.current_output_port
+    } else {
+        args[0]
+    };
+
+    let f = port_kind_from_scheme_port(rt, port);
+    match f {
+        crate::io::PortKind::Stdout => {
+            std::io::stdout().flush().ok();
+        }
+        crate::io::PortKind::File { id, write, .. } => {
+            if write {
+                let f = rt.file_table.get(id);
+                match f {
+                    Some(file) => {
+                        file.flush().ok();
+                        return Ok(());
+                    }
+                    None => return Err("flush-output: file not found".to_string()),
+                }
+            }
+        }
+        _ => return Err("flush-output: invalid port".to_string()),
+    }
+
+    state.control = Control::Value(port);
     Ok(())
 }
 
