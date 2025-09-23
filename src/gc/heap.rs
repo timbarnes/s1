@@ -132,7 +132,6 @@ impl GcHeap {
         }
     }
 
-
     /// Get the singleton nil value.
     pub fn nil_s(&self) -> GcRef {
         self.nil_obj.unwrap()
@@ -202,24 +201,38 @@ impl GcHeap {
     }
 
     /// Perform garbage collection.
-    pub fn collect_garbage(&mut self, state: &crate::eval::CEKState, current_output_port: GcRef) {
-        //println!("gc..");
+    pub fn collect_garbage(
+        &mut self,
+        state: &crate::eval::CEKState,
+        current_output_port: GcRef,
+        port_stack: &[GcRef],
+    ) {
+        // println!("GC: Starting collection, {} objects, {} in nursery, {} ports in stack",
+        //          self.objects.len(), self.nursery.len(), port_stack.len());
         self.allocations = 0;
         for obj in &self.objects {
             crate::gc::unmark(*obj);
         }
-        self.mark_from(state, current_output_port);
+        self.mark_from(state, current_output_port, port_stack);
         self.sweep();
         self.nursery.clear();
     }
 
-    fn mark_from(&mut self, state: &crate::eval::CEKState, current_output_port: GcRef) {
+    fn mark_from(
+        &mut self,
+        state: &crate::eval::CEKState,
+        current_output_port: GcRef,
+        port_stack: &[GcRef],
+    ) {
         let mut root_set: Vec<GcRef> = Vec::new();
         state.mark(&mut |gcref| root_set.push(gcref));
 
         // Add roots from the runtime
         root_set.push(current_output_port);
-
+        // Add all ports from the port stack as roots
+        for &port_ref in port_stack {
+            root_set.push(port_ref);
+        }
         // Add singleton objects to the root set
         if let Some(nil_obj) = self.nil_obj {
             root_set.push(nil_obj);
@@ -295,9 +308,7 @@ impl GcHeap {
     }
 
     pub fn needs_gc(&self) -> bool {
-        // Temporarily disabled for testing port_stack changes
-        false
-        // self.allocations > self.threshold
+        self.allocations > self.threshold
     }
 
     /// Update the position of a StringPortInput in a SchemeValue::Port

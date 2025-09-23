@@ -140,7 +140,7 @@ fn garbage_collect_sp(
     _args: &[GcRef],
     state: &mut CEKState,
 ) -> Result<(), String> {
-    ec.heap.collect_garbage(state, *ec.current_output_port);
+    ec.heap.collect_garbage(state, *ec.current_output_port, ec.port_stack);
     state.control = Control::Value(ec.heap.void());
     Ok(())
 }

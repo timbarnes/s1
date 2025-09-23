@@ -283,3 +283,19 @@
        `(define ,s ,(car b)))
       (else
        (error "define: expected exactly one value expression")))))
+
+;; File I/O convenience functions
+
+(define call-with-input-file
+  (lambda (filename proc)
+    (let ((port (open-input-file filename)))
+      (let ((result (proc port)))
+        (close-input-port port)
+        result))))
+
+(define call-with-output-file
+  (lambda (filename proc)
+    (let ((port (open-output-file filename)))
+      (let ((result (proc port)))
+        (close-output-port port)
+        result))))

@@ -140,7 +140,7 @@ fn repl(rt: &mut RunTime, state: &mut CEKState, quit_after_load: bool) {
                         if interactive {
                             for v in result.iter() {
                                 println!("=> {}", print_value(&v));
-                                // rt.heap.collect_garbage(state, *rt.current_output_port); // Temporarily disabled
+                                rt.heap.collect_garbage(state, *rt.current_output_port, rt.port_stack);
                             }
                         }
                     }

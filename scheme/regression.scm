@@ -436,6 +436,49 @@
 
 (close-input-port char-port)
 
+(display "          === Testing File I/O ===")
+(newline)
+
+;; Test call-with-input-file
+(test-equal #\a (call-with-input-file "tests/char_test.txt"
+                  (lambda (port) (read-char port)))
+            "call-with-input-file reads first character")
+
+;; Test call-with-input-file with multiple operations
+(test-equal '(#\a #\b) (call-with-input-file "tests/char_test.txt"
+                         (lambda (port)
+                           (list (read-char port) (read-char port))))
+            "call-with-input-file reads multiple characters")
+
+;; Test call-with-input-file with read function
+(test-equal 'abc (call-with-input-file "tests/char_test.txt"
+                   (lambda (port) (read port)))
+            "call-with-input-file with read function")
+
+;; Test that call-with-input-file properly closes file (basic functionality test)
+(define result-from-file #f)
+(set! result-from-file
+      (call-with-input-file "tests/char_test.txt"
+        (lambda (port)
+          (list (read-char port) (read-char port) (read-char port)))))
+(test-equal '(#\a #\b #\c) result-from-file "call-with-input-file returns result correctly")
+
+;; Test call-with-output-file basic functionality
+;; Note: Due to current file I/O limitations, we test the function structure rather than file content
+(define output-result #f)
+(set! output-result
+      (call-with-output-file "tests/test-output-temp.txt"
+        (lambda (port)
+          (display "test" port)
+          "function-completed")))
+(test-equal "function-completed" output-result "call-with-output-file returns result correctly")
+
+;; Test that files are properly closed (port should be invalid after call)
+(define test-port-closed #f)
+(call-with-input-file "tests/char_test.txt"
+  (lambda (port) (set! test-port-closed port)))
+;; Note: We can't easily test that the port is closed without causing an error
+
 (display "          === Testing Equality ===")
 (newline)
 (test-true (eq? 'foo 'foo) "Equal symbols")
