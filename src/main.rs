@@ -117,17 +117,20 @@ fn repl(rt: &mut RunTime, state: &mut CEKState, quit_after_load: bool) {
         }
         let expr = parse(rt.heap, current_port_val);
         match expr {
-            Ok(expr) => match eval_main(expr, state, rt) {
-                Ok(result) => {
-                    if interactive {
-                        for v in result.iter() {
-                            println!("=> {}", print_value(&v));
-                            rt.heap.collect_garbage(state);
+            Ok(expr) => {
+                let returned = eval_main(expr, state, rt);
+                match returned {
+                    Ok(result) => {
+                        if interactive {
+                            for v in result.iter() {
+                                println!("=> {}", print_value(&v));
+                                rt.heap.collect_garbage(state, *rt.current_output_port);
+                            }
                         }
                     }
+                    Err(e) => println!("Error: {}", e),
                 }
-                Err(e) => println!("Error: {}", e),
-            },
+            }
             Err(crate::parser::ParseError::Eof) => {
                 // Pop the port stack on EOF
                 rt.port_stack.pop();

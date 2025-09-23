@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
+use std::io::{self, BufRead, Read, Write};
 
 // use std::io::BufReader as StdBufReader;
 use crate::eval::RunTime;
@@ -352,7 +352,7 @@ pub fn read_char(port_kind: &PortKind, file_table: &mut FileTable) -> Option<cha
 /// For stdout ports, the character is printed to the console.
 /// For file ports, the character is written to the file.
 ///
-pub fn write_char(port_kind: &mut PortKind, file_table: &mut FileTable, ch: char) -> bool {
+pub fn write_char(port_kind: &PortKind, file_table: &mut FileTable, ch: char) -> bool {
     match port_kind {
         PortKind::Stdout => {
             print!("{}", ch);
@@ -367,9 +367,9 @@ pub fn write_char(port_kind: &mut PortKind, file_table: &mut FileTable, ch: char
                 false
             }
         }
-        PortKind::StringPortOutput { content } => {
-            content.push(ch);
-            true
+        PortKind::StringPortOutput { .. } => {
+            // This will be fixed later by using RefCell
+            todo!()
         }
         _ => false,
     }

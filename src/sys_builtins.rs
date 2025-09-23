@@ -140,7 +140,7 @@ fn garbage_collect_sp(
     _args: &[GcRef],
     state: &mut CEKState,
 ) -> Result<(), String> {
-    ec.heap.collect_garbage(state);
+    ec.heap.collect_garbage(state, *ec.current_output_port);
     state.control = Control::Value(ec.heap.void());
     Ok(())
 }
@@ -290,13 +290,9 @@ fn trace_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
 
 /// (debug-env ['g(lobal)])
 /// Prints the environment, optionally including the global env.
-fn trace_env_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn trace_env_sp(ec: &mut RunTime, _args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
     *ec.depth -= 1;
-    let mut global = false;
-    if args.len() == 1 {
-        global = true;
-    }
-    let env = state.env.clone();
+
     state.control = Control::Value(ec.heap.void());
     Ok(())
 }
@@ -381,21 +377,23 @@ fn write_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
     }
     let s = crate::printer::print_value(&args[0]);
 
-    if args.len() == 2 {
-        let mut port_kind = crate::io::port_kind_from_scheme_port(rt, args[1]);
-        match port_kind {
-            PortKind::Stdout | PortKind::Stderr | PortKind::StringPortOutput { .. } => {}
-            PortKind::File { write, .. } => {
-                if !write {
-                    return Err("write: provided port is not an output port".to_string());
-                }
-            }
-            _ => return Err("write: provided port is not an output port".to_string()),
-        }
-        crate::io::write_line(&mut port_kind, rt.file_table, &s);
+    let port = if args.len() == 2 {
+        args[1]
     } else {
-        crate::io::write_line(rt.current_output_port, rt.file_table, &s);
+        *rt.current_output_port
     };
+    let mut port_kind = crate::io::port_kind_from_scheme_port(rt, port);
+
+    match port_kind {
+        PortKind::Stdout | PortKind::Stderr | PortKind::StringPortOutput { .. } => {}
+        PortKind::File { write, .. } => {
+            if !write {
+                return Err("write: provided port is not an output port".to_string());
+            }
+        }
+        _ => return Err("write: provided port is not an output port".to_string()),
+    }
+    crate::io::write_line(&mut port_kind, rt.file_table, &s);
 
     state.control = Control::Value(rt.heap.void());
     Ok(())
@@ -407,24 +405,24 @@ fn display_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<
     }
     let s = crate::printer::display_value(&args[0]);
 
-    let mut port_kind = if args.len() == 2 {
-        let pk = crate::io::port_kind_from_scheme_port(rt, args[1]);
-        match pk {
-            PortKind::Stdout | PortKind::Stderr | PortKind::StringPortOutput { .. } => pk,
-            PortKind::File { write, .. } => {
-                if write {
-                    pk
-                } else {
-                    return Err("display: provided port is not an output port".to_string());
-                }
-            }
-            _ => return Err("display: provided port is not an output port".to_string()),
-        }
+    let port = if args.len() == 2 {
+        args[1]
     } else {
-        PortKind::Stdout
+        *rt.current_output_port
     };
+    let mut port_kind = crate::io::port_kind_from_scheme_port(rt, port);
 
+    match port_kind {
+        PortKind::Stdout | PortKind::Stderr | PortKind::StringPortOutput { .. } => {}
+        PortKind::File { write, .. } => {
+            if !write {
+                return Err("display: provided port is not an output port".to_string());
+            }
+        }
+        _ => return Err("display: provided port is not an output port".to_string()),
+    }
     crate::io::write_line(&mut port_kind, rt.file_table, &s);
+
     state.control = Control::Value(rt.heap.void());
     Ok(())
 }
@@ -434,24 +432,27 @@ fn newline_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<
         return Err("newline: expected 0 or 1 arguments".to_string());
     }
 
-    let mut port_kind = if args.len() == 1 {
-        let pk = crate::io::port_kind_from_scheme_port(rt, args[0]);
-        match pk {
-            PortKind::Stdout | PortKind::Stderr | PortKind::StringPortOutput { .. } => pk,
+    let port_gcref = if args.len() == 1 {
+        args[0]
+    } else {
+        *rt.current_output_port
+    };
+
+    if let SchemeValue::Port(port_kind) = rt.heap.get_value(port_gcref) {
+        match port_kind {
+            PortKind::Stdout | PortKind::Stderr | PortKind::StringPortOutput { .. } => {}
             PortKind::File { write, .. } => {
-                if write {
-                    pk
-                } else {
+                if !*write {
                     return Err("newline: provided port is not an output port".to_string());
                 }
             }
             _ => return Err("newline: provided port is not an output port".to_string()),
         }
+        crate::io::write_char(port_kind, rt.file_table, '\n');
     } else {
-        PortKind::Stdout
-    };
+        return Err("newline: argument must be a port".to_string());
+    }
 
-    crate::io::write_char(&mut port_kind, rt.file_table, '\n');
     state.control = Control::Value(rt.heap.void());
     Ok(())
 }
@@ -592,7 +593,6 @@ fn current_output_port_sp(
     if !args.is_empty() {
         return Err("current-output-port: expected 0 arguments".to_string());
     }
-    let port = new_port(rt.heap, PortKind::Stdout);
-    state.control = Control::Value(port);
+    state.control = Control::Value(*rt.current_output_port);
     Ok(())
 }

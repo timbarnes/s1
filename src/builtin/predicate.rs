@@ -74,7 +74,6 @@ pub fn register_predicate_builtins(heap: &mut crate::gc::GcHeap, env: EnvRef) {
 
 mod tests {
     use super::*;
-    use crate::gc_value;
 
     #[test]
     fn test_number_q() {

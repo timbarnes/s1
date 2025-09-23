@@ -14,10 +14,10 @@ pub use kont::{
 
 /// Evaluator that owns both heap and environment
 pub struct RunTimeStruct {
-    pub heap: GcHeap,                  // The global heap for scheme data
-    pub port_stack: Vec<PortKind>,     // Stack of ports for input/output operations
-    pub file_table: FileTable,         // Table of open files
-    pub current_output_port: PortKind, // The current output port
+    pub heap: GcHeap,               // The global heap for scheme data
+    pub port_stack: Vec<PortKind>,  // Stack of ports for input/output operations
+    pub file_table: FileTable,      // Table of open files
+    pub current_output_port: GcRef, // The current output port
     pub trace: TraceType,
     pub depth: i32,
 }
@@ -26,7 +26,7 @@ pub struct RunTime<'a> {
     pub heap: &'a mut GcHeap,
     pub port_stack: &'a mut Vec<PortKind>,
     pub file_table: &'a mut FileTable,
-    pub current_output_port: &'a mut PortKind,
+    pub current_output_port: &'a mut GcRef,
     pub trace: &'a mut TraceType,
     pub depth: &'a mut i32,
 }
@@ -55,13 +55,15 @@ pub enum TraceType {
 impl RunTimeStruct {
     /// Create a new RunTime struct initialized to stdin
     pub fn new() -> Self {
+        let mut heap = GcHeap::new();
         let mut port_vec = Vec::new();
         port_vec.push(PortKind::Stdin);
+        let stdout_port = new_port(&mut heap, PortKind::Stdout);
         Self {
-            heap: GcHeap::new(),
+            heap,
             port_stack: port_vec,
             file_table: FileTable::new(),
-            current_output_port: PortKind::Stdout,
+            current_output_port: stdout_port,
             trace: TraceType::Reset,
             depth: 0,
         }

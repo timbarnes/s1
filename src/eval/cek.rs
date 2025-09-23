@@ -6,7 +6,7 @@ use super::kont::{
 use crate::env::{EnvOps, EnvRef};
 use crate::eval::{RunTime, bind_params, eval_macro};
 use crate::gc::SchemeValue::*;
-use crate::gc::{Callable, GcHeap, GcRef, cons, is_false, list_to_vec};
+use crate::gc::{Callable, GcRef, cons, is_false, list_to_vec};
 use crate::gc_value;
 use crate::printer::print_value;
 use crate::utilities::{debugger, post_error};
@@ -239,7 +239,7 @@ fn dispatch_kont(
             next,
         } => handle_if(state, *then_branch, *else_branch, Rc::clone(next)),
         Kont::RestoreEnv { old_env, next } => {
-            handle_restore_env(state, ec.heap, old_env.clone(), Rc::clone(next))
+            handle_restore_env(state, ec, old_env.clone(), Rc::clone(next))
         }
         Kont::Seq { rest, next } => handle_seq(state, rest.clone(), Rc::clone(next)),
         Kont::Halt => Ok(()),
@@ -572,12 +572,12 @@ fn handle_if(
 
 fn handle_restore_env(
     state: &mut CEKState,
-    heap: &mut GcHeap,
+    ec: &mut RunTime,
     old_env: EnvRef,
     next: Rc<Kont>,
 ) -> Result<(), String> {
-    if heap.needs_gc() {
-        heap.collect_garbage(state);
+    if ec.heap.needs_gc() {
+        ec.heap.collect_garbage(state, *ec.current_output_port);
     }
     // Restore environment
     state.env = old_env;

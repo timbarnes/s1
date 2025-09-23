@@ -193,20 +193,23 @@ impl GcHeap {
     }
 
     /// Perform garbage collection.
-    pub fn collect_garbage(&mut self, roots: &impl Mark) {
+    pub fn collect_garbage(&mut self, state: &crate::eval::CEKState, current_output_port: GcRef) {
         //println!("gc..");
         self.allocations = 0;
         for obj in &self.objects {
             crate::gc::unmark(*obj);
         }
-        self.mark_from(roots);
+        self.mark_from(state, current_output_port);
         self.sweep();
         self.nursery.clear();
     }
 
-    fn mark_from(&mut self, roots: &impl Mark) {
+    fn mark_from(&mut self, state: &crate::eval::CEKState, current_output_port: GcRef) {
         let mut root_set: Vec<GcRef> = Vec::new();
-        roots.mark(&mut |gcref| root_set.push(gcref));
+        state.mark(&mut |gcref| root_set.push(gcref));
+
+        // Add roots from the runtime
+        root_set.push(current_output_port);
 
         // Add singleton objects to the root set
         if let Some(nil_obj) = self.nil_obj {
