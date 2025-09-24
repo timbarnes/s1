@@ -19,6 +19,14 @@ macro_rules! gc_value {
 }
 
 #[macro_export]
+macro_rules! gc_value_mut {
+    ($r:expr) => {{
+        // SAFETY: caller must ensure $r is a valid GcRef pointing to live data
+        unsafe { &mut (*$r).value }
+    }};
+}
+
+#[macro_export]
 macro_rules! gc_marked {
     ($r:expr) => {{
         // SAFETY: caller must ensure $r is a valid GcRef pointing to live data

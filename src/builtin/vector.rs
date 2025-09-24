@@ -1,10 +1,34 @@
 /// Vector functions
 ///
 use crate::env::{EnvOps, EnvRef};
-use crate::gc::{GcHeap, GcRef, SchemeValue, new_int, new_vector};
+use crate::gc::{GcHeap, GcRef, SchemeValue, list_from_slice, list_to_vec, new_int, new_vector};
+use crate::{gc_value, gc_value_mut};
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 use std::vec;
+
+macro_rules! register_builtin_family {
+    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
+        $(
+            $env.define($heap.intern_symbol($name),
+                crate::gc::new_builtin($heap, $func,
+                    concat!($name, ": builtin function").to_string()));
+        )*
+    };
+}
+
+pub fn register_vector_builtins(heap: &mut crate::gc::GcHeap, env: EnvRef) {
+    register_builtin_family!(heap, env,
+        "vector" => vector,
+        "make-vector" => make_vector,
+        "vector-length" => vector_length,
+        "vector-ref" => vector_ref,
+        "vector-set!" => vector_set,
+        "vector->list" => vector_to_list,
+        "list->vector" => list_to_vector,
+        "vector-fill!" => vector_fill,
+    );
+}
 
 /// Creates a new vector from a list of arguments.
 /// (vector arg1 arg2 ...)
@@ -98,22 +122,44 @@ pub fn vector_set(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     }
 }
 
-macro_rules! register_builtin_family {
-    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
-        $(
-            $env.define($heap.intern_symbol($name),
-                crate::gc::new_builtin($heap, $func,
-                    concat!($name, ": builtin function").to_string()));
-        )*
-    };
+/// (vector->list vector) -> list
+fn vector_to_list(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 1 {
+        return Err("vector->list: expects exactly 1 argument".to_string());
+    }
+
+    match gc_value!(args[0]) {
+        SchemeValue::Vector(v) => Ok(list_from_slice(&v[..], heap)),
+        _ => Err("vector->list: first argument must be a vector".to_string()),
+    }
 }
 
-pub fn register_vector_builtins(heap: &mut crate::gc::GcHeap, env: EnvRef) {
-    register_builtin_family!(heap, env,
-        "vector" => vector,
-        "make-vector" => make_vector,
-        "vector-length" => vector_length,
-        "vector-ref" => vector_ref,
-        "vector-set!" => vector_set,
-    );
+/// (list->vector list) -> vector
+fn list_to_vector(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 1 {
+        return Err("list->vector: expects exactly 1 argument".to_string());
+    }
+
+    let list_ptr = gc_value!(args[0]);
+    match list_ptr {
+        SchemeValue::Pair(_car, _cdr) => {
+            let result = new_vector(heap, list_to_vec(heap, args[0])?);
+            Ok(result)
+        }
+        _ => Err("vector->list: first argument must be a vector".to_string()),
+    }
+}
+
+/// (vector-set! vector index value) -> vector
+fn vector_fill(_heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 2 {
+        return Err("vector-fill!: expects a vector and a fill value".to_string());
+    }
+
+    match gc_value_mut!(args[0]) {
+        SchemeValue::Vector(v) => v.fill(args[1]),
+        _ => return Err("vector-fill!: first argument must be a vector".to_string()),
+    };
+
+    Ok(args[0])
 }

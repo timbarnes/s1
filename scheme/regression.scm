@@ -187,6 +187,8 @@
 (test-false (pair? 42) "pair? with number")
 (test-true (eq? '() '()) "nil? with nil")
 (test-false (eq? '(1 2) '()) "nil? with list")
+(test-true (vector? #(1 2 3)) "vector? with vector")
+(test-false (vector? 42) "vector? with number")
 
 (display "          === Testing Type-of ===")
 (newline)
@@ -353,6 +355,18 @@
 (test-false (> 3 2 2) "Not strictly decreasing")
 (test-equal 4 (min 5 4 6) "min with integers")
 (test-equal 3.14 (min 5 6 7.8 3.14) "min with int and float")
+
+(display "          === Testing Vectors ===")
+(newline)
+(test-equal 4 (vector-length (vector 1 2 3 4)) "vector-length")
+(test-equal '#(9 8 7) (vector 9 8 7) "vector constructor with numbers")
+(test-equal '#(a b c) (vector 'a 'b 'c) "vector constructor with symbols")
+(test-equal 10 (vector-length (make-vector 10)) "make-vector length check")
+(test-equal '#() (make-vector 0 99) "zero length make-vector")
+(test-equal '#(9 9 9) (make-vector 3 9) "make-vector with fill")
+(test-equal '#(2 2 2) (vector-fill! (vector 4 5 6) 2) "vector-fill")
+(test-equal '(1 2 3) (vector->list (vector 1 2 3)) "vector->list")
+(test-equal '(1) (vector->list (vector 1)) "vector->list")
 
 (display "          === Testing Strings ===")
 (newline)

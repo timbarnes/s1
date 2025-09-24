@@ -1,7 +1,5 @@
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{GcHeap, GcRef, SchemeValue, new_bool};
-use crate::gc_value;
-use std::io::Write;
 
 macro_rules! register_builtin_family {
     ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
@@ -18,7 +16,6 @@ pub fn register_fileio_builtins(heap: &mut GcHeap, env: EnvRef) {
         "eof-object?" => eof_object_q,
         "input-port?" => input_port_q,
         "output-port?" => output_port_q,
-        "flush-output" => flush_output,
     );
 }
 
