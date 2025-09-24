@@ -52,6 +52,7 @@ pub fn register_sys_builtins(runtime: &mut RunTime, env: EnvRef) {
         "close-output-port" => close_output_port_sp,
         "read" => read_sp,
         "read-char" => read_char_sp,
+        "write-char" => write_char_sp,
         "peek-char" => peek_char_sp,
         "char-ready?" => char_ready_sp,
         "current-input-port" => current_input_port_sp,
@@ -634,6 +635,25 @@ fn read_char_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Resul
     };
 
     state.control = Control::Value(result_val);
+    Ok(())
+}
+
+/// (write-char char [output-port])
+/// Writes a character to the current or specified output port.
+fn write_char_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+    let port = match args.len() {
+        1 => port_kind_from_scheme_port(rt, *rt.current_output_port),
+        2 => port_kind_from_scheme_port(rt, args[1]),
+        _ => return Err("write-char: expected 1 or 2 arguments".to_string()),
+    };
+    match gc_value!(args[0]) {
+        SchemeValue::Char(c) => {
+            crate::io::write_char(&port, rt.file_table, *c);
+        }
+        _ => return Err("write-char: expected a character".to_string()),
+    }
+
+    state.control = Control::Value(rt.heap.void());
     Ok(())
 }
 

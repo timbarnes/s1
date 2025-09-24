@@ -9,6 +9,7 @@ pub mod vector;
 
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{GcHeap, GcRef, SchemeValue, new_int, new_string};
+use crate::gc_value;
 use num_traits::ToPrimitive;
 
 /// Macro to register builtin functions in the environment
@@ -27,9 +28,46 @@ macro_rules! register_builtin_family {
     };
 }
 
+/// Register all builtin functions in the environment
+pub fn register_builtins(heap: &mut GcHeap, env: EnvRef) {
+    char::register_char_builtins(heap, env.clone());
+    display::register_display_builtins(heap, env.clone());
+    list::register_list_builtins(heap, env.clone());
+    fileio::register_fileio_builtins(heap, env.clone());
+    number::register_number_builtins(heap, env.clone());
+    predicate::register_predicate_builtins(heap, env.clone());
+    string::register_string_builtins(heap, env.clone());
+    vector::register_vector_builtins(heap, env.clone());
+    register_builtin_family!(heap, env.clone(),
+        "help" => help,
+        "exit" => exit,
+        "void" => void,
+        "gc-threshold" => gc_threshold,
+        "shell" => shell,
+    );
+}
+
 // ============================================================================
 // BUILTIN FUNCTIONS
 // ============================================================================
+
+/// (system cmd)
+/// Executes the given command in a subprocess and returns the output as a string.
+fn shell(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 1 {
+        return Err("system: expected 1 argument".to_string());
+    }
+    let cmd_string = match gc_value!(args[0]) {
+        SchemeValue::Str(s) => s,
+        _ => return Err("system: expected a string argument".to_string()),
+    };
+
+    let result = crate::utilities::run_command(cmd_string);
+    match result {
+        Ok(output) => Ok(new_string(heap, output.as_str())),
+        Err(e) => Err(e.to_string()),
+    }
+}
 
 /// (void)
 /// Returns the void value.
@@ -83,22 +121,4 @@ fn gc_threshold(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
         }
         _ => Err("gc-threshold: expected 0 or 1 arguments".to_string()),
     }
-}
-
-/// Register all builtin functions in the environment
-pub fn register_builtins(heap: &mut GcHeap, env: EnvRef) {
-    char::register_char_builtins(heap, env.clone());
-    display::register_display_builtins(heap, env.clone());
-    list::register_list_builtins(heap, env.clone());
-    fileio::register_fileio_builtins(heap, env.clone());
-    number::register_number_builtins(heap, env.clone());
-    predicate::register_predicate_builtins(heap, env.clone());
-    string::register_string_builtins(heap, env.clone());
-    vector::register_vector_builtins(heap, env.clone());
-    register_builtin_family!(heap, env.clone(),
-        "help" => help,
-        "exit" => exit,
-        "void" => void,
-        "gc-threshold" => gc_threshold,
-    );
 }

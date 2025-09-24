@@ -323,3 +323,12 @@ pub fn dbg_env(loc: &str, frame: EnvRef, global: bool) {
         }
     }
 }
+
+use std::io;
+use std::process::Command;
+
+pub fn run_command(cmd: &str) -> io::Result<String> {
+    let output = Command::new("sh").arg("-c").arg(cmd).output()?;
+    // Convert stdout bytes to String, trimming trailing newlines if you like
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}

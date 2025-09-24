@@ -48,6 +48,7 @@ pub fn type_of(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
             Callable::SysBuiltin { .. } => "sys-builtin",
         },
         SchemeValue::Nil => "null",
+        SchemeValue::Port(_) => "port",
         _ => "unknown",
     };
     Ok(get_symbol(heap, type_name))

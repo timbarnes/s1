@@ -124,12 +124,13 @@ fn repl(rt: &mut RunTime, state: &mut CEKState, quit_after_load: bool) {
             stdio::stdout().flush().unwrap();
         }
 
-        // Parse using direct access to the port similar to gc_value! macro pattern
         let expr = {
-            if let SchemeValue::Port(port_kind) = unsafe { &mut (*current_port_ref).value } {
+            if let SchemeValue::Port(port_kind) = gc_value_mut!(current_port_ref) {
                 parse(rt.heap, port_kind)
             } else {
-                Err(crate::parser::ParseError::Syntax("Expected port on port stack".to_string()))
+                Err(crate::parser::ParseError::Syntax(
+                    "Expected port on port stack".to_string(),
+                ))
             }
         };
         match expr {
@@ -140,7 +141,11 @@ fn repl(rt: &mut RunTime, state: &mut CEKState, quit_after_load: bool) {
                         if interactive {
                             for v in result.iter() {
                                 println!("=> {}", print_value(&v));
-                                rt.heap.collect_garbage(state, *rt.current_output_port, rt.port_stack);
+                                rt.heap.collect_garbage(
+                                    state,
+                                    *rt.current_output_port,
+                                    rt.port_stack,
+                                );
                             }
                         }
                     }

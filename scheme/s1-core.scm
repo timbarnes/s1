@@ -14,15 +14,14 @@
 (define macro? (lambda (x) (eq? (type-of x) 'macro)))
 (define boolean? (lambda (x) (eq? (type-of x) 'boolean)))
 (define char? (lambda (x) (eq? (type-of x) 'char)))
-
-(define procedure? (lambda (x)
-    (let ((type (type-of x)))
-        (or (eq? type 'builtin)
-            (eq? type 'closure)
-            (eq? type 'sys-builtin)))))
-
 (define env-frame? (lambda (x) (eq? (type-of x) 'env-frame)))
+(define port? (lambda (x) (eq? (type-of x) 'port)))
 
+(define (procedure? x)
+    (if (memq (type-of x) '(builtin closure sys-builtin))
+        #t #f))
+
+;; Character comparisons and predicates
 (define char<=?
   (lambda (c1 c2)
     (or (char<? c1 c2)
@@ -56,9 +55,9 @@
   (lambda (c)
     (and (char>=? c #\a) (char<=? c #\z))))
 
-
 (define null? (lambda (x) (eq? x '())))
 
+;; Membership and association functions
 (define memq
   (lambda (v l)
     (cond ((null? l) #f)
@@ -114,13 +113,11 @@
 ;; List accessor functions (compositions of car and cdr)
 ;; These provide convenient access to nested list elements
 
-;; Basic 2-level accessors
 (define cadr (lambda (l) (car (cdr l))))      ;; Second element of a list
 (define cdar (lambda (l) (cdr (car l))))      ;; Cdr of the first element
 (define caar (lambda (l) (car (car l))))      ;; Car of the first element
 (define cddr (lambda (l) (cdr (cdr l))))      ;; Cdr of the cdr of a list
 
-;; 3-level accessors
 (define caddr (lambda (l) (car (cdr (cdr l)))))     ;; Third element of a list
 (define cadddr (lambda (l) (car (cdr (cdr (cdr l)))))) ;; Fourth element of a list
 (define cadar (lambda (l) (car (cdr (car l)))))     ;; Car of cdr of car
@@ -129,7 +126,6 @@
 (define cdadr (lambda (l) (cdr (car (cdr l)))))     ;; Cdr of car of cdr
 (define cdddr (lambda (l) (cdr (cdr (cdr l)))))     ;; Cdr of cdr of cdr
 
-;; 4-level accessors (less common but useful)
 (define caaar (lambda (l) (car (car (car l)))))     ;; Car of car of car
 (define cdaar (lambda (l) (cdr (car (car l)))))     ;; Cdr of car of car
 (define caaadr (lambda (l) (car (car (car (cdr l)))))) ;; Car of car of car of cdr
@@ -141,30 +137,33 @@
 (define cdddr (lambda (l) (cdr (cdr (cdr l)))))      ;; Cdr of cdr of cdr
 (define cddddr (lambda (l) (cdr (cdr (cdr (cdr l)))))) ;; Cdr of cdr of cdr of cdr
 
-(define map (lambda (f l)
+;; Simplified (single argument) version of map
+(define (map f l)
     (if (null? l)
         '()
-        (cons (f (car l)) (map f (cdr l))))))
+        (cons (f (car l)) (map f (cdr l)))))
 
-(define for-each (lambda (f args)
+;; Simplified (single argument) version of for-each
+(define (for-each f args)
     (if (null? args)
         #t
         (begin
             (f (car args))
-            (for-each f (cdr args))))))
+            (for-each f (cdr args)))))
 
-(define displayln (lambda s
+;; Multi-element print function; needs to take an optional port
+(define (displayln . s)
     (for-each display+ s)
-    (newline)))
+    (newline))
 
-(define display+ (lambda (s)
+(define (display+ s)
     (display s)
-    (display " ")))
+    (display " "))
 
-(define writeln (lambda args
+(define (writeln . args)
     (if (null? args)
         (newline)
-        (for-each display args))))
+        (for-each display args)))
 
 (display "s1-core loaded")
 (newline)
@@ -215,21 +214,28 @@
 (define push! (macro (val var) `(set! ,var (cons ,val ,var))))
 (define pop! (macro (var) `(let ((result (car ,var))) (set! ,var (cdr ,var)) result)))
 
-; (define map (lambda (f . lists)
-;     (display "Fn:") (displayln f)
-;     (display "Lists:") (displayln lists)
-;   (define any-null? (lambda lsts
-;     (cond ((null? lsts) #f)
-;           ((null? (car lsts)) #t)
-;           (else (any-null? (cdr lsts))))))
+(define (zip . lists)
+    (if (null? lists)
+        '()
+        (cons (map car lists)
+              (apply zip (map cdr lists)))))
 
-;   (define loop (lambda lists
-;     (if (any-null? lists)
-;         '()
-;         (cons (apply f (map car lists))
-;               (loop (map cdr lists))))))
-
-;   (loop lists)))
+;; Portable R5RS multi-list map
+(define (map f . lists)
+  ;; helpers to extract first elements and tails
+  (define (cars ls)
+    (if (null? ls) '()
+        (cons (caar ls) (cars (cdr ls)))))
+  (define (cdrs ls)
+    (if (null? ls) '()
+        (cons (cdar ls) (cdrs (cdr ls)))))
+  ;; main loop
+  (define (loop ls)
+    (if (or (null? ls) (null? (car ls))) ; stop when shortest list ends
+        '()
+        (cons (apply f (cars ls))
+              (loop (cdrs ls)))))
+  (loop lists))
 
 ;; Pass in a quoted form and number of times to run it
 ;; e.g. (benchmark '(fac-acc 1000) 20)
