@@ -523,7 +523,7 @@
 (test-equal 5 (tail 5) "Apply with (values ...)")
 (define (g . lst) lst)
 (test-equal '((1 2 3)) (apply g '((1 2 3))) "apply with doubly nested list")
-(test-equal '(1 2 3) (apply g 1 '((2 3))) "apply with doubly nested list")
+(test-equal '(1 (2 3)) (apply g 1 '((2 3))) "apply with doubly nested list")
 
 (display "          === Testing Recursion ===")
 (define fact
