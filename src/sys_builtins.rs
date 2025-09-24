@@ -104,6 +104,7 @@ fn apply_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
     }
     // combine args into a single list
     let arglist = apply_arg_list(&args[1..], ec.heap);
+    //eprintln!("apply: arglist = {}", crate::printer::print_value(&arglist));
     let func = gc_value!(args[0]);
     match func {
         SchemeValue::Callable(func) => match func {
@@ -802,16 +803,16 @@ fn capture_call_site_kont(k: &KontRef) -> KontRef {
 }
 
 fn apply_arg_list(args: &[GcRef], heap: &mut GcHeap) -> GcRef {
-    match args.len() {
-        0 => heap.nil_s(),
-        1 => args[0],
-        _ => {
-            let mut list = *args.last().unwrap();
-            for arg in args[..args.len() - 1].iter().rev() {
-                list = crate::gc::cons(*arg, list, heap).unwrap();
-            }
-            list
+    if args.is_empty() {
+        heap.nil_s()
+    } else {
+        let (fixed, last) = args.split_at(args.len() - 1);
+        // last argument must be a list
+        let mut list = last[0];
+        for arg in fixed.iter().rev() {
+            list = crate::gc::cons(*arg, list, heap).unwrap();
         }
+        list
     }
 }
 
