@@ -390,6 +390,13 @@
 (test-true (string<? "apple" "chinook") "string<?")
 (test-false (string>? "apple" "banana") "string>?")
 (test-false (string>? "apple" "apple") "string>?")
+(test-equal "133" (number->string 133) "number->string with int")
+(test-equal "-4.55" (number->string -4.55) "number->string with float")
+(test-equal "12345678901234567890" (number->string 12345678901234567890) "number->string with bigint")
+(test-equal -9 (string->number "-9") "string->number with int")
+(test-equal 4.55 (string->number "4.55") "string->number with float")
+(test-equal 1234567890123456789055 (string->number "1234567890123456789055") "string->number with bigint")
+(test-equal 123 (string->number "    123 ") "string->number with whitespace")
 
 (display "          === Testing Characters ===")
 (newline)

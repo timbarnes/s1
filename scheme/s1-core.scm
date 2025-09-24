@@ -202,7 +202,12 @@
 (define number->string (lambda (n)
     (if (number? n)
         (>string n)
-        (error "number>string: not a string"))))
+        (error "number>string: not a number"))))
+
+(define (string->number str)
+    (if (string? str)
+        (car (eval-string str))
+        (error "string>number: not a string")))
 
 ;; Stack support
 (define empty? (lambda (s) (null? s)))
