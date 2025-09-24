@@ -104,7 +104,6 @@ fn apply_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
     }
     // combine args into a single list
     let arglist = apply_arg_list(&args[1..], ec.heap);
-    //eprintln!("apply: arglist = {}", crate::printer::print_value(&arglist));
     let func = gc_value!(args[0]);
     match func {
         SchemeValue::Callable(func) => match func {
@@ -132,9 +131,27 @@ fn apply_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
                 }
                 return Ok(());
             }
-            Callable::Closure { .. } => {
-                let eval_expr = crate::gc::cons(args[0], arglist, ec.heap)?;
-                state.control = Control::Expr(eval_expr);
+            Callable::Closure {
+                params,
+                body,
+                env: closure_env,
+            } => {
+                // get a next pointer from the current continuation
+                let next = match state.kont.next() {
+                    Some(n) => n,
+                    None => return Err("No next pointer found".to_string()),
+                };
+                let applied_args = list_to_vec(ec.heap, arglist)?;
+                let new_env =
+                    crate::eval::bind_params(&params[..], &applied_args, &closure_env, ec.heap)?;
+                let old_env = state.env.clone();
+
+                state.kont = Rc::new(Kont::RestoreEnv {
+                    old_env,
+                    next: Rc::clone(next),
+                });
+                state.env = new_env;
+                state.control = Control::Expr(*body);
                 return Ok(());
             }
             _ => return Err("apply: first argument must be a function".to_string()),

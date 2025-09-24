@@ -577,7 +577,8 @@ fn handle_restore_env(
     next: Rc<Kont>,
 ) -> Result<(), String> {
     if ec.heap.needs_gc() {
-        ec.heap.collect_garbage(state, *ec.current_output_port, ec.port_stack);
+        ec.heap
+            .collect_garbage(state, *ec.current_output_port, ec.port_stack);
     }
     // Restore environment
     state.env = old_env;
@@ -698,7 +699,6 @@ pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> 
                     state.env = new_env;
                     state.kont = next; // reuse continuation depth
                     state.control = Control::Expr(*body);
-                    //crate::utilities::debugger("exiting apply_proc; tail call", &state, ec);
                     Ok(())
                 } else {
                     // Normal (non-tail) call: push a RestoreEnv barrier.
@@ -707,10 +707,7 @@ pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> 
                         next: next,
                     });
                     state.env = new_env;
-                    // crate::utilities::dbg_env("apply_proc", state.env.clone(), false);
-                    // crate::utilities::dbg_kont("apply_proc", &state.kont);
                     state.control = Control::Expr(*body);
-                    //crate::utilities::debugger("exiting apply_proc; non-tail call", &state, ec);
                     Ok(())
                 }
             }
