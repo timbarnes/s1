@@ -4,7 +4,7 @@ use super::kont::{
 /// Continuation-Passing Style (CPS) evaluator.
 ///
 use crate::env::{EnvOps, EnvRef};
-use crate::eval::{RunTime, bind_params, eval_macro};
+use crate::eval::{DynamicWind, RunTime, bind_params, eval_macro};
 use crate::gc::SchemeValue::*;
 use crate::gc::{Callable, GcRef, cons, is_false, list_to_vec};
 use crate::gc_value;
@@ -105,8 +105,17 @@ pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
     //dump_cek("   eval_cek", &state);
     match &gc_value!(expr) {
         // Self-evaluating values are returned unchanged
-        Int(_) | Float(_) | Str(_) | Bool(_) | Vector(_) | Char(_) | Nil | Callable(_)
-        | Continuation(_) | Void | Undefined => {
+        Int(_)
+        | Float(_)
+        | Str(_)
+        | Bool(_)
+        | Vector(_)
+        | Char(_)
+        | Nil
+        | Callable(_)
+        | Continuation(_, _)
+        | Void
+        | Undefined => {
             state.control = Control::Value(expr);
         }
         // Symbols are looked up in the environment
@@ -206,6 +215,9 @@ fn dispatch_kont(
         }
         Kont::CondClause { clause, next } => {
             handle_cond_clause(state, ec, clause.clone(), Rc::clone(next))
+        }
+        Kont::DynamicWind { after, next } => {
+            handle_dynamic_wind(state, ec.dynamic_wind, *after, Rc::clone(next))
         }
         Kont::EvalArg {
             proc,
@@ -413,6 +425,22 @@ fn handle_cond_clause(
         }
     }
     Ok(())
+}
+
+fn handle_dynamic_wind(
+    state: &mut CEKState,
+    dw: &mut Vec<DynamicWind>,
+    after: GcRef,
+    next: KontRef,
+) -> Result<(), String> {
+    match dw.pop() {
+        Some(_) => {
+            state.control = Control::Expr(after);
+            state.kont = next;
+            Ok(())
+        }
+        None => return Err("No dynamic wind to pop".to_string()),
+    }
 }
 
 fn handle_eval(

@@ -9,15 +9,17 @@ use crate::parser::parse;
 pub use cek::eval_main;
 pub use kont::{
     AndOrKind, CEKState, CondClause, Control, Kont, KontRef, insert_and_or, insert_bind,
-    insert_cond, insert_eval, insert_eval_eval, insert_if, insert_seq, insert_value,
+    insert_cond, insert_dynamic_wind, insert_eval, insert_eval_eval, insert_if, insert_seq,
+    insert_value,
 };
 
 /// Evaluator that owns both heap and environment
 pub struct RunTimeStruct {
     pub heap: GcHeap,               // The global heap for scheme data
-    pub port_stack: Vec<GcRef>,  // Stack of ports for input/output operations
+    pub port_stack: Vec<GcRef>,     // Stack of ports for input/output operations
     pub file_table: FileTable,      // Table of open files
     pub current_output_port: GcRef, // The current output port
+    pub dynamic_wind: Vec<DynamicWind>,
     pub trace: TraceType,
     pub depth: i32,
 }
@@ -27,6 +29,7 @@ pub struct RunTime<'a> {
     pub port_stack: &'a mut Vec<GcRef>,
     pub file_table: &'a mut FileTable,
     pub current_output_port: &'a mut GcRef,
+    pub dynamic_wind: &'a mut Vec<DynamicWind>,
     pub trace: &'a mut TraceType,
     pub depth: &'a mut i32,
 }
@@ -38,6 +41,7 @@ impl<'a> RunTime<'a> {
             port_stack: &mut eval.port_stack,
             file_table: &mut eval.file_table,
             current_output_port: &mut eval.current_output_port,
+            dynamic_wind: &mut eval.dynamic_wind,
             trace: &mut eval.trace,
             depth: &mut eval.depth,
         }
@@ -50,6 +54,18 @@ pub enum TraceType {
     Full,
     Step,
     Off,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct DynamicWind {
+    before: GcRef,
+    after: GcRef,
+}
+
+impl DynamicWind {
+    pub fn new(before: GcRef, after: GcRef) -> Self {
+        DynamicWind { before, after }
+    }
 }
 
 impl RunTimeStruct {
@@ -65,6 +81,7 @@ impl RunTimeStruct {
             port_stack: port_vec,
             file_table: FileTable::new(),
             current_output_port: stdout_port,
+            dynamic_wind: Vec::new(),
             trace: TraceType::Reset,
             depth: 0,
         }

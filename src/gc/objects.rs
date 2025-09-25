@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use super::{Callable, GcObject, GcRef, SchemeValue};
-use crate::eval::{CEKState, KontRef, RunTime};
+use crate::eval::{CEKState, DynamicWind, KontRef, RunTime};
 use crate::gc::heap::GcHeap;
 use crate::gc_value;
 use num_bigint::BigInt;
@@ -286,9 +286,9 @@ pub fn new_vector(heap: &mut GcHeap, elements: Vec<GcRef>) -> GcRef {
 }
 
 /// Create a new continuation.
-pub fn new_continuation(heap: &mut GcHeap, kont: KontRef) -> GcRef {
+pub fn new_continuation(heap: &mut GcHeap, kont: KontRef, dw_stack: Vec<DynamicWind>) -> GcRef {
     let obj = GcObject {
-        value: SchemeValue::Continuation(kont),
+        value: SchemeValue::Continuation(kont, dw_stack),
         marked: false,
     };
     heap.alloc(obj)

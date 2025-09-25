@@ -223,6 +223,14 @@ pub fn dbg_one_kont(loc: &str, frame: &Kont) -> String {
             next,
         } => result
             .push_str(format!("Bind{{symbol={}, next={:?}}}", print_value(symbol), next).as_str()),
+        Kont::DynamicWind { after, next } => result.push_str(
+            format!(
+                "DynamicWind{{after={},next={:?}}}",
+                print_value(&after),
+                next
+            )
+            .as_str(),
+        ),
         Kont::Eval { .. } => result.push_str("Eval"),
         Kont::If {
             then_branch,
@@ -261,7 +269,7 @@ pub fn dbg_kont(loc: &str, kont: &KontRef) {
     println!("");
 }
 
-pub fn dbg_short_kont(kont: &KontRef) {
+pub fn _dbg_short_kont(kont: &KontRef) {
     match **kont {
         Kont::Halt => println!("    Halt"),
         Kont::AndOr { kind, .. } => match &kind {
@@ -274,6 +282,7 @@ pub fn dbg_short_kont(kont: &KontRef) {
         Kont::CallWithValues { .. } => print!("CallWithValues "),
         Kont::Cond { .. } => print!("Cond "),
         Kont::CondClause { .. } => print!("CondClause "),
+        Kont::DynamicWind { .. } => print!("DynamicWind "),
         Kont::Eval { .. } => print!("Eval "),
         Kont::EvalArg { .. } => print!("EvalArg "),
         Kont::If { .. } => print!("If "),

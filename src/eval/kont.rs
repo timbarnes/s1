@@ -41,6 +41,10 @@ pub enum Kont {
         clause: CondClause,
         next: KontRef,
     },
+    DynamicWind {
+        after: GcRef,
+        next: KontRef,
+    },
     Eval {
         expr: GcRef,
         env: Option<GcRef>,
@@ -88,6 +92,7 @@ impl Kont {
             Kont::CallWithValues { next, .. } => Some(next),
             Kont::Cond { next, .. } => Some(next),
             Kont::CondClause { next, .. } => Some(next),
+            Kont::DynamicWind { next, .. } => Some(next),
             Kont::Eval { next, .. } => Some(next),
             Kont::EvalArg { next, .. } => Some(next),
             Kont::Halt => None,
@@ -309,14 +314,22 @@ impl crate::gc::Mark for KontRef {
                     }
                     worklist.push(Rc::clone(next));
                 }
-                Kont::ApplyProc { proc, evaluated_args, next } => {
+                Kont::ApplyProc {
+                    proc,
+                    evaluated_args,
+                    next,
+                } => {
                     visit(*proc);
                     for arg in evaluated_args.iter() {
                         visit(*arg);
                     }
                     worklist.push(Rc::clone(next));
                 }
-                Kont::ApplySpecial { proc, original_call, next } => {
+                Kont::ApplySpecial {
+                    proc,
+                    original_call,
+                    next,
+                } => {
                     visit(*proc);
                     visit(*original_call);
                     worklist.push(Rc::clone(next));
@@ -342,14 +355,28 @@ impl crate::gc::Mark for KontRef {
                     clause.mark(visit);
                     worklist.push(Rc::clone(next));
                 }
-                Kont::Eval { expr, env, next, .. } => {
+                Kont::DynamicWind { after, next } => {
+                    visit(*after);
+                    worklist.push(Rc::clone(next));
+                }
+                Kont::Eval {
+                    expr, env, next, ..
+                } => {
                     visit(*expr);
                     if let Some(env) = env {
                         visit(*env);
                     }
                     worklist.push(Rc::clone(next));
                 }
-                Kont::EvalArg { proc, remaining, evaluated, original_call, env, next, .. } => {
+                Kont::EvalArg {
+                    proc,
+                    remaining,
+                    evaluated,
+                    original_call,
+                    env,
+                    next,
+                    ..
+                } => {
                     if let Some(proc) = proc {
                         visit(*proc);
                     }
@@ -363,7 +390,11 @@ impl crate::gc::Mark for KontRef {
                     env.mark(visit);
                     worklist.push(Rc::clone(next));
                 }
-                Kont::If { then_branch, else_branch, next } => {
+                Kont::If {
+                    then_branch,
+                    else_branch,
+                    next,
+                } => {
                     visit(*then_branch);
                     visit(*else_branch);
                     worklist.push(Rc::clone(next));
@@ -474,6 +505,11 @@ pub fn insert_cond(state: &mut CEKState, remaining: Vec<CondClause>) {
         remaining,
         next: prev,
     });
+}
+
+pub fn insert_dynamic_wind(state: &mut CEKState, after: GcRef) {
+    let prev = Rc::clone(&state.kont);
+    state.kont = Rc::new(Kont::DynamicWind { after, next: prev });
 }
 
 /// Insert a continuation for a (if ...) expression

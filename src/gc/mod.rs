@@ -1,7 +1,7 @@
 pub mod heap;
 pub mod objects;
 
-use crate::eval::{CEKState, KontRef, RunTime};
+use crate::eval::{CEKState, DynamicWind, KontRef, RunTime};
 use crate::io::PortKind;
 use num_bigint::BigInt;
 use std::cell::RefCell;
@@ -94,7 +94,7 @@ pub enum SchemeValue {
     Nil,
     TailCallScheduled,
     Port(PortKind),
-    Continuation(KontRef),
+    Continuation(KontRef, Vec<DynamicWind>),
     Eof,
     Void,
     Undefined,

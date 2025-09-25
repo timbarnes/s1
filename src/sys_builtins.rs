@@ -1,6 +1,8 @@
 use crate::env::{EnvOps, EnvRef};
-use crate::eval::{CEKState, Control, Kont, KontRef, insert_eval_eval};
-use crate::eval::{RunTime, TraceType};
+use crate::eval::{
+    CEKState, Control, DynamicWind, Kont, KontRef, RunTime, TraceType, insert_dynamic_wind,
+    insert_eval, insert_eval_eval,
+};
 use crate::gc::{
     Callable, GcHeap, GcRef, SchemeValue, get_symbol, list, list_to_vec, list3, new_bool,
     new_continuation, new_float, new_port, new_sys_builtin,
@@ -42,6 +44,7 @@ pub fn register_sys_builtins(runtime: &mut RunTime, env: EnvRef) {
         "call/cc" => call_cc_sp,
         "call-with-current-continuation" => call_cc_sp,
         "escape" => escape_sp,
+        "dynamic-wind" => dynamic_wind_sp,
         "values" => values_sp,
         "call-with-values" => call_with_values_sp,
         "trace" => trace_sp,
@@ -198,7 +201,11 @@ fn call_cc_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<
         _ => return Err("call/cc: argument must be a function".to_string()),
     }
     // Capture the current continuation
-    let kont = new_continuation(ec.heap, capture_call_site_kont(&state.kont));
+    let kont = new_continuation(
+        ec.heap,
+        capture_call_site_kont(&state.kont),
+        ec.dynamic_wind.clone(),
+    );
     // Build the escape call
     let sym_val = get_symbol(ec.heap, "val");
     let sym_lambda = get_symbol(ec.heap, "lambda");
@@ -232,7 +239,7 @@ fn escape_sp(_ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<
         return Err("escape: requires two arguments".to_string());
     }
     match gc_value!(args[0]) {
-        SchemeValue::Continuation(new_kont) => {
+        SchemeValue::Continuation(new_kont, _) => {
             // Assign to the new continuation
             //state.kont = Rc::clone(new_kont);
             let result = args[1];
@@ -244,6 +251,20 @@ fn escape_sp(_ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<
         }
         _ => return Err("escape: first argument must be a continuation".to_string()),
     }
+}
+
+fn dynamic_wind_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+    if args.len() != 3 {
+        return Err("dynamic-wind: requires three arguments".to_string());
+    }
+    let before = args[0];
+    let thunk = args[1];
+    let after = args[2];
+    ec.dynamic_wind.push(DynamicWind::new(before, after));
+    insert_dynamic_wind(state, after);
+    insert_eval(state, thunk, false);
+    state.control = Control::Expr(before);
+    Ok(())
 }
 
 fn values_sp(_ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
