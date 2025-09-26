@@ -1,7 +1,7 @@
 use crate::env::{EnvOps, EnvRef};
 use crate::eval::{
     CEKState, Control, DynamicWind, Kont, KontRef, RunTime, TraceType, insert_dynamic_wind,
-    insert_eval, insert_eval_eval,
+    insert_eval_eval, insert_seq,
 };
 use crate::gc::{
     Callable, GcHeap, GcRef, SchemeValue, get_symbol, list, list_to_vec, list3, new_bool,
@@ -257,12 +257,11 @@ fn dynamic_wind_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Re
     if args.len() != 3 {
         return Err("dynamic-wind: requires three arguments".to_string());
     }
-    let before = args[0];
-    let thunk = args[1];
-    let after = args[2];
+    let before = list(args[0], ec.heap)?;
+    let thunk = list(args[1], ec.heap)?;
+    let after = list(args[2], ec.heap)?;
     ec.dynamic_wind.push(DynamicWind::new(before, after));
-    insert_dynamic_wind(state, after);
-    insert_eval(state, thunk, false);
+    insert_dynamic_wind(state, before, thunk, after);
     state.control = Control::Expr(before);
     Ok(())
 }

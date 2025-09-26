@@ -4,6 +4,7 @@ use super::kont::{
 /// Continuation-Passing Style (CPS) evaluator.
 ///
 use crate::env::{EnvOps, EnvRef};
+use crate::eval::kont::DynamicWindPhase;
 use crate::eval::{DynamicWind, RunTime, bind_params, eval_macro};
 use crate::gc::SchemeValue::*;
 use crate::gc::{Callable, GcRef, cons, is_false, list_to_vec};
@@ -61,7 +62,7 @@ fn run_cek(mut state: &mut CEKState, rt: &mut RunTime) -> Result<Vec<GcRef>, Str
 
 fn step(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> {
     //dump_cek("  step", &state);
-    debugger("step", &state, ec);
+    debugger("", &state, ec);
 
     let control = std::mem::replace(&mut state.control, Control::Empty);
     match control {
@@ -216,9 +217,24 @@ fn dispatch_kont(
         Kont::CondClause { clause, next } => {
             handle_cond_clause(state, ec, clause.clone(), Rc::clone(next))
         }
-        Kont::DynamicWind { after, next } => {
-            handle_dynamic_wind(state, ec.dynamic_wind, *after, Rc::clone(next))
-        }
+        Kont::DynamicWind {
+            before,
+            thunk,
+            after,
+            thunk_result,
+            phase,
+            next,
+            ..
+        } => handle_dynamic_wind(
+            state,
+            ec.dynamic_wind,
+            *before,
+            *thunk,
+            *after,
+            *thunk_result,
+            *phase,
+            Rc::clone(next),
+        ),
         Kont::EvalArg {
             proc,
             remaining,
@@ -430,16 +446,58 @@ fn handle_cond_clause(
 fn handle_dynamic_wind(
     state: &mut CEKState,
     dw: &mut Vec<DynamicWind>,
+    before: GcRef,
+    thunk: GcRef,
     after: GcRef,
+    thunk_result: Option<GcRef>,
+    phase: DynamicWindPhase,
     next: KontRef,
 ) -> Result<(), String> {
-    match dw.pop() {
-        Some(_) => {
-            state.control = Control::Expr(after);
-            state.kont = next;
+    match phase {
+        DynamicWindPhase::Thunk => {
+            // Incoming value from before can be dropped
+            state.control = Control::Expr(thunk);
+            state.kont = Rc::new(Kont::DynamicWind {
+                before,
+                thunk,
+                after,
+                thunk_result: None,
+                phase: DynamicWindPhase::After,
+                next,
+            });
             Ok(())
         }
-        None => return Err("No dynamic wind to pop".to_string()),
+        DynamicWindPhase::After => {
+            // Save incoming value from thunk
+            if let Control::Value(result) = state.control {
+                state.control = Control::Expr(after);
+                state.kont = Rc::new(Kont::DynamicWind {
+                    before,
+                    thunk,
+                    after,
+                    thunk_result: Some(result),
+                    phase: DynamicWindPhase::Return,
+                    next,
+                });
+            } else {
+                return Err("dynamic-wind: Expected thunk value".to_string());
+            }
+            match dw.pop() {
+                Some(_) => {
+                    state.control = Control::Expr(after);
+                    return Ok(());
+                }
+                None => return Err("No dynamic wind to pop".to_string()),
+            }
+        }
+        DynamicWindPhase::Return => match thunk_result {
+            Some(value) => {
+                state.control = Control::Value(value);
+                state.kont = next;
+                return Ok(());
+            }
+            None => return Err("dynamic-wind: Expected thunk value".to_string()),
+        },
     }
 }
 
@@ -460,7 +518,7 @@ fn handle_eval(
                     expr,
                     env: new_env,
                     phase: EvalPhase::EvalExpr,
-                    next: Rc::clone(&next),
+                    next: next,
                 });
             } else {
                 unreachable!("EvalEnv phase should yield a value");
@@ -474,7 +532,7 @@ fn handle_eval(
                     expr: val,
                     env,
                     phase: EvalPhase::Done,
-                    next: Rc::clone(&next),
+                    next: next,
                 });
             } else {
                 unreachable!("EvalExpr phase should yield a value");
@@ -484,7 +542,7 @@ fn handle_eval(
             if let Control::Value(val) = state.control {
                 // Final value: propagate it
                 state.control = Control::Value(val);
-                state.kont = Rc::clone(&next);
+                state.kont = next;
             } else {
                 unreachable!("Done phase should yield a value");
             }
@@ -707,11 +765,11 @@ pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> 
                 Ok(())
             }
             Callable::SysBuiltin { func, .. } => {
+                state.kont = next;
                 match func(ec, &evaluated_args[..], state) {
                     Err(err) => post_error(state, ec, &err),
                     Ok(_) => {}
                 }
-                state.kont = next;
                 Ok(())
             }
             Callable::Closure {

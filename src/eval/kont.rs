@@ -42,7 +42,11 @@ pub enum Kont {
         next: KontRef,
     },
     DynamicWind {
+        before: GcRef,
+        thunk: GcRef,
         after: GcRef,
+        thunk_result: Option<GcRef>,
+        phase: DynamicWindPhase,
         next: KontRef,
     },
     Eval {
@@ -255,6 +259,13 @@ pub enum AndOrKind {
     Or,
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum DynamicWindPhase {
+    Thunk,
+    After,
+    Return,
+}
+
 pub enum Control {
     Expr(GcRef),        // Unevaluated expression
     Value(GcRef),       // Fully evaluated result
@@ -355,7 +366,19 @@ impl crate::gc::Mark for KontRef {
                     clause.mark(visit);
                     worklist.push(Rc::clone(next));
                 }
-                Kont::DynamicWind { after, next } => {
+                Kont::DynamicWind {
+                    before,
+                    thunk,
+                    after,
+                    thunk_result,
+                    next,
+                    ..
+                } => {
+                    visit(*before);
+                    visit(*thunk);
+                    if let Some(thunk_result) = thunk_result {
+                        visit(*thunk_result);
+                    }
                     visit(*after);
                     worklist.push(Rc::clone(next));
                 }
@@ -439,6 +462,19 @@ impl crate::gc::Mark for CEKState {
     }
 }
 
+///Insert a continuation for an (and...) or (or ...) expression
+pub fn insert_and_or(state: &mut CEKState, kind: AndOrKind, mut exprs: Vec<GcRef>) {
+    // exprs has length ≥ 2
+    exprs.reverse();
+    let prev = Rc::clone(&state.kont);
+    state.control = Control::Expr(exprs.pop().unwrap());
+    state.kont = Rc::new(Kont::AndOr {
+        kind,
+        rest: exprs,
+        next: prev,
+    });
+}
+
 /// Install `expr` into the existing CEKState and return immediately.
 /// If `replace_next` is true, the installed EvalArg (if any) will have `next = Halt`
 /// (i.e., it will replace the current continuation); otherwise the existing kont chain is preserved.
@@ -507,9 +543,16 @@ pub fn insert_cond(state: &mut CEKState, remaining: Vec<CondClause>) {
     });
 }
 
-pub fn insert_dynamic_wind(state: &mut CEKState, after: GcRef) {
+pub fn insert_dynamic_wind(state: &mut CEKState, before: GcRef, thunk: GcRef, after: GcRef) {
     let prev = Rc::clone(&state.kont);
-    state.kont = Rc::new(Kont::DynamicWind { after, next: prev });
+    state.kont = Rc::new(Kont::DynamicWind {
+        before,
+        thunk,
+        after,
+        thunk_result: None,
+        phase: DynamicWindPhase::Thunk,
+        next: prev,
+    });
 }
 
 /// Insert a continuation for a (if ...) expression
@@ -528,19 +571,6 @@ pub fn insert_seq(state: &mut CEKState, mut exprs: Vec<GcRef>) {
     exprs.reverse();
     let prev = Rc::clone(&state.kont);
     state.kont = Rc::new(Kont::Seq {
-        rest: exprs,
-        next: prev,
-    });
-}
-
-///Insert a continuation for an (and...) or (or ...) expression
-pub fn insert_and_or(state: &mut CEKState, kind: AndOrKind, mut exprs: Vec<GcRef>) {
-    // exprs has length ≥ 2
-    exprs.reverse();
-    let prev = Rc::clone(&state.kont);
-    state.control = Control::Expr(exprs.pop().unwrap());
-    state.kont = Rc::new(Kont::AndOr {
-        kind,
         rest: exprs,
         next: prev,
     });

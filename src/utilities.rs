@@ -78,7 +78,7 @@ fn debug_interactive(state: &CEKState, ec: &mut RunTime) {
         //println!("Command: {}", cmd);
         match cmd {
             "" | "n" | "next" => {
-                // step one more and come back
+                // "step"one more and come back
                 println!("control expr = {}", dump_control(&state.control));
                 break;
             }
@@ -119,10 +119,10 @@ fn debug_interactive(state: &CEKState, ec: &mut RunTime) {
 
 fn dump_control(control: &Control) -> String {
     match control {
-        Control::Expr(obj) => format!("Expr  = {}", print_value(obj)),
-        Control::Value(obj) => format!("Value = {}", print_value(obj)),
-        Control::Values(vals) => format!("Values[0]={:20}", print_value(&vals[0])),
-        Control::Escape(val, k) => format!("Escape = {}, {:?}", print_value(val), k),
+        Control::Expr(obj) => format!("Expr:  {}", print_value(obj)),
+        Control::Value(obj) => format!("Value: {}", print_value(obj)),
+        Control::Values(vals) => format!("Values[0]: {:20}", print_value(&vals[0])),
+        Control::Escape(val, k) => format!("Escape: {}, {:?}", print_value(val), k),
         Control::Empty => format!("Empty"),
     }
 }
@@ -223,7 +223,7 @@ pub fn dbg_one_kont(loc: &str, frame: &Kont) -> String {
             next,
         } => result
             .push_str(format!("Bind{{symbol={}, next={:?}}}", print_value(symbol), next).as_str()),
-        Kont::DynamicWind { after, next } => result.push_str(
+        Kont::DynamicWind { after, next, .. } => result.push_str(
             format!(
                 "DynamicWind{{after={},next={:?}}}",
                 print_value(&after),
@@ -246,7 +246,9 @@ pub fn dbg_one_kont(loc: &str, frame: &Kont) -> String {
             .as_str(),
         ),
         Kont::RestoreEnv { old_env, .. } => {
-            result.push_str(format!("RestoreEnv {{old_env={:?}}}", old_env).as_str())
+            result.push_str("RestoreEnv:");
+            result.push_str(&dbg_env_short(old_env));
+            result.push('\n');
         }
         Kont::Seq { .. } => result.push_str("Seq"),
     }
@@ -254,9 +256,9 @@ pub fn dbg_one_kont(loc: &str, frame: &Kont) -> String {
 }
 
 pub fn dbg_kont(loc: &str, kont: &KontRef) {
-    print!("{}  Stack: ", loc);
+    print!("{}Stack: ", loc);
     let mut kr = Rc::clone(&kont);
-    dbg_one_kont("", &kr);
+    print!("{} ", dbg_one_kont("", &kr));
     let k_next = kr.next();
     match k_next {
         Some(k) => kr = Rc::clone(k),
@@ -289,6 +291,27 @@ pub fn _dbg_short_kont(kont: &KontRef) {
         Kont::RestoreEnv { .. } => print!("RestoreEnv "),
         Kont::Seq { .. } => print!("Seq "),
     }
+}
+
+pub fn dbg_env_short(frame: &EnvRef) -> String {
+    use std::cmp::min;
+    let frame = frame.borrow();
+    let mut bindings = Vec::new();
+    for (k, v) in frame.bindings.iter() {
+        match gc_value!(*k) {
+            crate::gc::SchemeValue::Symbol(s) => {
+                bindings.push((s, v));
+            }
+            _ => {}
+        }
+    }
+    let len = min(bindings.len(), 6);
+    bindings[..len].sort_by(|(k1, _v1), (k2, _v2)| k1.cmp(k2));
+    let mut result = String::new();
+    for (k, v) in bindings {
+        result.push_str(&format!("{}=>{} ", &k, print_value(&v)));
+    }
+    result
 }
 
 pub fn dbg_one_env(frame: &EnvRef, depth: usize) {
