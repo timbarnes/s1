@@ -1,7 +1,7 @@
 use crate::env::{EnvOps, EnvRef};
 use crate::eval::{
     CEKState, Control, DynamicWind, Kont, KontRef, RunTime, TraceType, insert_dynamic_wind,
-    insert_eval_eval, insert_seq,
+    insert_eval_eval,
 };
 use crate::gc::{
     Callable, GcHeap, GcRef, SchemeValue, get_symbol, list, list_to_vec, list3, new_bool,
@@ -71,7 +71,12 @@ pub fn register_sys_builtins(runtime: &mut RunTime, env: EnvRef) {
     );
 }
 
-fn eval_string_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn eval_string_sp(
+    rt: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
     if args.len() != 1 {
         return Err("eval-string: expected exactly 1 argument".to_string());
     }
@@ -86,22 +91,35 @@ fn eval_string_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Res
     } else {
         state.control = Control::Values(result);
     }
+
+    state.kont = next;
     Ok(())
 }
 
 /// (eval expr [env])
-fn eval_eval_sp(_ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn eval_eval_sp(
+    _ec: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
     match args.len() {
         1 => insert_eval_eval(state, args[0], None, false),
         2 => insert_eval_eval(state, args[0], Some(args[1]), false),
         _ => return Err("eval: requires 1 or 2 arguments".to_string()),
     }
+    state.kont = next;
     Ok(())
 }
 
 /// (apply func args)
 /// Applies a function to a list of arguments
-fn apply_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn apply_sp(
+    ec: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    nxt: KontRef,
+) -> Result<(), String> {
     if args.len() < 2 {
         return Err("apply: requires at least 2 arguments".to_string());
     }
@@ -121,17 +139,19 @@ fn apply_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
                         state.control = Control::Value(*value);
                     }
                 }
+                state.kont = nxt;
                 return Ok(());
             }
             Callable::SysBuiltin { func, .. } => {
                 let args = list_to_vec(ec.heap, arglist)?;
-                let result = func(ec, &args, state);
+                let result = func(ec, &args, state, Rc::clone(&nxt));
                 match &result {
                     Err(err) => {
                         post_error(state, ec, &err);
                     }
                     Ok(_) => {}
                 }
+                state.kont = nxt;
                 return Ok(());
             }
             Callable::Closure {
@@ -155,6 +175,7 @@ fn apply_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
                 });
                 state.env = new_env;
                 state.control = Control::Expr(*body);
+                state.kont = nxt;
                 return Ok(());
             }
             _ => return Err("apply: first argument must be a function".to_string()),
@@ -167,6 +188,7 @@ fn garbage_collect_sp(
     ec: &mut RunTime,
     _args: &[GcRef],
     state: &mut CEKState,
+    next: KontRef,
 ) -> Result<(), String> {
     let timer = Instant::now();
     ec.heap
@@ -174,20 +196,32 @@ fn garbage_collect_sp(
     let elapsed_time = timer.elapsed().as_secs_f64();
     let time = new_float(&mut ec.heap, elapsed_time);
     state.control = Control::Value(time);
+    state.kont = next;
     Ok(())
 }
 
 /// (debug-stack)
 /// Prints the stack
-fn debug_stack_sp(ec: &mut RunTime, _args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn debug_stack_sp(
+    ec: &mut RunTime,
+    _args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
     state.control = Control::Value(ec.heap.void());
+    state.kont = next;
     Ok(())
 }
 
 /// (call/cc func)
 /// Creates and returns an escape procedure that resets the continuation to the current state
 /// at the time call/cc was invoked.
-fn call_cc_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn call_cc_sp(
+    ec: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
     // 1. Check arguments
     if args.len() != 1 {
         return Err("call/cc: requires a single function argument".to_string());
@@ -227,14 +261,20 @@ fn call_cc_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<
     call.push(args[0]);
     call.push(list(*closure, ec.heap)?);
     // 4. Call func with the escape closure as an argument
-    apply_sp(ec, &call[..], state)?;
+    apply_sp(ec, &call[..], state, Rc::clone(&next))?;
+    state.kont = next;
     Ok(())
 }
 
 /// (escape continuation arg)
 /// This is the internal mechanism for call/cc. It is bound by a lambda to the escape continuation,
 /// and when called, it resets the continuation and returns the provided arg.
-fn escape_sp(_ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn escape_sp(
+    _ec: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
     if args.len() != 2 {
         return Err("escape: requires two arguments".to_string());
     }
@@ -247,13 +287,19 @@ fn escape_sp(_ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<
             state.control = Control::Escape(result, Rc::clone(new_kont));
             //eprintln!("Escaping to continuation:");
             //crate::utilities::dump_kont(Rc::clone(new_kont));
+            state.kont = next;
             Ok(())
         }
         _ => return Err("escape: first argument must be a continuation".to_string()),
     }
 }
 
-fn dynamic_wind_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn dynamic_wind_sp(
+    ec: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
     if args.len() != 3 {
         return Err("dynamic-wind: requires three arguments".to_string());
     }
@@ -261,17 +307,24 @@ fn dynamic_wind_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Re
     let thunk = list(args[1], ec.heap)?;
     let after = list(args[2], ec.heap)?;
     ec.dynamic_wind.push(DynamicWind::new(before, after));
+    state.kont = next; // Delete the ApplyProc before installing the new continuation
     insert_dynamic_wind(state, before, thunk, after);
     state.control = Control::Expr(before);
     Ok(())
 }
 
-fn values_sp(_ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn values_sp(
+    _ec: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
     match args.len() {
         0 => return Err("values: requires at least one argument".to_string()),
         1 => state.control = Control::Value(args[0]),
         _ => state.control = Control::Values(args.to_vec()),
     }
+    state.kont = next;
     Ok(())
 }
 
@@ -279,6 +332,7 @@ fn call_with_values_sp(
     ec: &mut RunTime,
     args: &[GcRef],
     state: &mut CEKState,
+    next: KontRef,
 ) -> Result<(), String> {
     if args.len() != 2 {
         return Err("call-with-values: expected 2 arguments".to_string());
@@ -294,6 +348,7 @@ fn call_with_values_sp(
     // Evaluate the producer thunk
     state.control = Control::Expr(list(producer, ec.heap)?);
     // dump_cek("call_with_values_sp", state);
+    state.kont = next;
     Ok(())
 }
 
@@ -307,7 +362,12 @@ fn call_with_values_sp(
 /// (trace 'expr)   - show trace when control is an expr, or when a value is returned
 /// (trace 'step)   - enable single stepping
 /// (trace 'off)    - disable tracing and stepping
-fn trace_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn trace_sp(
+    ec: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
     *ec.depth -= 1;
     if args.len() == 0 {
         let result = match ec.trace {
@@ -334,14 +394,21 @@ fn trace_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
         _ => return Err("trace: expects o(ff), a(ll), e(xpr), or s(tep)".to_string()),
     };
     state.control = Control::Value(args[0]);
+    state.kont = next;
     Ok(())
 }
 
 /// (debug-env ['g(lobal)])
 /// Prints the environment, optionally including the global env.
-fn trace_env_sp(ec: &mut RunTime, _args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn trace_env_sp(
+    ec: &mut RunTime,
+    _args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
     *ec.depth -= 1;
     state.control = Control::Value(ec.heap.void());
+    state.kont = next;
     Ok(())
 }
 
@@ -350,6 +417,7 @@ fn open_input_file_sp(
     ec: &mut RunTime,
     args: &[GcRef],
     state: &mut CEKState,
+    next: KontRef,
 ) -> Result<(), String> {
     if args.len() != 1 {
         return Err("open-input-file: expected exactly 1 argument".to_string());
@@ -373,6 +441,7 @@ fn open_input_file_sp(
             }
             let port = new_port(ec.heap, crate::io::new_string_port_input(&content));
             state.control = Control::Value(port);
+            state.kont = next;
             Ok(())
         }
         Err(e) => Err(format!(
@@ -387,6 +456,7 @@ fn open_output_file_sp(
     ec: &mut RunTime,
     args: &[GcRef],
     state: &mut CEKState,
+    next: KontRef,
 ) -> Result<(), String> {
     if args.len() != 1 {
         return Err("open-output-file: expected exactly 1 argument".to_string());
@@ -409,6 +479,7 @@ fn open_output_file_sp(
                 },
             );
             state.control = Control::Value(port);
+            state.kont = next;
             Ok(())
         }
         Err(e) => Err(format!(
@@ -422,6 +493,7 @@ fn close_input_port_sp(
     ec: &mut RunTime,
     args: &[GcRef],
     state: &mut CEKState,
+    next: KontRef,
 ) -> Result<(), String> {
     if args.len() != 1 {
         return Err("close-input-port: expected exactly 1 argument".to_string());
@@ -439,6 +511,7 @@ fn close_input_port_sp(
             } else {
                 // Closing non-file input ports is a no-op.
                 state.control = Control::Value(ec.heap.void());
+                state.kont = next;
                 Ok(())
             }
         }
@@ -451,6 +524,7 @@ fn close_output_port_sp(
     ec: &mut RunTime,
     args: &[GcRef],
     state: &mut CEKState,
+    next: KontRef,
 ) -> Result<(), String> {
     if args.len() != 1 {
         return Err("close-output-port: expected exactly 1 argument".to_string());
@@ -464,6 +538,7 @@ fn close_output_port_sp(
             {
                 ec.file_table.close_file(*id);
                 state.control = Control::Value(ec.heap.void());
+                state.kont = next;
                 Ok(())
             } else {
                 Err("close-output-port: argument must be an output file port".to_string())
@@ -475,7 +550,12 @@ fn close_output_port_sp(
 
 /// (read [port])
 /// Reads an s-expression from a port. Port defaults to the current input port (normally stdin).
-fn read_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn read_sp(
+    ec: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
     if args.len() > 1 {
         return Err("read: expected at most 1 argument".to_string());
     }
@@ -506,11 +586,13 @@ fn read_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(),
     match result {
         Ok(expr) => {
             state.control = Control::Value(expr);
+            state.kont = next;
             Ok(())
         }
         Err(err) => match err {
             ParseError::Eof => {
                 state.control = Control::Value(ec.heap.eof());
+                state.kont = next;
                 Ok(())
             }
             ParseError::Syntax(err) => Err(format!("read: syntax error:{}", err)),
@@ -528,29 +610,46 @@ fn read_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(),
 /// let mut evaluator = Evaluator::new();
 /// evaluator.push_port("example.txt");
 /// ```
-pub fn push_port_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+pub fn push_port_sp(
+    ec: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
     // (push-port! port)
     if args.len() != 1 {
         return Err("push_port!: expected exactly 1 argument".to_string());
     }
     ec.port_stack.push(args[0]);
     state.control = Control::Value(ec.heap.void());
+    state.kont = next;
     Ok(())
 }
 
-pub fn pop_port_sp(ec: &mut RunTime, _args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+pub fn pop_port_sp(
+    ec: &mut RunTime,
+    _args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
     // (pop-port!)
     let port_ref = ec.port_stack.pop();
     match port_ref {
         Some(port_ref) => {
             state.control = Control::Value(port_ref);
+            state.kont = next;
             Ok(())
         }
         None => Err("Port Stack is empty".to_string()),
     }
 }
 
-fn write_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn write_sp(
+    rt: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
     if args.len() < 1 || args.len() > 2 {
         return Err("write: expected 1 or 2 arguments".to_string());
     }
@@ -575,13 +674,19 @@ fn write_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<()
     let success = crate::io::write_line(&mut port_kind, rt.file_table, &s);
     if success {
         state.control = Control::Value(rt.heap.void());
+        state.kont = next;
         return Ok(());
     } else {
         return Err("write: failed to write to port".to_string());
     };
 }
 
-fn display_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn display_sp(
+    rt: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
     if args.len() < 1 || args.len() > 2 {
         return Err("display: expected 1 or 2 arguments".to_string());
     }
@@ -606,10 +711,16 @@ fn display_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<
     crate::io::write_line(&mut port_kind, rt.file_table, &s);
 
     state.control = Control::Value(rt.heap.void());
+    state.kont = next;
     Ok(())
 }
 
-fn newline_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn newline_sp(
+    rt: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
     if args.len() > 1 {
         return Err("newline: expected 0 or 1 arguments".to_string());
     }
@@ -636,11 +747,17 @@ fn newline_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<
     }
 
     state.control = Control::Value(rt.heap.void());
+    state.kont = next;
     Ok(())
 }
 
 /// (read-char [input-port]) -> Character | EOF
-fn read_char_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn read_char_sp(
+    rt: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
     if args.len() > 1 {
         return Err("read-char: expected 0 or 1 arguments".to_string());
     }
@@ -673,12 +790,18 @@ fn read_char_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Resul
     };
 
     state.control = Control::Value(result_val);
+    state.kont = next;
     Ok(())
 }
 
 /// (write-char char [output-port])
 /// Writes a character to the current or specified output port.
-fn write_char_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn write_char_sp(
+    rt: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
     let port = match args.len() {
         1 => port_kind_from_scheme_port(rt, *rt.current_output_port),
         2 => port_kind_from_scheme_port(rt, args[1]),
@@ -692,12 +815,18 @@ fn write_char_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Resu
     }
 
     state.control = Control::Value(rt.heap.void());
+    state.kont = next;
     Ok(())
 }
 
 /// (peek-char [input port]) -> Character | EOF
 /// Returns the next character from the current input port without consuming it.
-fn peek_char_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn peek_char_sp(
+    rt: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
     if args.len() > 1 {
         return Err("peek-char: expected 0 or 1 arguments".to_string());
     }
@@ -730,12 +859,18 @@ fn peek_char_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Resul
     };
 
     state.control = Control::Value(result_val);
+    state.kont = next;
     Ok(())
 }
 
 /// (char-ready? [input-port]) -> Boolean
 /// Returns true if there is a character available to be read from the current input port.
-fn char_ready_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn char_ready_sp(
+    rt: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
     if args.len() > 1 {
         return Err("char-ready?: expected 0 or 1 arguments".to_string());
     }
@@ -763,6 +898,7 @@ fn char_ready_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Resu
     };
 
     state.control = Control::Value(new_bool(rt.heap, is_ready));
+    state.kont = next;
     Ok(())
 }
 
@@ -773,12 +909,14 @@ fn current_input_port_sp(
     rt: &mut RunTime,
     args: &[GcRef],
     state: &mut CEKState,
+    next: KontRef,
 ) -> Result<(), String> {
     if !args.is_empty() {
         return Err("current-input-port: expected 0 arguments".to_string());
     }
     let port = *rt.port_stack.last().unwrap();
     state.control = Control::Value(port);
+    state.kont = next;
     Ok(())
 }
 
@@ -788,18 +926,25 @@ fn current_output_port_sp(
     rt: &mut RunTime,
     args: &[GcRef],
     state: &mut CEKState,
+    next: KontRef,
 ) -> Result<(), String> {
     if !args.is_empty() {
         return Err("current-output-port: expected 0 arguments".to_string());
     }
     state.control = Control::Value(*rt.current_output_port);
+    state.kont = next;
     Ok(())
 }
 
 /// (flush-output [port]) -> #<void>
 ///    If no arg, flush the current output port;
 ///    otherwise flush the given port if it's an output file port.
-fn flush_output_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Result<(), String> {
+fn flush_output_sp(
+    rt: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
     let port = if args.len() == 0 {
         *rt.current_output_port
     } else {
@@ -827,6 +972,7 @@ fn flush_output_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState) -> Re
     }
 
     state.control = Control::Value(port);
+    state.kont = next;
     Ok(())
 }
 

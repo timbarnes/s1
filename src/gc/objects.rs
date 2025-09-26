@@ -310,7 +310,7 @@ pub fn new_builtin(
 
 pub fn new_sys_builtin(
     rt: &mut RunTime,
-    f: fn(&mut RunTime, &[GcRef], &mut CEKState) -> Result<(), String>,
+    f: fn(&mut RunTime, &[GcRef], &mut CEKState, KontRef) -> Result<(), String>,
     doc: String,
 ) -> GcRef {
     let primitive = SchemeValue::Callable(Callable::SysBuiltin { func: f, doc });

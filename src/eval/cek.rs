@@ -765,8 +765,8 @@ pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> 
                 Ok(())
             }
             Callable::SysBuiltin { func, .. } => {
-                state.kont = next;
-                match func(ec, &evaluated_args[..], state) {
+                // SysBuiltin functions must advance the kont themselves
+                match func(ec, &evaluated_args[..], state, next) {
                     Err(err) => post_error(state, ec, &err),
                     Ok(_) => {}
                 }

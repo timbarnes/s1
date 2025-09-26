@@ -58,7 +58,7 @@ pub enum Callable {
     },
     // Privileged system procedures with access to the evaluator
     SysBuiltin {
-        func: fn(&mut RunTime, &[GcRef], &mut CEKState) -> Result<(), String>,
+        func: fn(&mut RunTime, &[GcRef], &mut CEKState, KontRef) -> Result<(), String>,
         doc: String,
     },
     // Syntax procedures called with unevaluated arguments
