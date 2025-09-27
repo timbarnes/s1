@@ -891,6 +891,15 @@
 (test-equal 5.0 (safe-divide 10 2) "call/cc error simulation normal")
 (test-equal 'division-by-zero (safe-divide 10 0) "call/cc error simulation escape")
 
+(display "          === Testing dyamic-wind ===")
+(newline)
+(test-equal "thunk"
+    (dynamic-wind
+        (lambda () (display "Before "))
+        (lambda () (display "Thunk ") "thunk")
+        (lambda () (displayln "After ")))
+    "dynamic-wind with local exit")
+
 (display "          === Testing values / call-with-values ===")
 (newline)
 (test-equal 5 (+ (values 2)3) "Singleton values call")

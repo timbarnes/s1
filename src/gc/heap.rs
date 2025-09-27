@@ -20,6 +20,8 @@ pub struct GcHeap {
     objects: Vec<GcRef>,
     // For objects allocated since the last GC
     nursery: Vec<GcRef>,
+    // Reusable worklist for marking objects during GC
+    worklist: Vec<GcRef>,
     // Symbol table for interning symbols (name -> symbol object)
     symbol_table: HashMap<String, GcRef>,
     // Number of allocations since last GC
@@ -30,6 +32,7 @@ pub struct GcHeap {
 impl GcHeap {
     /// Create a new empty heap.
     pub fn new() -> Self {
+        let gc_threshold = 100000;
         let mut heap = Self {
             nil_obj: None,
             true_obj: None,
@@ -40,10 +43,11 @@ impl GcHeap {
             void_obj: None,
             free_list: Vec::new(),
             objects: Vec::new(),
-            nursery: Vec::new(),
+            nursery: Vec::with_capacity(gc_threshold),
+            worklist: Vec::with_capacity(gc_threshold + 1000),
             symbol_table: HashMap::new(),
             allocations: 0,
-            threshold: 100000,
+            threshold: gc_threshold,
         };
 
         // Pre-allocate singleton objects
@@ -209,6 +213,8 @@ impl GcHeap {
     ) {
         // println!("GC: Starting collection, {} objects, {} in nursery, {} ports in stack",
         //          self.objects.len(), self.nursery.len(), port_stack.len());
+        self.worklist.clear();
+        self.worklist.reserve(self.threshold + 1000);
         self.allocations = 0;
         for obj in &self.objects {
             crate::gc::unmark(*obj);
@@ -224,76 +230,42 @@ impl GcHeap {
         current_output_port: GcRef,
         port_stack: &[GcRef],
     ) {
-        let mut root_set: Vec<GcRef> = Vec::new();
-        state.mark(&mut |gcref| root_set.push(gcref));
+        // Temporary vector for all roots (we’ll reuse it)
+        // let mut root_set: Vec<GcRef> = Vec::new();
 
-        // Add roots from the runtime
-        root_set.push(current_output_port);
-        // Add all ports from the port stack as roots
-        for &port_ref in port_stack {
-            root_set.push(port_ref);
+        // CEKState roots
+        //state.mark(&mut |gcref| root_set.push(gcref));
+        state.mark(&mut |gcref| mark_reachable(gcref, &mut self.worklist));
+
+        // Runtime roots
+        mark_reachable(current_output_port, &mut self.worklist);
+        for port in port_stack {
+            mark_reachable(*port, &mut self.worklist);
         }
-        // Add singleton objects to the root set
-        if let Some(nil_obj) = self.nil_obj {
-            root_set.push(nil_obj);
+
+        // Singleton objects
+        for &obj in [
+            self.nil_obj,
+            self.true_obj,
+            self.false_obj,
+            self.void_obj,
+            self.eof_obj,
+            self.undefined_obj,
+        ]
+        .iter()
+        .flatten()
+        {
+            mark_reachable(obj, &mut self.worklist);
         }
-        if let Some(true_obj) = self.true_obj {
-            root_set.push(true_obj);
+
+        // Symbol table roots
+        //root_set.extend(self.symbol_table.values().copied());
+        for &sym in self.symbol_table.values() {
+            mark_reachable(sym, &mut self.worklist);
         }
-        if let Some(false_obj) = self.false_obj {
-            root_set.push(false_obj);
-        }
-        if let Some(void_obj) = self.void_obj {
-            root_set.push(void_obj);
-        }
-        if let Some(eof_obj) = self.eof_obj {
-            root_set.push(eof_obj);
-        }
-        if let Some(undefined_obj) = self.undefined_obj {
-            root_set.push(undefined_obj);
-        }
-        // Add symbols from the symbol table to the root set
-        for symbol in self.symbol_table.values() {
-            root_set.push(*symbol);
-        }
-        // Add objects in the nursery to the root set
+        // Nursery roots — copy pointers into the same vector to end the immutable borrow
         for obj in &self.nursery {
-            root_set.push(*obj);
-        }
-        // Now, mark all reachable objects from the collected roots
-        for root in root_set {
-            self.mark_reachable(root);
-        }
-    }
-
-    fn mark_reachable(&mut self, start: GcRef) {
-        let mut worklist = vec![start];
-
-        while let Some(gcref) = worklist.pop() {
-            if unsafe { (*gcref).marked } {
-                continue;
-            }
-
-            unsafe {
-                (*gcref).marked = true;
-            }
-
-            match unsafe { &(*gcref).value } {
-                SchemeValue::Pair(car, cdr) => {
-                    worklist.push(*car);
-                    worklist.push(*cdr);
-                }
-                SchemeValue::Vector(vec) => {
-                    for item in vec {
-                        worklist.push(*item);
-                    }
-                }
-                SchemeValue::Callable(Callable::Closure { body, env, .. }) => {
-                    worklist.push(*body);
-                    env.mark(&mut |gcref| worklist.push(gcref));
-                }
-                _ => {}
-            }
+            mark_reachable(*obj, &mut self.worklist);
         }
     }
 
@@ -314,6 +286,35 @@ impl GcHeap {
     /// Update the position of a StringPortInput in a SchemeValue::Port
     pub fn update_string_port_pos(&mut self, port_ref: &mut PortKind, new_pos: usize) -> bool {
         crate::io::update_string_port_pos(port_ref, new_pos)
+    }
+}
+
+fn mark_reachable(start: GcRef, worklist: &mut Vec<GcRef>) {
+    worklist.push(start);
+
+    while let Some(gcref) = worklist.pop() {
+        if *crate::gc_marked!(gcref) {
+            continue;
+        }
+
+        *crate::gc_marked_mut!(gcref) = true;
+
+        match crate::gc_value!(gcref) {
+            SchemeValue::Pair(car, cdr) => {
+                worklist.push(*car);
+                worklist.push(*cdr);
+            }
+            SchemeValue::Vector(vec) => {
+                for item in vec {
+                    worklist.push(*item);
+                }
+            }
+            SchemeValue::Callable(Callable::Closure { body, env, .. }) => {
+                worklist.push(*body);
+                env.mark(&mut |gcref| worklist.push(gcref));
+            }
+            _ => {}
+        }
     }
 }
 
