@@ -46,14 +46,15 @@ pub trait EnvOps {
 impl EnvOps for EnvRef {
     /// Get a binding from this frame using a symbol key (doesn't search parent)
     fn lookup(&self, symbol: GcRef) -> Option<GcRef> {
-        let frame = self.borrow();
-        if let Some(val) = frame.bindings.get(&symbol) {
-            Some(*val)
-        } else if let Some(ref parent) = frame.parent {
-            parent.lookup(symbol)
-        } else {
-            None
+        let mut current = Some(self.clone());
+        while let Some(env) = current {
+            let frame = env.borrow();
+            if let Some(val) = frame.bindings.get(&symbol) {
+                return Some(*val);
+            }
+            current = frame.parent.clone();
         }
+        None
     }
 
     // Search only this frame
@@ -67,14 +68,15 @@ impl EnvOps for EnvRef {
     }
 
     fn lookup_with_frame(&self, symbol: GcRef) -> Option<(GcRef, EnvRef)> {
-        let frame = self.borrow();
-        if let Some(val) = frame.bindings.get(&symbol) {
-            Some((*val, Rc::clone(self)))
-        } else if let Some(ref parent) = frame.parent {
-            parent.lookup_with_frame(symbol)
-        } else {
-            None
+        let mut current = Some(self.clone());
+        while let Some(env) = current {
+            let frame = env.borrow();
+            if let Some(val) = frame.bindings.get(&symbol) {
+                return Some((*val, env.clone()));
+            }
+            current = frame.parent.clone();
         }
+        None
     }
 
     // Define a binding in this frame
@@ -85,16 +87,16 @@ impl EnvOps for EnvRef {
 
     // Set a binding in this frame using a symbol key
     fn set(&self, symbol: GcRef, val: GcRef) -> Result<(), String> {
-        let mut frame = self.borrow_mut();
-        if frame.bindings.contains_key(&symbol) {
-            frame.bindings.insert(symbol.clone(), val);
-            Ok(())
-        } else if let Some(ref parent) = frame.parent {
-            //drop(frame); // release borrow before recursive call
-            parent.set(symbol, val)
-        } else {
-            Err(format!("Unbound variable: {}", print_value(&symbol)))
+        let mut current = Some(self.clone());
+        while let Some(env) = current {
+            let mut frame = env.borrow_mut();
+            if frame.bindings.contains_key(&symbol) {
+                frame.bindings.insert(symbol.clone(), val);
+                return Ok(());
+            }
+            current = frame.parent.clone();
         }
+        Err(format!("Unbound variable: {}", print_value(&symbol)))
     }
 
     fn set_local(&self, symbol: GcRef, val: GcRef) -> Result<(), String> {

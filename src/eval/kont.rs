@@ -475,6 +475,20 @@ pub fn insert_and_or(state: &mut CEKState, kind: AndOrKind, mut exprs: Vec<GcRef
     });
 }
 
+// Bind a symbol to a value. This is installed before evaluation of the right hand side.
+/// Insert a frame to run a function.
+///
+pub fn insert_apply_proc(state: &mut CEKState, proc: GcRef, args: Vec<GcRef>) {
+    // clone the current continuation and link it under the new Bind
+    let evaluated_args = Rc::new(args);
+    let prev = Rc::clone(&state.kont);
+    state.kont = Rc::new(Kont::ApplyProc {
+        proc,
+        evaluated_args,
+        next: prev,
+    });
+}
+
 /// Install `expr` into the existing CEKState and return immediately.
 /// If `replace_next` is true, the installed EvalArg (if any) will have `next = Halt`
 /// (i.e., it will replace the current continuation); otherwise the existing kont chain is preserved.

@@ -1,7 +1,7 @@
 use crate::env::{EnvOps, EnvRef};
 use crate::eval::{
-    CEKState, Control, DynamicWind, Kont, KontRef, RunTime, TraceType, insert_dynamic_wind,
-    insert_eval_eval,
+    CEKState, Control, DynamicWind, Kont, KontRef, RunTime, TraceType, insert_apply_proc,
+    insert_dynamic_wind, insert_eval_eval,
 };
 use crate::gc::{
     Callable, GcHeap, GcRef, SchemeValue, get_symbol, list, list_to_vec, list3, new_bool,
@@ -279,14 +279,12 @@ fn escape_sp(
         return Err("escape: requires two arguments".to_string());
     }
     match gc_value!(args[0]) {
-        SchemeValue::Continuation(new_kont, _) => {
+        SchemeValue::Continuation(new_kont, new_stack) => {
             // Assign to the new continuation
-            //state.kont = Rc::clone(new_kont);
             let result = args[1];
             // Return the second argument
             state.control = Control::Escape(result, Rc::clone(new_kont));
             //eprintln!("Escaping to continuation:");
-            //crate::utilities::dump_kont(Rc::clone(new_kont));
             state.kont = next;
             Ok(())
         }
@@ -306,7 +304,9 @@ fn dynamic_wind_sp(
     let before = list(args[0], ec.heap)?;
     let thunk = list(args[1], ec.heap)?;
     let after = list(args[2], ec.heap)?;
-    ec.dynamic_wind.push(DynamicWind::new(before, after));
+    ec.dynamic_wind
+        .push(DynamicWind::new(*ec.dw_next, before, after));
+    *ec.dw_next += 1;
     state.kont = next; // Delete the ApplyProc before installing the new continuation
     insert_dynamic_wind(state, before, thunk, after);
     state.control = Control::Expr(before);
@@ -996,6 +996,37 @@ fn apply_arg_list(args: &[GcRef], heap: &mut GcHeap) -> GcRef {
             list = crate::gc::cons(*arg, list, heap).unwrap();
         }
         list
+    }
+}
+
+/// Schedule the necessary `after` calls for frames we are *leaving* and the
+/// `before` calls for frames we are *entering* when making a non-local exit.
+///
+/// * `state` – current CEK state to which new frames are added
+/// * `old_stack` – dynamic-wind stack of the current continuation
+/// * `new_stack` – dynamic-wind stack of the target continuation
+pub fn schedule_dynamic_wind_transitions(
+    state: &mut CEKState,
+    old_stack: &[DynamicWind],
+    new_stack: &[DynamicWind],
+) {
+    // Find common prefix length
+    let mut common = 0;
+    while common < old_stack.len()
+        && common < new_stack.len()
+        && old_stack[common].id == new_stack[common].id
+    {
+        common += 1;
+    }
+
+    // Frames we are *leaving*: run their `after` in reverse order (top down).
+    for dw in old_stack.iter().rev().take(old_stack.len() - common) {
+        insert_apply_proc(state, dw.after, Vec::new());
+    }
+
+    // Frames we are *entering*: run their `before` in forward order (bottom up).
+    for dw in new_stack.iter().skip(common) {
+        insert_apply_proc(state, dw.before, Vec::new());
     }
 }
 
