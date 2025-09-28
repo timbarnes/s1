@@ -138,10 +138,10 @@
 (define cddddr (lambda (l) (cdr (cdr (cdr (cdr l)))))) ;; Cdr of cdr of cdr of cdr
 
 ;; Simplified (single argument) version of map
-(define (map f l)
-    (if (null? l)
-        '()
-        (cons (f (car l)) (map f (cdr l)))))
+; (define (map f l)
+;     (if (null? l)
+;         '()
+;         (cons (f (car l)) (map f (cdr l)))))
 
 ;; Simplified (single argument) version of for-each
 (define (for-each f args)
@@ -236,6 +236,20 @@
         (cons (apply f (cars ls))
               (loop (cdrs ls)))))
   (loop lists))
+
+; (define (map f . lists)
+;    (letrec ((cars (lambda (ls)
+;                     (if (null? ls) '()
+;                         (cons (caar ls) (cars (cdr ls))))))
+;             (cdrs (lambda (ls)
+;                     (if (null? ls) '()
+;                         (cons (cdar ls) (cdrs (cdr ls))))))
+;             (loop (lambda (ls)
+;                     (if (or (null? ls) (null? (car ls)))
+;                         '()
+;                         (cons (apply f (cars ls))
+;                               (loop (cdrs ls)))))))
+;      (loop lists)))
 
 ;; Pass in a quoted form and number of times to run it
 ;; e.g. (benchmark '(fac-acc 1000) 20)

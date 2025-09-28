@@ -911,6 +911,27 @@
 (test-equal 'escaped result "dynamic-wind: non-local exit returns correct value")
 (test-equal '(after before) x "dynamic-wind: non-local exit runs 'after' thunk")
 
+(display "          === Testing Nested dynamic-wind ===")
+(newline)
+(define nested-dw-log '())
+(define (log . items)
+  (set! nested-dw-log (append nested-dw-log items)))
+
+(define nested-dw-result
+  (call/cc
+   (lambda (exit)
+     (dynamic-wind
+       (lambda () (log 'outer-before))
+       (lambda () 
+         (dynamic-wind
+           (lambda () (log 'inner-before))
+           (lambda () (exit 'escaped))
+           (lambda () (log 'inner-after))))
+       (lambda () (log 'outer-after))))))
+
+(test-equal 'escaped nested-dw-result "nested dynamic-wind: correct return value")
+(test-equal '(outer-before inner-before inner-after outer-after) nested-dw-log "nested dynamic-wind: correct thunk order")
+
 (display "          === Testing values / call-with-values ===")
 (newline)
 (test-equal 5 (+ (values 2)3) "Singleton values call")
