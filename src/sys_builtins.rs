@@ -270,22 +270,19 @@ fn call_cc_sp(
 /// This is the internal mechanism for call/cc. It is bound by a lambda to the escape continuation,
 /// and when called, it resets the continuation and returns the provided arg.
 fn escape_sp(
-    _ec: &mut RunTime,
+    ec: &mut RunTime,
     args: &[GcRef],
     state: &mut CEKState,
-    next: KontRef,
+    _next: KontRef,
 ) -> Result<(), String> {
     if args.len() != 2 {
         return Err("escape: requires two arguments".to_string());
     }
     match gc_value!(args[0]) {
-        SchemeValue::Continuation(new_kont, new_stack) => {
-            // Assign to the new continuation
+        SchemeValue::Continuation(new_kont, new_dw_stack) => {
             let result = args[1];
-            // Return the second argument
-            state.control = Control::Escape(result, Rc::clone(new_kont));
-            //eprintln!("Escaping to continuation:");
-            state.kont = next;
+            let thunks = schedule_dynamic_wind_transitions(&ec.dynamic_wind, new_dw_stack);
+            crate::eval::kont::insert_escape(state, result, thunks, Rc::clone(new_kont));
             Ok(())
         }
         _ => return Err("escape: first argument must be a continuation".to_string()),
@@ -1006,10 +1003,10 @@ fn apply_arg_list(args: &[GcRef], heap: &mut GcHeap) -> GcRef {
 /// * `old_stack` – dynamic-wind stack of the current continuation
 /// * `new_stack` – dynamic-wind stack of the target continuation
 pub fn schedule_dynamic_wind_transitions(
-    state: &mut CEKState,
     old_stack: &[DynamicWind],
     new_stack: &[DynamicWind],
-) {
+) -> Vec<GcRef> {
+    let mut thunks = Vec::new();
     // Find common prefix length
     let mut common = 0;
     while common < old_stack.len()
@@ -1021,13 +1018,14 @@ pub fn schedule_dynamic_wind_transitions(
 
     // Frames we are *leaving*: run their `after` in reverse order (top down).
     for dw in old_stack.iter().rev().take(old_stack.len() - common) {
-        insert_apply_proc(state, dw.after, Vec::new());
+        thunks.push(dw.after);
     }
 
     // Frames we are *entering*: run their `before` in forward order (bottom up).
     for dw in new_stack.iter().skip(common) {
-        insert_apply_proc(state, dw.before, Vec::new());
+        thunks.push(dw.before);
     }
+    thunks
 }
 
 // #[cfg(test)]

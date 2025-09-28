@@ -10,7 +10,7 @@
 
 (define **failed-tests** '()) ; keep track of test failures
 (define **counter** 0)
-(define **print-successes** #t)
+(define **print-successes** #f)
 
 (define fails
   (lambda (message)
@@ -899,6 +899,17 @@
         (lambda () (display "Thunk ") "thunk")
         (lambda () (displayln "After ")))
     "dynamic-wind with local exit")
+
+(define x '())
+(define result
+  (call/cc
+   (lambda (k)
+     (dynamic-wind
+      (lambda () (set! x (cons 'before x)))
+      (lambda () (k 'escaped))
+      (lambda () (set! x (cons 'after x)))))))
+(test-equal 'escaped result "dynamic-wind: non-local exit returns correct value")
+(test-equal '(after before) x "dynamic-wind: non-local exit runs 'after' thunk")
 
 (display "          === Testing values / call-with-values ===")
 (newline)

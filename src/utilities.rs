@@ -122,7 +122,6 @@ fn dump_control(control: &Control) -> String {
         Control::Expr(obj) => format!("Expr:  {}", print_value(obj)),
         Control::Value(obj) => format!("Value: {}", print_value(obj)),
         Control::Values(vals) => format!("Values[0]: {:20}", print_value(&vals[0])),
-        Control::Escape(val, k) => format!("Escape: {}, {:?}", print_value(val), k),
         Control::Empty => format!("Empty"),
     }
 }
@@ -153,13 +152,6 @@ pub fn dbg_cek(loc: &str, state: &CEKState) {
                 "Values[0] {};      Kont = {}",
                 print_value(&vals[0]),
                 dbg_one_kont("", &state.kont)
-            );
-        }
-        Control::Escape(val, kont) => {
-            eprintln!(
-                "Escape; Val {};      Kont = {}",
-                print_value(val),
-                dbg_one_kont("", &kont)
             );
         }
         Control::Empty => {
@@ -250,6 +242,7 @@ pub fn dbg_one_kont(loc: &str, frame: &Kont) -> String {
             result.push_str(&dbg_env_short(old_env));
             result.push('\n');
         }
+        Kont::Escape { .. } => result.push_str("Escape"),
         Kont::Seq { .. } => result.push_str("Seq"),
     }
     result
@@ -289,6 +282,7 @@ pub fn _dbg_short_kont(kont: &KontRef) {
         Kont::EvalArg { .. } => print!("EvalArg "),
         Kont::If { .. } => print!("If "),
         Kont::RestoreEnv { .. } => print!("RestoreEnv "),
+        Kont::Escape { .. } => print!("Escape "),
         Kont::Seq { .. } => print!("Seq "),
     }
 }

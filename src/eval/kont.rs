@@ -49,6 +49,11 @@ pub enum Kont {
         phase: DynamicWindPhase,
         next: KontRef,
     },
+    Escape {
+        result: GcRef,
+        thunks: Vec<GcRef>,
+        new_kont: KontRef,
+    },
     Eval {
         expr: GcRef,
         env: Option<GcRef>,
@@ -97,6 +102,7 @@ impl Kont {
             Kont::Cond { next, .. } => Some(next),
             Kont::CondClause { next, .. } => Some(next),
             Kont::DynamicWind { next, .. } => Some(next),
+            Kont::Escape { new_kont, .. } => Some(new_kont),
             Kont::Eval { next, .. } => Some(next),
             Kont::EvalArg { next, .. } => Some(next),
             Kont::Halt => None,
@@ -235,6 +241,14 @@ impl std::fmt::Debug for Kont {
                     k, rest, next
                 )
             }
+            Kont::Escape { thunks, new_kont, .. } => {
+                write!(
+                    f,
+                    "Escape {{ thunks: {}, new_kont: {:?} }}",
+                    thunks.len(),
+                    new_kont
+                )
+            }
             _ => write!(f, "Unknown continuation"),
         }
     }
@@ -270,7 +284,6 @@ pub enum Control {
     Expr(GcRef),        // Unevaluated expression
     Value(GcRef),       // Fully evaluated result
     Values(Vec<GcRef>), // For multiple value return
-    Escape(GcRef, KontRef),
     Empty,
 }
 
@@ -301,10 +314,6 @@ impl crate::gc::Mark for Control {
                 for val in vals {
                     visit(*val);
                 }
-            }
-            Control::Escape(val, kont) => {
-                visit(*val);
-                kont.mark(visit);
             }
             Control::Empty => {}
         }
@@ -381,6 +390,13 @@ impl crate::gc::Mark for KontRef {
                     }
                     visit(*after);
                     worklist.push(Rc::clone(next));
+                }
+                Kont::Escape { result, thunks, new_kont } => {
+                    visit(*result);
+                    for thunk in thunks {
+                        visit(*thunk);
+                    }
+                    worklist.push(Rc::clone(new_kont));
                 }
                 Kont::Eval {
                     expr, env, next, ..
@@ -587,5 +603,13 @@ pub fn insert_seq(state: &mut CEKState, mut exprs: Vec<GcRef>) {
     state.kont = Rc::new(Kont::Seq {
         rest: exprs,
         next: prev,
+    });
+}
+
+pub fn insert_escape(state: &mut CEKState, result: GcRef, thunks: Vec<GcRef>, new_kont: KontRef) {
+    state.kont = Rc::new(Kont::Escape {
+        result,
+        thunks,
+        new_kont,
     });
 }

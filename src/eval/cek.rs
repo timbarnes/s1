@@ -48,8 +48,6 @@ fn run_cek(mut state: &mut CEKState, rt: &mut RunTime) -> Result<Vec<GcRef>, Str
             },
             Control::Expr(_) => continue, // Still evaluating an expression; continue loop
             Control::Empty => return Ok(vec![rt.heap.void()]),
-            //Control::Empty => return Err("CEK: Control::Empty".to_string()),
-            Control::Escape(_, _) => continue, // Escape continuation; proceed from new continuation
         }
     }
 }
@@ -80,12 +78,6 @@ fn step(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> {
             eprintln!("step::Values");
             *ec.depth -= 1;
             dispatch_values_kont(state, vals.clone(), Rc::clone(&state.kont))
-        }
-        Control::Escape(val, kont) => {
-            *ec.depth -= 1;
-            state.control = Control::Value(val);
-            state.kont = kont;
-            Ok(())
         }
         Control::Empty => Err("Unexpected Control::Halt in step()".to_string()),
     }
@@ -269,10 +261,32 @@ fn dispatch_kont(
         Kont::RestoreEnv { old_env, next } => {
             handle_restore_env(state, ec, old_env.clone(), Rc::clone(next))
         }
+        Kont::Escape { result, thunks, new_kont } => {
+            handle_escape(state, ec, *result, thunks.clone(), Rc::clone(new_kont))
+        }
         Kont::Seq { rest, next } => handle_seq(state, rest.clone(), Rc::clone(next)),
         Kont::Halt => Ok(()),
         _ => Err("unexpected continuation".to_string()),
     }
+}
+
+fn handle_escape(
+    state: &mut CEKState,
+    _ec: &mut RunTime,
+    result: GcRef,
+    mut thunks: Vec<GcRef>,
+    new_kont: KontRef,
+) -> Result<(), String> {
+    if let Some(thunk) = thunks.pop() {
+        // More thunks to run, push the next one onto the stack.
+        state.kont = Rc::new(Kont::Escape { result, thunks, new_kont });
+        state.control = Control::Expr(thunk);
+    } else {
+        // No more thunks, install the new continuation.
+        state.kont = new_kont;
+        state.control = Control::Value(result);
+    }
+    Ok(())
 }
 
 fn handle_and_or(
