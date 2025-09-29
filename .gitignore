@@ -1,2 +1,6 @@
 /target
 GEMINI.md
+flamegraph*.svg
+*tmp*
+*.log
+*.log.*
