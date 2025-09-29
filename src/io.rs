@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 use std::fs::File;
 use std::io::{self, BufRead, Read, Write};
 
@@ -176,7 +176,7 @@ impl FileTable {
     pub fn new() -> Self {
         Self {
             next_id: 1,
-            files: HashMap::new(),
+            files: HashMap::default(),
         }
     }
 

@@ -2,7 +2,7 @@
 
 use super::{Callable, GcObject, GcRef, Mark, SchemeValue};
 use crate::io::PortKind;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 
 /// The garbage-collected heap that manages all Scheme objects.
 pub struct GcHeap {
@@ -45,7 +45,7 @@ impl GcHeap {
             objects: Vec::new(),
             nursery: Vec::with_capacity(gc_threshold),
             worklist: Vec::with_capacity(gc_threshold + 1000),
-            symbol_table: HashMap::new(),
+            symbol_table: HashMap::default(),
             allocations: 0,
             threshold: gc_threshold,
         };

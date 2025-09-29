@@ -8,8 +8,8 @@
 
 use crate::gc::GcRef;
 use crate::printer::print_value;
+use rustc_hash::FxHashMap as HashMap;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 pub type EnvRef = Rc<RefCell<Frame>>;
@@ -25,7 +25,7 @@ impl Frame {
     /// Create a new frame with an optional parent
     pub fn new(parent: Option<EnvRef>) -> Self {
         Self {
-            bindings: HashMap::new(),
+            bindings: HashMap::default(),
             parent,
         }
     }

@@ -16,7 +16,7 @@ use crate::gc::{
 };
 use crate::macros::expand_macro;
 use crate::utilities::post_error;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 use std::time::Instant;
 
 enum Ptype {
@@ -141,7 +141,7 @@ fn create_lambda_or_macro(
     let wrapped_body = wrap_body_in_begin(&form[2..], ec.heap);
 
     // Intern and preserve parameter symbols
-    let mut param_map = HashMap::new();
+    let mut param_map = HashMap::default();
     for param in params {
         match &ec.heap.get_value(*param) {
             SchemeValue::Symbol(name) => {
