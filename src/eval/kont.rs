@@ -1,4 +1,5 @@
 use crate::env::EnvRef;
+use crate::eval::DynamicWind;
 use crate::gc::GcRef;
 use crate::printer::print_value;
 use std::rc::Rc;
@@ -53,6 +54,7 @@ pub enum Kont {
         result: GcRef,
         thunks: Vec<GcRef>,
         new_kont: KontRef,
+        new_dw_stack: Vec<DynamicWind>,
     },
     Eval {
         expr: GcRef,
@@ -176,6 +178,18 @@ impl std::fmt::Debug for Kont {
                     next
                 )
             }
+            Kont::DynamicWind { before, thunk, after, thunk_result, phase, next } => {
+                write!(
+                    f,
+                    "DynamicWind {{ before: {}, thunk: {}, after: {}, thunk_result: {:?}, phase: {:?}, next: {:?} }}",
+                    print_value(before),
+                    print_value(thunk),
+                    print_value(after),
+                    thunk_result,
+                    phase,
+                    next
+                )
+            }
             Kont::If {
                 then_branch,
                 else_branch,
@@ -241,7 +255,9 @@ impl std::fmt::Debug for Kont {
                     k, rest, next
                 )
             }
-            Kont::Escape { thunks, new_kont, .. } => {
+            Kont::Escape {
+                thunks, new_kont, ..
+            } => {
                 write!(
                     f,
                     "Escape {{ thunks: {}, new_kont: {:?} }}",
@@ -391,7 +407,12 @@ impl crate::gc::Mark for KontRef {
                     visit(*after);
                     worklist.push(Rc::clone(next));
                 }
-                Kont::Escape { result, thunks, new_kont } => {
+                Kont::Escape {
+                    result,
+                    thunks,
+                    new_kont,
+                    ..
+                } => {
                     visit(*result);
                     for thunk in thunks {
                         visit(*thunk);
@@ -606,10 +627,17 @@ pub fn insert_seq(state: &mut CEKState, mut exprs: Vec<GcRef>) {
     });
 }
 
-pub fn insert_escape(state: &mut CEKState, result: GcRef, thunks: Vec<GcRef>, new_kont: KontRef) {
+pub fn insert_escape(
+    state: &mut CEKState,
+    result: GcRef,
+    thunks: Vec<GcRef>,
+    new_kont: KontRef,
+    new_dw_stack: Vec<DynamicWind>,
+) {
     state.kont = Rc::new(Kont::Escape {
         result,
         thunks,
         new_kont,
+        new_dw_stack,
     });
 }

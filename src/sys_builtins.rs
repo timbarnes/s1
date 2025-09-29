@@ -1,4 +1,5 @@
 use crate::env::{EnvOps, EnvRef};
+use crate::eval::kont::DynamicWindPhase;
 use crate::eval::{
     CEKState, Control, DynamicWind, Kont, KontRef, RunTime, TraceType, insert_apply_proc,
     insert_dynamic_wind, insert_eval_eval,
@@ -9,8 +10,8 @@ use crate::gc::{
 };
 use crate::gc_value;
 use crate::io::{PortKind, port_kind_from_scheme_port};
-//use crate::printer::print_value;
 use crate::parser::{ParseError, parse};
+use crate::printer::print_value;
 use crate::special_forms::create_callable;
 use crate::utilities::post_error;
 
@@ -151,7 +152,6 @@ fn apply_sp(
                     }
                     Ok(_) => {}
                 }
-                state.kont = nxt;
                 return Ok(());
             }
             Callable::Closure {
@@ -159,23 +159,15 @@ fn apply_sp(
                 body,
                 env: closure_env,
             } => {
-                // get a next pointer from the current continuation
-                let next = match state.kont.next() {
-                    Some(n) => n,
-                    None => return Err("No next pointer found".to_string()),
-                };
                 let applied_args = list_to_vec(ec.heap, arglist)?;
                 let new_env =
                     crate::eval::bind_params(&params[..], &applied_args, &closure_env, ec.heap)?;
                 let old_env = state.env.clone();
 
-                state.kont = Rc::new(Kont::RestoreEnv {
-                    old_env,
-                    next: Rc::clone(next),
-                });
+                // `apply` is never a tail call, so always push RestoreEnv
+                state.kont = Rc::new(Kont::RestoreEnv { old_env, next: nxt });
                 state.env = new_env;
                 state.control = Control::Expr(*body);
-                state.kont = nxt;
                 return Ok(());
             }
             _ => return Err("apply: first argument must be a function".to_string()),
@@ -235,11 +227,9 @@ fn call_cc_sp(
         _ => return Err("call/cc: argument must be a function".to_string()),
     }
     // Capture the current continuation
-    let kont = new_continuation(
-        ec.heap,
-        capture_call_site_kont(&state.kont),
-        ec.dynamic_wind.clone(),
-    );
+    let captured_kont = capture_call_site_kont(&state.kont);
+    // eprintln!("call_cc_sp: captured kont = {:?}", captured_kont);
+    let kont = new_continuation(ec.heap, captured_kont, ec.dynamic_wind.clone());
     // Build the escape call
     let sym_val = get_symbol(ec.heap, "val");
     let sym_lambda = get_symbol(ec.heap, "lambda");
@@ -275,14 +265,31 @@ fn escape_sp(
     state: &mut CEKState,
     _next: KontRef,
 ) -> Result<(), String> {
+    // eprintln!(
+    //     "escape_sp: args[0] = {}, args[1] = {}",
+    //     print_value(&args[0]),
+    //     print_value(&args[1])
+    // );
     if args.len() != 2 {
         return Err("escape: requires two arguments".to_string());
     }
     match gc_value!(args[0]) {
         SchemeValue::Continuation(new_kont, new_dw_stack) => {
             let result = args[1];
+            // eprintln!(
+            //     "escape_sp: new_kont = {:?}, new_dw_stack.len() = {}",
+            //     new_kont,
+            //     new_dw_stack.len()
+            // );
             let thunks = schedule_dynamic_wind_transitions(&ec.dynamic_wind, new_dw_stack);
-            crate::eval::kont::insert_escape(state, result, thunks, Rc::clone(new_kont));
+            // eprintln!("escape_sp: thunks.len() = {}", thunks.len());
+            crate::eval::kont::insert_escape(
+                state,
+                result,
+                thunks,
+                Rc::clone(new_kont),
+                new_dw_stack.clone(),
+            );
             Ok(())
         }
         _ => return Err("escape: first argument must be a continuation".to_string()),
@@ -976,8 +983,66 @@ fn flush_output_sp(
 /// Utility functions
 ///
 fn capture_call_site_kont(k: &KontRef) -> KontRef {
+    // eprintln!("capture_call_site_kont: k = {:?}", k);
     match &**k {
         Kont::EvalArg { next, .. } | Kont::ApplyProc { next, .. } => capture_call_site_kont(next),
+        Kont::DynamicWind {
+            before,
+            thunk,
+            after,
+            thunk_result,
+            phase,
+            next,
+        } => {
+            // eprintln!(
+            //     "capture_call_site_kont: DynamicWind before = {}, thunk = {}, after = {}, phase = {:?}",
+            //     print_value(before),
+            //     print_value(thunk),
+            //     print_value(after),
+            //     phase
+            // );
+            match phase {
+                DynamicWindPhase::Return => {
+                    // If dynamic-wind is already in Return phase, skip it completely
+                    // eprintln!("capture_call_site_kont: skipping Return phase DynamicWind frame");
+                    capture_call_site_kont(next)
+                }
+                DynamicWindPhase::After => {
+                    // If dynamic-wind is in After phase, we need to let it run its after thunk
+                    // and then return the result. Keep it in After phase so it will execute normally.
+                    let new_kont = Rc::new(Kont::DynamicWind {
+                        before: *before,
+                        thunk: *thunk,
+                        after: *after,
+                        thunk_result: *thunk_result,
+                        phase: DynamicWindPhase::After, // Keep in After phase
+                        next: capture_call_site_kont(next),
+                    });
+                    // eprintln!(
+                    //     "capture_call_site_kont: preserving After phase DynamicWind frame = {:?}",
+                    //     new_kont
+                    // );
+                    new_kont
+                }
+                DynamicWindPhase::Thunk => {
+                    // If we are capturing a continuation inside a dynamic-wind thunk,
+                    // the phase should be After, as the thunk has already run.
+                    let new_kont = Rc::new(Kont::DynamicWind {
+                        before: *before,
+                        thunk: *thunk,
+                        after: *after,
+                        thunk_result: *thunk_result,
+                        phase: DynamicWindPhase::After, // <--- Change phase here
+                        next: capture_call_site_kont(next), // Recursively process the next continuation
+                    });
+                    // eprintln!(
+                    //     "capture_call_site_kont: returning new_kont = {:?}",
+                    //     new_kont
+                    // );
+                    new_kont
+                }
+            }
+        }
         _ => Rc::clone(k),
     }
 }
@@ -1016,15 +1081,21 @@ pub fn schedule_dynamic_wind_transitions(
         common += 1;
     }
 
-    // Frames we are *leaving*: run their `after` in reverse order (top down).
-    for dw in old_stack.iter().rev().take(old_stack.len() - common) {
-        thunks.push(dw.after);
-    }
-
-    // Frames we are *entering*: run their `before` in forward order (bottom up).
-    for dw in new_stack.iter().skip(common) {
+    // Frames we are *entering*: run their `before` in forward order (outer to inner).
+    // To execute in reverse order via pop(), we must push them in reverse.
+    for dw in new_stack.iter().skip(common).rev() {
         thunks.push(dw.before);
     }
+
+    // Frames we are *leaving*: run their `after` in reverse order (inner to outer).
+    // To execute in reverse order via pop(), we must push them in forward order.
+    for dw in old_stack.iter().skip(common) {
+        thunks.push(dw.after);
+    }
+    // eprintln!("Thunk list is:");
+    // for th in &thunks {
+    //     println!(" => {}", print_value(&th));
+    // }
     thunks
 }
 

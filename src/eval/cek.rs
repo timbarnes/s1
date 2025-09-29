@@ -261,32 +261,23 @@ fn dispatch_kont(
         Kont::RestoreEnv { old_env, next } => {
             handle_restore_env(state, ec, old_env.clone(), Rc::clone(next))
         }
-        Kont::Escape { result, thunks, new_kont } => {
-            handle_escape(state, ec, *result, thunks.clone(), Rc::clone(new_kont))
-        }
+        Kont::Escape {
+            result,
+            thunks,
+            new_kont,
+            new_dw_stack,
+        } => handle_escape(
+            state,
+            ec,
+            *result,
+            thunks.clone(),
+            Rc::clone(new_kont),
+            new_dw_stack.clone(),
+        ),
         Kont::Seq { rest, next } => handle_seq(state, rest.clone(), Rc::clone(next)),
         Kont::Halt => Ok(()),
         _ => Err("unexpected continuation".to_string()),
     }
-}
-
-fn handle_escape(
-    state: &mut CEKState,
-    _ec: &mut RunTime,
-    result: GcRef,
-    mut thunks: Vec<GcRef>,
-    new_kont: KontRef,
-) -> Result<(), String> {
-    if let Some(thunk) = thunks.pop() {
-        // More thunks to run, push the next one onto the stack.
-        state.kont = Rc::new(Kont::Escape { result, thunks, new_kont });
-        state.control = Control::Expr(thunk);
-    } else {
-        // No more thunks, install the new continuation.
-        state.kont = new_kont;
-        state.control = Control::Value(result);
-    }
-    Ok(())
 }
 
 fn handle_and_or(
@@ -513,6 +504,42 @@ fn handle_dynamic_wind(
             None => return Err("dynamic-wind: Expected thunk value".to_string()),
         },
     }
+}
+
+fn handle_escape(
+    state: &mut CEKState,
+    ec: &mut RunTime,
+    result: GcRef,
+    mut thunks: Vec<GcRef>,
+    new_kont: KontRef,
+    new_dw_stack: Vec<DynamicWind>,
+) -> Result<(), String> {
+    // eprintln!(
+    //     "handle_escape: result = {}, thunks.len() = {}, new_kont = {:?}, new_dw_stack.len() = {}",
+    //     print_value(&result),
+    //     thunks.len(),
+    //     new_kont,
+    //     new_dw_stack.len()
+    // );
+    if let Some(thunk) = thunks.pop() {
+        // eprintln!("handle_escape: running thunk = {}", print_value(&thunk));
+        state.kont = Rc::new(Kont::Escape {
+            result,
+            thunks,
+            new_kont,
+            new_dw_stack,
+        });
+        state.control = Control::Expr(thunk);
+    } else {
+        // eprintln!(
+        //     "handle_escape: no more thunks, restoring state. result = {}",
+        //     print_value(&result)
+        // );
+        state.kont = new_kont;
+        state.control = Control::Value(result);
+        *ec.dynamic_wind = new_dw_stack;
+    }
+    Ok(())
 }
 
 fn handle_eval(
