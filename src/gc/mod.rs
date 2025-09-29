@@ -104,12 +104,6 @@ pub trait Mark {
     fn mark(&self, visit: &mut dyn FnMut(GcRef));
 }
 
-pub fn mark(gcref: GcRef) {
-    unsafe {
-        (*gcref).marked = true;
-    }
-}
-
 pub fn unmark(gcref: GcRef) {
     unsafe {
         (*gcref).marked = false;

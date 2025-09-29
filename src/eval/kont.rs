@@ -178,7 +178,14 @@ impl std::fmt::Debug for Kont {
                     next
                 )
             }
-            Kont::DynamicWind { before, thunk, after, thunk_result, phase, next } => {
+            Kont::DynamicWind {
+                before,
+                thunk,
+                after,
+                thunk_result,
+                phase,
+                next,
+            } => {
                 write!(
                     f,
                     "DynamicWind {{ before: {}, thunk: {}, after: {}, thunk_result: {:?}, phase: {:?}, next: {:?} }}",
@@ -401,23 +408,31 @@ impl crate::gc::Mark for KontRef {
                 } => {
                     visit(*before);
                     visit(*thunk);
+                    visit(*after);
                     if let Some(thunk_result) = thunk_result {
                         visit(*thunk_result);
                     }
-                    visit(*after);
                     worklist.push(Rc::clone(next));
                 }
                 Kont::Escape {
                     result,
                     thunks,
                     new_kont,
-                    ..
+                    new_dw_stack,
                 } => {
                     visit(*result);
                     for thunk in thunks {
                         visit(*thunk);
                     }
                     worklist.push(Rc::clone(new_kont));
+                    for dw in new_dw_stack {
+                        match dw {
+                            DynamicWind { before, after, .. } => {
+                                visit(*before);
+                                visit(*after);
+                            }
+                        }
+                    }
                 }
                 Kont::Eval {
                     expr, env, next, ..
