@@ -1,7 +1,7 @@
 use crate::env::{EnvOps, EnvRef};
 use crate::eval::kont::DynamicWindPhase;
 use crate::eval::{
-    CEKState, Control, DynamicWind, Kont, KontRef, RunTime, TraceType, insert_apply_proc,
+    CEKState, Control, DynamicWind, Kont, KontRef, RunTime, TraceType,
     insert_dynamic_wind, insert_eval_eval,
 };
 use crate::gc::{
@@ -11,7 +11,6 @@ use crate::gc::{
 use crate::gc_value;
 use crate::io::{PortKind, port_kind_from_scheme_port};
 use crate::parser::{ParseError, parse};
-use crate::printer::print_value;
 use crate::special_forms::create_callable;
 use crate::utilities::post_error;
 

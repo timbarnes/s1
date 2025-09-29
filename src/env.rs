@@ -130,6 +130,11 @@ impl crate::gc::Mark for EnvRef {
         let mut current = Some(self.clone());
         while let Some(env) = current {
             let frame = env.borrow();
+            // Mark keys first
+            for &key in frame.bindings.keys() {
+                visit(key);
+            }
+            // Mark values second
             for &val in frame.bindings.values() {
                 visit(val);
             }
@@ -137,6 +142,20 @@ impl crate::gc::Mark for EnvRef {
         }
     }
 }
+
+// impl crate::gc::Mark for EnvRef {
+//     fn mark(&self, visit: &mut dyn FnMut(GcRef)) {
+//         let mut current = Some(self.clone());
+//         while let Some(env) = current {
+//             let frame = env.borrow();
+//             for &val in frame.bindings.values() {
+//                 visit(val);
+//             }
+//             current = frame.parent.clone();
+//         }
+//     }
+// }
+
 // impl crate::gc::Mark for EnvRef {
 //     fn mark(&self, visit: &mut dyn FnMut(GcRef)) {
 //         let frame = self.borrow();

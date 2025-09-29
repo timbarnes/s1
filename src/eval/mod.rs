@@ -8,7 +8,7 @@ use crate::macros::expand_macro;
 use crate::parser::parse;
 pub use cek::eval_main;
 pub use kont::{
-    AndOrKind, CEKState, CondClause, Control, Kont, KontRef, insert_and_or, insert_apply_proc,
+    AndOrKind, CEKState, CondClause, Control, Kont, KontRef, insert_and_or,
     insert_bind, insert_cond, insert_dynamic_wind, insert_eval, insert_eval_eval, insert_if,
     insert_seq, insert_value,
 };

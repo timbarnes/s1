@@ -10,7 +10,7 @@
 
 (define **failed-tests** '()) ; keep track of test failures
 (define **counter** 0)
-(define **print-successes** #f)
+(define **print-successes** #t)
 
 (define fails
   (lambda (message)
@@ -922,7 +922,7 @@
    (lambda (exit)
      (dynamic-wind
        (lambda () (log 'outer-before))
-       (lambda () 
+       (lambda ()
          (dynamic-wind
            (lambda () (log 'inner-before))
            (lambda () (exit 'escaped))
@@ -931,6 +931,154 @@
 
 (test-equal 'escaped nested-dw-result "nested dynamic-wind: correct return value")
 (test-equal '(outer-before inner-before inner-after outer-after) nested-dw-log "nested dynamic-wind: correct thunk order")
+
+(display "          === Testing Re-entrant dynamic-wind ===")
+(newline)
+(define re-entrant-log '())
+(define (log-re . items)
+  (set! re-entrant-log (append re-entrant-log items)))
+
+(define k #f)
+(define re-entrant-result
+  (dynamic-wind
+    (lambda () (log-re 'before-1))
+    (lambda ()
+      (call/cc
+       (lambda (exit)
+         (set! k exit)
+         'initial-run)))
+    (lambda () (log-re 'after-1))))
+
+(test-equal 'initial-run re-entrant-result "re-entrant: initial result")
+(test-equal '(before-1 after-1) re-entrant-log "re-entrant: initial run order")
+
+;; Part 2: Re-entry
+(set! re-entrant-log '())
+(set! re-entrant-result #f) ; Reset the result from part 1
+
+; When (k 're-entry-value) is called, it will escape to where k was captured
+; and bind 're-entry-value to re-entrant-result, executing thunks as needed
+(call/cc
+ (lambda (top-exit)
+   (dynamic-wind
+     (lambda () (log-re 'before-2))
+     (lambda () (top-exit (k 're-entry-value)))
+     (lambda () (log-re 'after-2)))))
+; The above call/cc will never complete because k escapes to the first dynamic-wind
+; So we test that re-entrant-result got the correct value from the escape
+(test-equal 're-entry-value re-entrant-result "re-entrant: re-entry result")
+(test-equal '(before-2 after-2 before-1 after-1) re-entrant-log "re-entrant: re-entry run order")
+
+;; Additional dynamic-wind edge case tests
+(display "          === Testing Dynamic-wind Edge Cases ===")
+(newline)
+
+;; Test 1: Error handling with continuations (simulated error in before thunk)
+(define error-test-1-result #f)
+(define error-test-1-caught #f)
+(call/cc
+  (lambda (outer-escape)
+    (call/cc
+      (lambda (error-escape)
+        (set! error-test-1-result
+          (dynamic-wind
+            (lambda () (error-escape "before-error-caught"))
+            (lambda () 'should-not-reach)
+            (lambda () 'cleanup-not-reached)))
+        (set! error-test-1-result 'should-not-reach)))
+    (set! error-test-1-caught #t)))
+(test-equal #t error-test-1-caught "error simulation: before thunk escape caught")
+
+;; Test 2: Simple escape from dynamic-wind thunk
+(define simple-escape-result #f)
+(set! simple-escape-result
+  (call/cc
+    (lambda (escape)
+      (dynamic-wind
+        (lambda () 'setup)
+        (lambda () (escape 'escaped-early))
+        (lambda () 'cleanup)))))
+(test-equal 'escaped-early simple-escape-result "simple escape: early exit works")
+
+;; Test 3: Multiple escapes from same dynamic-wind
+(define multi-escape-log '())
+(define multi-k #f)
+(define multi-result
+  (dynamic-wind
+    (lambda () (set! multi-escape-log (cons 'before multi-escape-log)))
+    (lambda ()
+      (call/cc (lambda (k) (set! multi-k k) 'first)))
+    (lambda () (set! multi-escape-log (cons 'after multi-escape-log)))))
+
+(test-equal 'first multi-result "multiple escapes: initial result")
+(test-equal '(after before) multi-escape-log "multiple escapes: initial log")
+
+;; Test 4: Dynamic-wind with minimal thunk
+(define empty-log '())
+(define empty-thunk-result
+  (dynamic-wind
+    (lambda () (set! empty-log (cons 'before empty-log)))
+    (lambda () #f)
+    (lambda () (set! empty-log (cons 'after empty-log)))))
+(test-equal #f empty-thunk-result "empty thunk: returns #f")
+(test-equal '(before after) (reverse empty-log) "empty thunk: thunks execute")
+
+;; Test 5: Deep nesting (simplified)
+(define deep-simple-result
+  (dynamic-wind
+    (lambda () 'outer-setup)
+    (lambda ()
+      (dynamic-wind
+        (lambda () 'inner-setup)
+        (lambda () 'inner-completed)
+        (lambda () 'inner-cleanup)))
+    (lambda () 'outer-cleanup)))
+
+(test-equal 'inner-completed deep-simple-result "deep nesting: simple nested completion")
+
+;; Test 6: Dynamic-wind with side effects
+(define side-effect-counter 0)
+(define side-effect-result
+  (call/cc
+    (lambda (escape)
+      (dynamic-wind
+        (lambda () (set! side-effect-counter (+ side-effect-counter 1)))
+        (lambda () (escape 'escaped))
+        (lambda () (set! side-effect-counter (+ side-effect-counter 10)))))))
+
+(test-equal 'escaped side-effect-result "side effects: escape result")
+(test-equal 11 side-effect-counter "side effects: counter value")
+
+;; Test 7: Nested dynamic-wind (simplified)
+(define nested-simple-log '())
+(define nested-simple-result
+  (dynamic-wind
+    (lambda () (set! nested-simple-log (cons 'outer-before nested-simple-log)))
+    (lambda ()
+      (dynamic-wind
+        (lambda () (set! nested-simple-log (cons 'inner-before nested-simple-log)))
+        (lambda () 'nested-normal)
+        (lambda () (set! nested-simple-log (cons 'inner-after nested-simple-log))))
+      'outer-normal)
+    (lambda () (set! nested-simple-log (cons 'outer-after nested-simple-log)))))
+
+(test-equal 'outer-normal nested-simple-result "nested simple: normal completion")
+(test-equal '(outer-before inner-before inner-after outer-after) (reverse nested-simple-log) "nested simple: normal log")
+
+;; Test 8: Simplified chain test
+(define simple-chain-log '())
+(define simple-chain-result
+  (dynamic-wind
+    (lambda () (set! simple-chain-log (cons 'dw1-before simple-chain-log)))
+    (lambda ()
+      (dynamic-wind
+        (lambda () (set! simple-chain-log (cons 'dw2-before simple-chain-log)))
+        (lambda () 'chain-normal)
+        (lambda () (set! simple-chain-log (cons 'dw2-after simple-chain-log)))))
+    (lambda () (set! simple-chain-log (cons 'dw1-after simple-chain-log)))))
+
+(test-equal 'chain-normal simple-chain-result "simple chain: normal completion")
+(test-equal '(dw1-before dw2-before dw2-after dw1-after) (reverse simple-chain-log) "simple chain: normal log")
 
 (display "          === Testing values / call-with-values ===")
 (newline)

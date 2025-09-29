@@ -258,11 +258,11 @@ impl GcHeap {
             mark_reachable(obj, &mut self.worklist);
         }
 
-        // Symbol table roots
+        // Symbol table roots - removed, symbols should be marked via environment keys
         //root_set.extend(self.symbol_table.values().copied());
-        for &sym in self.symbol_table.values() {
-            mark_reachable(sym, &mut self.worklist);
-        }
+        // for &sym in self.symbol_table.values() {
+        //     mark_reachable(sym, &mut self.worklist);
+        // }
         // Nursery roots — copy pointers into the same vector to end the immutable borrow
         for obj in &self.nursery {
             mark_reachable(*obj, &mut self.worklist);
