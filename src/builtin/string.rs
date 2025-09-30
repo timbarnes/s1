@@ -7,6 +7,7 @@ use crate::gc::{
     new_string,
 };
 use crate::printer::display_value;
+use crate::register_builtin_family;
 use num_bigint::BigInt;
 
 /// (string char1 [char2 ..])
@@ -18,15 +19,6 @@ use num_bigint::BigInt;
 /////////////////////////////////////////////////
 /// Builtin registration for string functions
 ///
-macro_rules! register_builtin_family {
-    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
-        $(
-            $env.define($heap.intern_symbol($name),
-                crate::gc::new_builtin($heap, $func,
-                    concat!($name, ": builtin function").to_string()));
-        )*
-    };
-}
 
 pub fn register_string_builtins(heap: &mut GcHeap, env: EnvRef) {
     register_builtin_family!(heap, env,

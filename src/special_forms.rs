@@ -15,6 +15,7 @@ use crate::gc::{
     new_float, new_macro, new_special_form,
 };
 use crate::macros::expand_macro;
+use crate::register_special_form;
 use crate::utilities::post_error;
 use rustc_hash::FxHashMap as HashMap;
 use std::time::Instant;
@@ -32,15 +33,6 @@ enum Ptype {
 ///     "name" => function,
 ///     "another" => another_function,
 /// );
-macro_rules! register_special_form {
-    ($rt:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
-        $(
-            $env.define($rt.intern_symbol($name),
-                new_special_form($rt, $func,
-                    concat!($name, ": special form").to_string()));
-        )*
-    };
-}
 
 pub fn register_special_forms(heap: &mut GcHeap, env: EnvRef) {
     register_special_form!(heap, env,

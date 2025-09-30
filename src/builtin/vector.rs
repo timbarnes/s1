@@ -2,20 +2,11 @@
 ///
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{GcHeap, GcRef, SchemeValue, list_from_slice, list_to_vec, new_int, new_vector};
+use crate::register_builtin_family;
 use crate::{gc_value, gc_value_mut};
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 use std::vec;
-
-macro_rules! register_builtin_family {
-    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
-        $(
-            $env.define($heap.intern_symbol($name),
-                crate::gc::new_builtin($heap, $func,
-                    concat!($name, ": builtin function").to_string()));
-        )*
-    };
-}
 
 pub fn register_vector_builtins(heap: &mut crate::gc::GcHeap, env: EnvRef) {
     register_builtin_family!(heap, env,

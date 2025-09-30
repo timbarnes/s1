@@ -10,23 +10,8 @@ pub mod vector;
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{GcHeap, GcRef, SchemeValue, new_int, new_string};
 use crate::gc_value;
+use crate::register_builtin_family;
 use num_traits::ToPrimitive;
-
-/// Macro to register builtin functions in the environment
-///
-/// Usage: register_builtin!(heap, env,
-///     "name" => function,
-///     "another" => another_function,
-/// );
-macro_rules! register_builtin_family {
-    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
-        $(
-            $env.define($heap.intern_symbol($name),
-                crate::gc::new_builtin($heap, $func,
-                    concat!($name, ": builtin function").to_string()));
-        )*
-    };
-}
 
 /// Register all builtin functions in the environment
 pub fn register_builtins(heap: &mut GcHeap, env: EnvRef) {

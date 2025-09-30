@@ -6,7 +6,7 @@
 ;; (define test-result (test-equal 42 42 "Integer equality"))
 ;; (define test-result (test-true (number? 42) "Number predicate"))
 
-;(gc-threshold 10000)
+;(gc-threshold 1)
 
 ;; Test helper functions
 (define **failed-tests** '()) ; keep track of test failures

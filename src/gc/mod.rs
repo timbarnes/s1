@@ -3,12 +3,42 @@ pub mod objects;
 
 use crate::eval::{CEKState, DynamicWind, KontRef, RunTime};
 use crate::io::PortKind;
+pub use heap::GcHeap;
 use num_bigint::BigInt;
+pub use objects::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-pub use heap::GcHeap;
-pub use objects::*;
+#[macro_export]
+macro_rules! register_builtin_family {
+    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
+        $(
+            $env.define($heap.intern_symbol($name),
+                crate::gc::new_builtin($heap, $func,
+                    concat!($name, ": builtin function").to_string()));
+        )*
+    };
+}
+
+#[macro_export]
+macro_rules! register_special_form {
+    ($rt:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
+        $(
+            $env.define($rt.intern_symbol($name),
+                new_special_form($rt, $func,
+                    concat!($name, ": special form").to_string()));
+        )*
+    };
+}
+
+#[macro_export]
+macro_rules! register_sys_builtins {
+    ($rt:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
+        $( $env.define($rt.heap.intern_symbol($name), new_sys_builtin($rt, $func,
+            concat!($name, ": sys-builtin").to_string()));
+        )*
+    };
+}
 
 #[macro_export]
 macro_rules! gc_value {

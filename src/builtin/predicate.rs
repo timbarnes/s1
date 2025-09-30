@@ -1,6 +1,16 @@
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{Callable, GcHeap, GcRef, SchemeValue, get_symbol, new_bool};
 use crate::gc_value;
+use crate::register_builtin_family;
+
+pub fn register_predicate_builtins(heap: &mut crate::gc::GcHeap, env: EnvRef) {
+    register_builtin_family!(heap, env,
+        "type-of" => type_of,
+        "equal?" => equal_q,
+        "number?" => number_q,
+        "eq?" => eq_q,
+    );
+}
 
 pub fn number_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     let arg = args.get(0).ok_or("number?: expected 1 argument")?;
@@ -52,25 +62,6 @@ pub fn type_of(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
         _ => "unknown",
     };
     Ok(get_symbol(heap, type_name))
-}
-
-macro_rules! register_builtin_family {
-    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
-        $(
-            $env.define($heap.intern_symbol($name),
-                crate::gc::new_builtin($heap, $func,
-                    concat!($name, ": builtin function").to_string()));
-        )*
-    };
-}
-
-pub fn register_predicate_builtins(heap: &mut crate::gc::GcHeap, env: EnvRef) {
-    register_builtin_family!(heap, env,
-        "type-of" => type_of,
-        "equal?" => equal_q,
-        "number?" => number_q,
-        "eq?" => eq_q,
-    );
 }
 
 mod tests {

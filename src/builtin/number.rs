@@ -1,8 +1,32 @@
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{GcHeap, GcRef, SchemeValue, new_bool, new_float, new_int};
 use crate::gc_value;
+use crate::register_builtin_family;
 use num_bigint::BigInt;
 use num_traits::{One, ToPrimitive, Zero};
+
+pub fn register_number_builtins(heap: &mut GcHeap, env: EnvRef) {
+    register_builtin_family!(heap, env,
+        "+" => plus_b,
+        "-" => minus_b,
+        "*" => times_b,
+        "/" => div_b,
+        "modulo" => mod_b,
+        "=" => eq_b,
+        "<" => lt_b,
+        ">" => gt_b,
+        "quotient" => quotient_b,
+        "remainder" => remainder_b,
+        "numerator" => numerator_b,
+        "denominator" => denominator_b,
+        "floor" => floor_b,
+        "ceiling" => ceiling_b,
+        "truncate" => truncate_b,
+        "round" => round_b,
+        "sqrt" => sqrt_b,
+        "expt" => expt_b,
+    );
+}
 
 pub fn plus_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     match args.len() {
@@ -445,39 +469,6 @@ pub fn expt_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     } else {
         Ok(new_float(heap, result))
     }
-}
-
-macro_rules! register_builtin_family {
-    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
-        $(
-            $env.define($heap.intern_symbol($name),
-                crate::gc::new_builtin($heap, $func,
-                    concat!($name, ": builtin function").to_string()));
-        )*
-    };
-}
-
-pub fn register_number_builtins(heap: &mut GcHeap, env: EnvRef) {
-    register_builtin_family!(heap, env,
-        "+" => plus_b,
-        "-" => minus_b,
-        "*" => times_b,
-        "/" => div_b,
-        "modulo" => mod_b,
-        "=" => eq_b,
-        "<" => lt_b,
-        ">" => gt_b,
-        "quotient" => quotient_b,
-        "remainder" => remainder_b,
-        "numerator" => numerator_b,
-        "denominator" => denominator_b,
-        "floor" => floor_b,
-        "ceiling" => ceiling_b,
-        "truncate" => truncate_b,
-        "round" => round_b,
-        "sqrt" => sqrt_b,
-        "expt" => expt_b,
-    );
 }
 
 mod tests {

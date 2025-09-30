@@ -1,17 +1,8 @@
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{GcHeap, GcRef, SchemeValue, new_int, new_pair, set_car, set_cdr};
 use crate::gc_value;
+use crate::register_builtin_family;
 use num_traits::ToPrimitive;
-
-macro_rules! register_builtin_family {
-    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
-        $(
-            $env.define($heap.intern_symbol($name),
-                crate::gc::new_builtin($heap, $func,
-                    concat!($name, ": builtin function").to_string()));
-        )*
-    };
-}
 
 pub fn register_list_builtins(heap: &mut GcHeap, env: EnvRef) {
     register_builtin_family!(heap, env,

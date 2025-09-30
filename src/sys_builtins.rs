@@ -1,8 +1,8 @@
 use crate::env::{EnvOps, EnvRef};
 use crate::eval::kont::DynamicWindPhase;
 use crate::eval::{
-    CEKState, Control, DynamicWind, Kont, KontRef, RunTime, TraceType,
-    insert_dynamic_wind, insert_eval_eval,
+    CEKState, Control, DynamicWind, Kont, KontRef, RunTime, TraceType, insert_dynamic_wind,
+    insert_eval_eval,
 };
 use crate::gc::{
     Callable, GcHeap, GcRef, SchemeValue, get_symbol, list, list_to_vec, list3, new_bool,
@@ -11,9 +11,9 @@ use crate::gc::{
 use crate::gc_value;
 use crate::io::{PortKind, port_kind_from_scheme_port};
 use crate::parser::{ParseError, parse};
+use crate::register_sys_builtins;
 use crate::special_forms::create_callable;
 use crate::utilities::post_error;
-
 use std::io::Write;
 use std::rc::Rc;
 use std::time::Instant;
@@ -24,16 +24,6 @@ use std::time::Instant;
 /// They differ from normal builtins in that they also have access to the CEK Evaluator.
 ///
 /// Like special forms, they return values through the CEK evaluator rather than directly.
-
-macro_rules! register_sys_builtins {
-    ($rt:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
-        $(
-            $env.define($rt.heap.intern_symbol($name),
-                new_sys_builtin($rt, $func,
-                    concat!($name, ": sys-builtin").to_string()));
-        )*
-    };
-}
 
 pub fn register_sys_builtins(runtime: &mut RunTime, env: EnvRef) {
     register_sys_builtins!(runtime, env,
@@ -182,8 +172,12 @@ fn garbage_collect_sp(
     next: KontRef,
 ) -> Result<(), String> {
     let timer = Instant::now();
-    ec.heap
-        .collect_garbage(state, *ec.current_output_port, ec.port_stack, ec.dynamic_wind);
+    ec.heap.collect_garbage(
+        state,
+        *ec.current_output_port,
+        ec.port_stack,
+        ec.dynamic_wind,
+    );
     let elapsed_time = timer.elapsed().as_secs_f64();
     let time = new_float(&mut ec.heap, elapsed_time);
     state.control = Control::Value(time);
@@ -234,7 +228,7 @@ fn call_cc_sp(
     let sym_lambda = get_symbol(ec.heap, "lambda");
     let sym_escape = get_symbol(ec.heap, "escape");
 
-    let params = list(sym_val, ec.heap)?; // (val)
+    let params = list(sym_val, ec.heap)?;
     let body = list3(sym_escape, kont, sym_val, ec.heap)?;
     let lambda = list3(sym_lambda, params, body, ec.heap)?;
     create_callable(lambda, ec, state)?;
@@ -264,22 +258,14 @@ fn escape_sp(
     state: &mut CEKState,
     _next: KontRef,
 ) -> Result<(), String> {
-    // eprintln!(
-    //     "escape_sp: args[0] = {}, args[1] = {}",
-    //     print_value(&args[0]),
-    //     print_value(&args[1])
-    // );
+    // eprintln!("escape_sp: args[0] = {}, args[1] = {}", print_value(&args[0]), print_value(&args[1]));
     if args.len() != 2 {
         return Err("escape: requires two arguments".to_string());
     }
     match gc_value!(args[0]) {
         SchemeValue::Continuation(new_kont, new_dw_stack) => {
             let result = args[1];
-            // eprintln!(
-            //     "escape_sp: new_kont = {:?}, new_dw_stack.len() = {}",
-            //     new_kont,
-            //     new_dw_stack.len()
-            // );
+            // eprintln!("escape_sp: new_kont = {:?}, new_dw_stack.len() = {}", new_kont, new_dw_stack.len());
             let thunks = schedule_dynamic_wind_transitions(&ec.dynamic_wind, new_dw_stack);
             // eprintln!("escape_sp: thunks.len() = {}", thunks.len());
             crate::eval::kont::insert_escape(
@@ -993,13 +979,7 @@ fn capture_call_site_kont(k: &KontRef) -> KontRef {
             phase,
             next,
         } => {
-            // eprintln!(
-            //     "capture_call_site_kont: DynamicWind before = {}, thunk = {}, after = {}, phase = {:?}",
-            //     print_value(before),
-            //     print_value(thunk),
-            //     print_value(after),
-            //     phase
-            // );
+            // eprintln!("capture_call_site_kont: DynamicWind before = {}, thunk = {}, after = {}, phase = {:?}", print_value(before), print_value(thunk), print_value(after), phase);
             match phase {
                 DynamicWindPhase::Return => {
                     // If dynamic-wind is already in Return phase, skip it completely
@@ -1017,10 +997,7 @@ fn capture_call_site_kont(k: &KontRef) -> KontRef {
                         phase: DynamicWindPhase::After, // Keep in After phase
                         next: capture_call_site_kont(next),
                     });
-                    // eprintln!(
-                    //     "capture_call_site_kont: preserving After phase DynamicWind frame = {:?}",
-                    //     new_kont
-                    // );
+                    // eprintln!("capture_call_site_kont: preserving After phase DynamicWind frame = {:?}", new_kont);
                     new_kont
                 }
                 DynamicWindPhase::Thunk => {
@@ -1034,10 +1011,7 @@ fn capture_call_site_kont(k: &KontRef) -> KontRef {
                         phase: DynamicWindPhase::After, // <--- Change phase here
                         next: capture_call_site_kont(next), // Recursively process the next continuation
                     });
-                    // eprintln!(
-                    //     "capture_call_site_kont: returning new_kont = {:?}",
-                    //     new_kont
-                    // );
+                    // eprintln!("capture_call_site_kont: returning new_kont = {:?}", new_kont);
                     new_kont
                 }
             }

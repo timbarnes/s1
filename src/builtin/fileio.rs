@@ -1,15 +1,6 @@
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{GcHeap, GcRef, SchemeValue, new_bool};
-
-macro_rules! register_builtin_family {
-    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
-        $(
-            $env.define($heap.intern_symbol($name),
-                crate::gc::new_builtin($heap, $func,
-                    concat!($name, ": builtin function").to_string()));
-        )*
-    };
-}
+use crate::register_builtin_family;
 
 pub fn register_fileio_builtins(heap: &mut GcHeap, env: EnvRef) {
     register_builtin_family!(heap, env,

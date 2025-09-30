@@ -1,6 +1,17 @@
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{GcHeap, GcRef, SchemeValue, new_bool, new_char, new_int};
+use crate::register_builtin_family;
 use num_bigint::BigInt;
+
+pub fn register_char_builtins(heap: &mut GcHeap, env: EnvRef) {
+    register_builtin_family!(heap, env,
+        "char=?" => char_eq,
+        "char<?" => char_lt,
+        "char>?" => char_gt,
+        "char->integer" => char_to_integer,
+        "integer->char" => integer_to_char,
+    );
+}
 
 fn get_char(heap: &mut GcHeap, val: GcRef) -> Result<char, String> {
     match heap.get_value(val) {
@@ -61,24 +72,4 @@ fn integer_to_char(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     } else {
         Err("integer->char: invalid character code".to_string())
     }
-}
-
-macro_rules! register_builtin_family {
-    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
-        $(
-            $env.define($heap.intern_symbol($name),
-                crate::gc::new_builtin($heap, $func,
-                    concat!($name, ": builtin function").to_string()));
-        )*
-    };
-}
-
-pub fn register_char_builtins(heap: &mut GcHeap, env: EnvRef) {
-    register_builtin_family!(heap, env,
-        "char=?" => char_eq,
-        "char<?" => char_lt,
-        "char>?" => char_gt,
-        "char->integer" => char_to_integer,
-        "integer->char" => integer_to_char,
-    );
 }

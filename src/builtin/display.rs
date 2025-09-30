@@ -4,6 +4,15 @@
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{GcHeap, GcRef};
 use crate::printer::{display_value, print_value};
+use crate::register_builtin_family;
+
+pub fn register_display_builtins(heap: &mut GcHeap, env: EnvRef) {
+    register_builtin_family!(heap, env,
+        "write" => write,
+        "display" => display,
+        "newline" => newline,
+    );
+}
 
 /// write a SchemeValue in Scheme-readable format
 ///
@@ -68,12 +77,4 @@ macro_rules! register_builtin_family {
                     concat!($name, ": builtin function").to_string()));
         )*
     };
-}
-
-pub fn register_display_builtins(heap: &mut GcHeap, env: EnvRef) {
-    register_builtin_family!(heap, env,
-        "write" => write,
-        "display" => display,
-        "newline" => newline,
-    );
 }
