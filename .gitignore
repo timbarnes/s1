@@ -1,0 +1,7 @@
+/target
+GEMINI.md
+flamegraph*.svg
+*tmp*
+*.log
+*.log.*
+.DS_store
