@@ -183,7 +183,7 @@ fn garbage_collect_sp(
 ) -> Result<(), String> {
     let timer = Instant::now();
     ec.heap
-        .collect_garbage(state, *ec.current_output_port, ec.port_stack);
+        .collect_garbage(state, *ec.current_output_port, ec.port_stack, ec.dynamic_wind);
     let elapsed_time = timer.elapsed().as_secs_f64();
     let time = new_float(&mut ec.heap, elapsed_time);
     state.control = Control::Value(time);

@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use super::{Callable, GcObject, GcRef, Mark, SchemeValue};
+use crate::eval::DynamicWind;
 use crate::io::PortKind;
 use rustc_hash::FxHashMap as HashMap;
 
@@ -210,6 +211,7 @@ impl GcHeap {
         state: &crate::eval::CEKState,
         current_output_port: GcRef,
         port_stack: &[GcRef],
+        dynamic_wind: &[DynamicWind],
     ) {
         // println!("GC: Starting collection, {} objects, {} in nursery, {} ports in stack",
         //          self.objects.len(), self.nursery.len(), port_stack.len());
@@ -219,7 +221,7 @@ impl GcHeap {
         for obj in &self.objects {
             crate::gc::unmark(*obj);
         }
-        self.mark_from(state, current_output_port, port_stack);
+        self.mark_from(state, current_output_port, port_stack, dynamic_wind);
         self.sweep();
         self.nursery.clear();
     }
@@ -229,6 +231,7 @@ impl GcHeap {
         state: &crate::eval::CEKState,
         current_output_port: GcRef,
         port_stack: &[GcRef],
+        dynamic_wind: &[DynamicWind],
     ) {
         // Temporary vector for all roots (we’ll reuse it)
         // let mut root_set: Vec<GcRef> = Vec::new();
@@ -241,6 +244,11 @@ impl GcHeap {
         mark_reachable(current_output_port, &mut self.worklist);
         for port in port_stack {
             mark_reachable(*port, &mut self.worklist);
+        }
+
+        for dw in dynamic_wind {
+            mark_reachable(dw.before, &mut self.worklist);
+            mark_reachable(dw.after, &mut self.worklist);
         }
 
         // Singleton objects
@@ -258,11 +266,11 @@ impl GcHeap {
             mark_reachable(obj, &mut self.worklist);
         }
 
-        // Symbol table roots - removed, symbols should be marked via environment keys
-        //root_set.extend(self.symbol_table.values().copied());
-        // for &sym in self.symbol_table.values() {
-        //     mark_reachable(sym, &mut self.worklist);
-        // }
+        // Symbol table roots
+        for &sym in self.symbol_table.values() {
+            mark_reachable(sym, &mut self.worklist);
+        }
+
         // Nursery roots — copy pointers into the same vector to end the immutable borrow
         for obj in &self.nursery {
             mark_reachable(*obj, &mut self.worklist);
@@ -312,6 +320,17 @@ fn mark_reachable(start: GcRef, worklist: &mut Vec<GcRef>) {
             SchemeValue::Callable(Callable::Closure { body, env, .. }) => {
                 worklist.push(*body);
                 env.mark(&mut |gcref| worklist.push(gcref));
+            }
+            SchemeValue::Callable(Callable::Macro { body, env, .. }) => {
+                worklist.push(*body);
+                env.mark(&mut |gcref| worklist.push(gcref));
+            }
+            SchemeValue::Continuation(kont, dw_stack) => {
+                kont.mark(&mut |gcref| worklist.push(gcref));
+                for dw in dw_stack {
+                    worklist.push(dw.before);
+                    worklist.push(dw.after);
+                }
             }
             _ => {}
         }

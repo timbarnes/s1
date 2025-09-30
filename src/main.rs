@@ -142,9 +142,10 @@ fn repl(rt: &mut RunTime, state: &mut CEKState, quit_after_load: bool) {
                             for v in result.iter() {
                                 println!("=> {}", print_value(&v));
                                 rt.heap.collect_garbage(
-                                    state,
+                                    &state,
                                     *rt.current_output_port,
-                                    rt.port_stack,
+                                    &rt.port_stack,
+                                    &rt.dynamic_wind,
                                 );
                             }
                         }

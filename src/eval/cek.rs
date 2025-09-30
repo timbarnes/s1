@@ -705,7 +705,7 @@ fn handle_restore_env(
 ) -> Result<(), String> {
     if ec.heap.needs_gc() {
         ec.heap
-            .collect_garbage(state, *ec.current_output_port, ec.port_stack);
+            .collect_garbage(state, *ec.current_output_port, ec.port_stack, ec.dynamic_wind);
     }
     // Restore environment
     state.env = old_env;
