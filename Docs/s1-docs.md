@@ -16,4 +16,4 @@ The documentation is organized into the following sections, following the R5RS s
 * [Input and Output](./input-and-output.md)
 * [System Interface](./system-interface.md)
 * [Miscellaneous](./miscellaneous.md)
-* [Miscellaneous](./miscellaneous.md)
+* [S1 Scheme Extensions](./extensions.md)
