@@ -77,7 +77,7 @@ fn step(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> {
         Control::Values(vals) => {
             eprintln!("step::Values");
             *ec.depth -= 1;
-            dispatch_values_kont(state, vals.clone(), Rc::clone(&state.kont))
+            dispatch_values_kont(state, vals.clone(), Rc::clone(&state.kont), ec)
         }
         Control::Empty => Err("Unexpected Control::Halt in step()".to_string()),
     }
@@ -168,6 +168,7 @@ fn dispatch_values_kont(
     state: &mut CEKState,
     vals: Vec<GcRef>,
     kont: KontRef,
+    rt: &mut RunTime,
 ) -> Result<(), String> {
     eprintln!("dispatch_values_kont: vals = {:?}", vals);
     match &*kont {
@@ -178,7 +179,7 @@ fn dispatch_values_kont(
                 evaluated_args: Rc::new(vals),
                 next: Rc::clone(&next),
             });
-            Ok(())
+            apply_proc(state, rt)
         }
         _ => Err("Unexpected Kont in dispatch_values_kont".to_string()),
     }
