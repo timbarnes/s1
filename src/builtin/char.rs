@@ -10,6 +10,8 @@ pub fn register_char_builtins(heap: &mut GcHeap, env: EnvRef) {
         "char>?" => char_gt,
         "char->integer" => char_to_integer,
         "integer->char" => integer_to_char,
+        "char-upcase" => char_upcase,
+        "char-downcase" => char_downcase,
     );
 }
 
@@ -26,6 +28,23 @@ fn get_integer(heap: &mut GcHeap, val: GcRef) -> Result<i64, String> {
         _ => Err("Expected an integer".to_string()),
     }
 }
+
+fn char_upcase(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 1 {
+        return Err("char-upcase: expected exactly 1 argument".to_string());
+    }
+    let c = get_char(heap, args[0])?;
+    Ok(new_char(heap, c.to_ascii_uppercase()))
+}
+
+fn char_downcase(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 1 {
+        return Err("char-downcase: expected exactly 1 argument".to_string());
+    }
+    let c = get_char(heap, args[0])?;
+    Ok(new_char(heap, c.to_ascii_lowercase()))
+}
+
 
 fn char_eq(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 2 {

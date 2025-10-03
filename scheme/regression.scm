@@ -12,6 +12,7 @@
 (define **failed-tests** '()) ; keep track of test failures
 (define **counter** 0)
 (define **print-successes** #t)
+;(define side-effect-result #f)
 
 (define fails
   (lambda (message)
