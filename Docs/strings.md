@@ -18,7 +18,7 @@ Returns a newly allocated string of length `k`. If `char` is given, then all ele
 
 `(string char ...)`
 
-Returns a newly allocated string composed of the arguments. **Not implemented.**
+Returns a newly allocated string composed of the arguments.
 
 ## `string-length`
 
@@ -58,7 +58,7 @@ Stores `char` in element `k` of `string`.
 
 `(string>=? string1 string2)`
 
-These procedures compare strings in a lexicographical fashion. `string<=?` and `string>=?` are **not implemented**.
+These procedures compare strings in a lexicographical fashion. `string>=?` is **not implemented**.
 
 ## `substring`
 
@@ -82,7 +82,7 @@ Returns a newly allocated list of the characters that make up the given string.
 
 `(list->string list)`
 
-Returns a newly allocated string formed from the characters in `list`. **Not implemented.**
+Returns a newly allocated string formed from the characters in `list`.
 
 ## `string-copy`
 
@@ -94,6 +94,6 @@ Returns a newly allocated copy of the given `string`.
 
 `(string-fill! string char)`
 
-Stores `char` in every element of `string`. **Not implemented.**
+Stores `char` in every element of `string`.
 
 [Home](s1-docs.md)

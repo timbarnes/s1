@@ -72,6 +72,6 @@ Returns the character whose integer representation is `n`.
 
 `(char-downcase char)`
 
-These procedures return a character `char2` such that `(char-downcase char)` returns the lower case version of `char` and `(char-upcase char)` returns the upper case version of `char`. **Not implemented.**
+These procedures return a character `char2` such that `(char-downcase char)` returns the lower case version of `char` and `(char-upcase char)` returns the upper case version of `char`. If the argument is not a letter, it is returned unchanged.
 
 [Home](s1-docs.md)

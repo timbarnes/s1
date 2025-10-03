@@ -18,19 +18,14 @@ This document lists R5RS (Revised^5 Report on the Algorithmic Language Scheme) f
 
 *   `complex?`, `real?`, `rational?`, `integer?` (some predicates are implemented, but not all)
 *   `exact?`, `inexact?`
-*   `exp`, `log`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`
 *   `make-rectangular`, `make-polar`, `real-part`, `imag-part`, `magnitude`, `angle`
 
 ## Characters
 
-*   `char-upcase`, `char-downcase`
 
 ## Strings
 
-*   `string` (from chars)
-*   `string<=?`, `string>=?`
-*   `list->string`
-*   `string-fill!`
+*   `string>=?`
 
 ## Input and Output
 

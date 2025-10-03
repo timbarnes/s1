@@ -128,6 +128,54 @@ Returns the principal square root of `z`.
 
 Returns `z1` raised to the power of `z2`.
 
+## `exp`
+
+`(exp z)`
+
+Returns e raised to the power of `z`.
+
+## `log`
+
+`(log z)`
+
+Returns the natural logarithm of `z`.
+
+## `sin`
+
+`(sin z)`
+
+Returns the sine of `z`.
+
+## `cos`
+
+`(cos z)`
+
+Returns the cosine of `z`.
+
+## `tan`
+
+`(tan z)`
+
+Returns the tangent of `z`.
+
+## `asin`
+
+`(asin z)`
+
+Returns the arcsine of `z`.
+
+## `acos`
+
+`(acos z)`
+
+Returns the arccosine of `z`.
+
+## `atan`
+
+`(atan y x)` or `(atan z)`
+
+With one argument, returns the arctangent of `z`. With two arguments, returns the arctangent of `y/x`.
+
 ## `zero?`
 
 `(zero? n)`
