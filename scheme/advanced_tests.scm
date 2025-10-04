@@ -257,8 +257,8 @@
 
 ;; Additional call/cc regression tests
 ;; Basic call/cc with assignment (the original bug case)
-(define cont1 (call/cc (lambda (k) (k 42))))
-(test-equal 42 cont1 "call/cc assignment should work")
+(define cont2 (call/cc (lambda (k) (k 42))))
+(test-equal 42 cont2 "call/cc assignment should work")
 
 ;; call/cc with nested computation
 (define result1 (call/cc (lambda (k) (+ 10 (k 5) 20))))
