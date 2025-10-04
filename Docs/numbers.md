@@ -128,6 +128,18 @@ Returns the principal square root of `z`.
 
 Returns `z1` raised to the power of `z2`.
 
+## `exact?`
+
+`(exact? n)`
+
+Returns `#t` if `n` is an exact number (an integer in S1), `#f` otherwise. Implemented in `s1-core.scm`.
+
+## `inexact?`
+
+`(inexact? n)`
+
+Returns `#t` if `n` is an inexact number (a float in S1), `#f` otherwise. Implemented in `s1-core.scm`.
+
 ## `exp`
 
 `(exp z)`

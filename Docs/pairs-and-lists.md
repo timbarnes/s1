@@ -138,6 +138,40 @@ These functions provide convenient access to nested list elements. Implemented i
 *   `caaddr`
 *   `cdaddr`
 *   `cdddr`
-*   `cddddr`
+## `empty?`
+
+`(empty? obj)`
+
+Returns `#t` if `obj` is the empty list, and `#f` otherwise. An alias for `null?`. Implemented in `s1-core.scm`.
+
+## `top`
+
+`(top list)`
+
+Returns the first element of a list. An alias for `car`. Implemented in `s1-core.scm`.
+
+## `push!`
+
+`(push! obj list)`
+
+A macro that prepends an element to a list. Equivalent to `(set! list (cons obj list))`. Implemented in `s1-core.scm`.
+
+## `pop!`
+
+`(pop! list)`
+
+A macro that removes and returns the first element of a list. Equivalent to `(let ((result (car list))) (set! list (cdr list)) result)`. Implemented in `s1-core.scm`.
+
+## `zip`
+
+`(zip list ...)`
+
+Returns a list of lists, where the i-th list contains the i-th elements of the input lists. Implemented in `s1-core.scm`.
+
+## `map`
+
+`(map proc list ...)`
+
+Applies `proc` to the elements of the `list`s and returns a list of the results. Implemented in `s1-core.scm`.
 
 [Home](s1-docs.md)

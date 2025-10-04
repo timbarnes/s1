@@ -39,4 +39,18 @@ Controls step and tracing options.
 *   `(trace 'step)`: Enables single stepping.
 *   `(trace 'off)`: Disables tracing and stepping.
 
+## `benchmark`
+
+`(benchmark form count)`
+
+Runs the quoted `form` `count` times and returns the average execution time.
+
+## `def`, `def-fn`, `def-var`
+
+These are macros that provide a more convenient way to create definitions. `def` is a general purpose macro that dispatches to `def-fn` or `def-var` based on the form of the first argument.
+
+`(def (name args...) body ...)` is equivalent to `(define name (lambda (args...) body ...))`.
+
+`(def name value)` is equivalent to `(define name value)`.
+
 [Home](s1-docs.md)

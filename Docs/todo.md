@@ -7,17 +7,14 @@ This document lists R5RS (Revised^5 Report on the Algorithmic Language Scheme) f
 ## Core Syntax/Forms
 
 *   `case`
-*   `delay` (core form, `force` is implemented)
 *   `quasiquote`, `unquote`, `unquote-splicing`
 
 ## Equivalence Predicates
 
-*   `eqv?` (currently implemented as `eq?`)
 
 ## Numbers
 
 *   `complex?`, `real?`, `rational?`, `integer?` (some predicates are implemented, but not all)
-*   `exact?`, `inexact?`
 *   `make-rectangular`, `make-polar`, `real-part`, `imag-part`, `magnitude`, `angle`
 
 ## Characters

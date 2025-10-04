@@ -12,7 +12,7 @@ The `eq?` procedure returns `#t` if `obj1` and `obj2` are the same object, other
 
 `(eqv? obj1 obj2)`
 
-The `eqv?` procedure is similar to `eq?`, but it is more discerning. In S1 Scheme, `eqv?` is currently implemented using the same logic as `eq?`. It returns `#t` if `obj1` and `obj2` are the same object, otherwise it returns `#f`.
+The `eqv?` procedure is similar to `eq?`, but it is more discerning. It returns `#t` if `obj1` and `obj2` are the same object, or if they are equivalent values of certain types (booleans, characters, and numbers).
 
 ## `equal?`
 

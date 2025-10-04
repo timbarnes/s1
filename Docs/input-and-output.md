@@ -24,6 +24,12 @@ Returns `#t` if `obj` is an input port, and `#f` otherwise.
 
 Returns `#t` if `obj` is an output port, and `#f` otherwise.
 
+## `port?`
+
+`(port? obj)`
+
+Returns `#t` if `obj` is a port, and `#f` otherwise. Implemented via `type-of`.
+
 ## `current-input-port`
 
 `(current-input-port)`
@@ -84,6 +90,18 @@ Writes a representation of `obj` to the given `port`.
 
 Writes an end of line to `port`.
 
+## `displayln`
+
+`(displayln obj ...)`
+
+Like `display`, but adds a newline character at the end. Implemented in `s1-core.scm`.
+
+## `writeln`
+
+`(writeln obj ...)`
+
+Like `write`, but adds a newline character at the end. Implemented in `s1-core.scm`.
+
 ## `read-char`
 
 `(read-char [port])`
@@ -112,7 +130,7 @@ Returns `#t` if a character is ready on the input `port` and `#f` otherwise.
 
 `(load filename)`
 
-`filename` must be a string. The `load` procedure reads expressions and definitions from the file and evaluates them sequentially. **Not implemented.**
+`filename` must be a string. The `load` procedure reads expressions and definitions from the file and evaluates them sequentially. Implemented in `s1-core.scm`.
 
 ## `transcript-on`
 
