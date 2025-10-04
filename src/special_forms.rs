@@ -129,8 +129,8 @@ fn create_lambda_or_macro(
         }
     }
 
-    // Wrap the body expressions in (begin ...) if needed
-    let wrapped_body = wrap_body_in_begin(&form[2..], ec.heap);
+    // Transform internal defines to letrec
+    let wrapped_body = transform_internal_defines(&form[2..], ec.heap)?;
 
     // Intern and preserve parameter symbols
     let mut param_map = HashMap::default();
@@ -498,9 +498,12 @@ pub fn letrec_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
     let let_sym = ec.heap.intern_symbol("let");
     let init_bindings_list = list_from_slice(&init_bindings[..], ec.heap);
 
-    // Combine set! expressions with body
+    // Process internal defines in the body
+    let new_body = transform_internal_defines(&formvec[2..], ec.heap)?;
+
+    // Combine set! expressions with new body
     let mut all_exprs = set_exprs;
-    all_exprs.extend_from_slice(&formvec[2..]);
+    all_exprs.push(new_body);
 
     let let_body = wrap_body_in_begin(&all_exprs[..], ec.heap);
     let letrec_as_let = list_from_slice(&[let_sym, init_bindings_list, let_body], ec.heap);
@@ -665,6 +668,70 @@ pub fn do_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), 
 
 /// Utility functions
 ///
+
+fn transform_internal_defines(body_exprs: &[GcRef], heap: &mut GcHeap) -> Result<GcRef, String> {
+    let mut defines = Vec::new();
+    let mut expressions = Vec::new();
+    let mut defines_done = false;
+
+    for expr in body_exprs {
+        if let SchemeValue::Pair(car, _) = heap.get_value(*expr) {
+            if let SchemeValue::Symbol(sym) = heap.get_value(*car) {
+                if sym == "define" {
+                    if defines_done {
+                        return Err("define: must be at the beginning of the body".to_string());
+                    }
+                    defines.push(*expr);
+                    continue;
+                }
+            }
+        }
+        defines_done = true;
+        expressions.push(*expr);
+    }
+
+    if defines.is_empty() {
+        return Ok(wrap_body_in_begin(body_exprs, heap));
+    }
+
+    let mut bindings = Vec::new();
+    for def in defines {
+        let def_vec = list_to_vec(heap, def)?;
+        if def_vec.len() < 3 {
+            return Err("define: invalid syntax".to_string());
+        }
+        match heap.get_value(def_vec[1]) {
+            SchemeValue::Symbol(_) => {
+                // (define var expr)
+                if def_vec.len() != 3 {
+                    return Err("define: variable definition requires exactly 2 arguments".to_string());
+                }
+                let var = def_vec[1];
+                let val_expr = def_vec[2];
+                bindings.push(list2(var, val_expr, heap)?);
+            }
+            SchemeValue::Pair(_, _) => {
+                // (define (name args...) body...)
+                let signature = def_vec[1];
+                let body = &def_vec[2..];
+                let name = car(signature)?;
+                let params = cdr(signature)?;
+                let lambda_sym = heap.intern_symbol("lambda");
+                let lambda_body = wrap_body_in_begin(body, heap);
+                let lambda_expr = list_from_slice(&[lambda_sym, params, lambda_body], heap);
+                bindings.push(list2(name, lambda_expr, heap)?);
+            }
+            _ => return Err("define: invalid syntax".to_string()),
+        }
+    }
+
+    let letrec_sym = heap.intern_symbol("letrec");
+    let bindings_list = list_from_slice(&bindings, heap);
+    let body_expr = wrap_body_in_begin(&expressions, heap);
+    let letrec_expr = list_from_slice(&[letrec_sym, bindings_list, body_expr], heap);
+
+    Ok(letrec_expr)
+}
 
 pub fn wrap_body_in_begin(body_exprs: &[GcRef], heap: &mut GcHeap) -> GcRef {
     if body_exprs.len() == 1 {

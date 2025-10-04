@@ -223,6 +223,25 @@
 (test-equal '(1 2 (3 4)) (mixed 1 2 3 4) "define mixed-arity function")
 (test-equal '(1 2 ()) (mixed 1 2) "define mixed-arity function with no rest args")
 
+(display "          === Testing Local Define === ")
+(newline)
+(test-equal 22 (let () (define foobar 22) foobar) "Local define in let")
+
+(define (test-local-define)
+  (define x 10)
+  (define (y) 20)
+  (+ x (y)))
+
+(test-equal 30 (test-local-define) "Local define in function")
+
+(test-equal 3 (let* () (define x 3) x) "Local define in let*")
+(test-equal 30 (letrec ((even? (lambda (n) (if (= n 0) #t (odd? (- n 1))))) 
+                         (odd? (lambda (n) (if (= n 0) #f (even? (- n 1)))))) 
+                  (define x 10) 
+                  (define y 20) 
+                  (+ x y)) "Local define in letrec")
+
+
 (display "          === Testing List Accessors ===")
 (newline)
 (test-equal 1 (car '(1 2 3)) "car of list")
