@@ -73,3 +73,92 @@ fn integer_to_char(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
         Err("integer->char: invalid character code".to_string())
     }
 }
+
+mod tests {
+    #[allow(unused_imports)]
+    use super::*;
+    #[allow(unused_imports)]
+    use crate::eval::{RunTime, RunTimeStruct};
+    #[allow(unused_imports)]
+    use crate::gc_value;
+
+    #[test]
+    fn test_char_eq() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+        let args = vec![new_char(ec.heap, 'a'), new_char(ec.heap, 'a')];
+        let result = char_eq(&mut ec.heap, &args).unwrap();
+        assert!(matches!(&gc_value!(result), SchemeValue::Bool(true)));
+
+        let args = vec![new_char(ec.heap, 'a'), new_char(ec.heap, 'b')];
+        let result = char_eq(&mut ec.heap, &args).unwrap();
+        assert!(matches!(&gc_value!(result), SchemeValue::Bool(false)));
+    }
+
+    #[test]
+    fn test_char_lt() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+        let args = vec![new_char(ec.heap, 'a'), new_char(ec.heap, 'b')];
+        let result = char_lt(&mut ec.heap, &args).unwrap();
+        assert!(matches!(&gc_value!(result), SchemeValue::Bool(true)));
+
+        let args = vec![new_char(ec.heap, 'b'), new_char(ec.heap, 'a')];
+        let result = char_lt(&mut ec.heap, &args).unwrap();
+        assert!(matches!(&gc_value!(result), SchemeValue::Bool(false)));
+
+        let args = vec![new_char(ec.heap, 'a'), new_char(ec.heap, 'a')];
+        let result = char_lt(&mut ec.heap, &args).unwrap();
+        assert!(matches!(&gc_value!(result), SchemeValue::Bool(false)));
+    }
+
+    #[test]
+    fn test_char_gt() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+        let args = vec![new_char(ec.heap, 'b'), new_char(ec.heap, 'a')];
+        let result = char_gt(&mut ec.heap, &args).unwrap();
+        assert!(matches!(&gc_value!(result), SchemeValue::Bool(true)));
+
+        let args = vec![new_char(ec.heap, 'a'), new_char(ec.heap, 'b')];
+        let result = char_gt(&mut ec.heap, &args).unwrap();
+        assert!(matches!(&gc_value!(result), SchemeValue::Bool(false)));
+
+        let args = vec![new_char(ec.heap, 'a'), new_char(ec.heap, 'a')];
+        let result = char_gt(&mut ec.heap, &args).unwrap();
+        assert!(matches!(&gc_value!(result), SchemeValue::Bool(false)));
+    }
+
+    #[test]
+    fn test_char_to_integer() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+        let args = vec![new_char(ec.heap, 'a')];
+        let result = char_to_integer(&mut ec.heap, &args).unwrap();
+        match &gc_value!(result) {
+            SchemeValue::Int(i) => assert_eq!(*i, BigInt::from(97)),
+            _ => panic!("Expected integer"),
+        }
+    }
+
+    #[test]
+    fn test_integer_to_char() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+        let args = vec![new_int(ec.heap, BigInt::from(97))];
+        let result = integer_to_char(&mut ec.heap, &args).unwrap();
+        match &gc_value!(result) {
+            SchemeValue::Char(c) => assert_eq!(*c, 'a'),
+            _ => panic!("Expected char"),
+        }
+    }
+
+    #[test]
+    fn test_integer_to_char_invalid() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let mut ec = crate::eval::RunTime::from_eval(&mut ev);
+        let args = vec![new_int(ec.heap, BigInt::from(0x110000))];
+        let result = integer_to_char(&mut ec.heap, &args);
+        assert!(result.is_err());
+    }
+}
