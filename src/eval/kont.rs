@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 pub type KontRef = Rc<Kont>;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum Kont {
     Halt,
     AndOr {
@@ -277,26 +277,26 @@ impl std::fmt::Debug for Kont {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 pub enum EvalPhase {
     EvalEnv,
     EvalExpr,
     Done,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum CondClause {
     Normal { test: GcRef, body: Option<GcRef> },
     Arrow { test: GcRef, arrow_proc: GcRef },
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum AndOrKind {
     And,
     Or,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum DynamicWindPhase {
     Thunk,
     After,

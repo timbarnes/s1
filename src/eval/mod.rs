@@ -59,7 +59,7 @@ pub enum TraceType {
     Off,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DynamicWind {
     pub id: u32,
     pub before: GcRef,

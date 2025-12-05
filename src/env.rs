@@ -15,7 +15,7 @@ use std::rc::Rc;
 pub type EnvRef = Rc<RefCell<Frame>>;
 
 /// A single environment frame containing variable bindings
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Frame {
     pub bindings: HashMap<GcRef, GcRef>,
     pub parent: Option<EnvRef>,

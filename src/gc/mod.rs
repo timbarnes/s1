@@ -80,6 +80,7 @@ pub struct GcObject {
     pub marked: bool,
 }
 
+#[derive(Debug, PartialEq)]
 pub enum Callable {
     // Standard library / core functions
     Builtin {
@@ -111,6 +112,7 @@ pub enum Callable {
 }
 
 /// Scheme values that use GcRef references.
+#[derive(Debug, PartialEq)]
 pub enum SchemeValue {
     Int(BigInt),
     Float(f64),
