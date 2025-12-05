@@ -25,8 +25,85 @@ pub fn register_number_builtins(heap: &mut GcHeap, env: EnvRef) {
         "round" => round_b,
         "sqrt" => sqrt_b,
         "expt" => expt_b,
+        "exp" => exp_b,
+        "log" => log_b,
+        "sin" => sin_b,
+        "cos" => cos_b,
+        "tan" => tan_b,
+        "asin" => asin_b,
+        "acos" => acos_b,
+        "atan" => atan_b,
     );
 }
+
+macro_rules! unary_op {
+    ($heap:expr, $args:expr, $func:ident, $op:tt) => {
+        if $args.len() != 1 {
+            Err(format!("{}: expects exactly 1 argument", stringify!($func)))
+        } else {
+            let num = match &gc_value!($args[0]) {
+                SchemeValue::Int(i) => i.to_f64().unwrap(),
+                SchemeValue::Float(f) => *f,
+                _ => return Err(format!("{}: argument must be a number", stringify!($func))),
+            };
+            Ok(new_float($heap, num.$op()))
+        }
+    };
+}
+
+pub fn exp_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    unary_op!(heap, args, exp, exp)
+}
+
+pub fn log_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    unary_op!(heap, args, log, ln)
+}
+
+pub fn sin_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    unary_op!(heap, args, sin, sin)
+}
+
+pub fn cos_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    unary_op!(heap, args, cos, cos)
+}
+
+pub fn tan_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    unary_op!(heap, args, tan, tan)
+}
+
+pub fn asin_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    unary_op!(heap, args, asin, asin)
+}
+
+pub fn acos_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    unary_op!(heap, args, acos, acos)
+}
+
+pub fn atan_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() == 1 {
+        let num = match &gc_value!(args[0]) {
+            SchemeValue::Int(i) => i.to_f64().unwrap(),
+            SchemeValue::Float(f) => *f,
+            _ => return Err("atan: argument must be a number".to_string()),
+        };
+        Ok(new_float(heap, num.atan()))
+    } else if args.len() == 2 {
+        let y = match &gc_value!(args[0]) {
+            SchemeValue::Int(i) => i.to_f64().unwrap(),
+            SchemeValue::Float(f) => *f,
+            _ => return Err("atan: arguments must be numbers".to_string()),
+        };
+        let x = match &gc_value!(args[1]) {
+            SchemeValue::Int(i) => i.to_f64().unwrap(),
+            SchemeValue::Float(f) => *f,
+            _ => return Err("atan: arguments must be numbers".to_string()),
+        };
+        Ok(new_float(heap, y.atan2(x)))
+    } else {
+        Err("atan: expects 1 or 2 arguments".to_string())
+    }
+}
+
 
 pub fn plus_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     match args.len() {

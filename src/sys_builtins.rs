@@ -245,7 +245,6 @@ fn call_cc_sp(
     call.push(list(*closure, ec.heap)?);
     // 4. Call func with the escape closure as an argument
     apply_sp(ec, &call[..], state, Rc::clone(&next))?;
-    state.kont = next;
     Ok(())
 }
 
@@ -337,7 +336,6 @@ fn call_with_values_sp(
     // Evaluate the producer thunk
     state.control = Control::Expr(list(producer, ec.heap)?);
     // dump_cek("call_with_values_sp", state);
-    state.kont = next;
     Ok(())
 }
 

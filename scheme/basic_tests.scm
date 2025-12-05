@@ -223,6 +223,25 @@
 (test-equal '(1 2 (3 4)) (mixed 1 2 3 4) "define mixed-arity function")
 (test-equal '(1 2 ()) (mixed 1 2) "define mixed-arity function with no rest args")
 
+(display "          === Testing Local Define === ")
+(newline)
+(test-equal 22 (let () (define foobar 22) foobar) "Local define in let")
+
+(define (test-local-define)
+  (define x 10)
+  (define (y) 20)
+  (+ x (y)))
+
+(test-equal 30 (test-local-define) "Local define in function")
+
+(test-equal 3 (let* () (define x 3) x) "Local define in let*")
+(test-equal 30 (letrec ((even? (lambda (n) (if (= n 0) #t (odd? (- n 1))))) 
+                         (odd? (lambda (n) (if (= n 0) #f (even? (- n 1)))))) 
+                  (define x 10) 
+                  (define y 20) 
+                  (+ x y)) "Local define in letrec")
+
+
 (display "          === Testing List Accessors ===")
 (newline)
 (test-equal 1 (car '(1 2 3)) "car of list")
@@ -456,3 +475,40 @@
 (test-equal '(720) (list (fac-acc 6)) "Tail recursion inside a form")
 (define test-tail (lambda (n) (if (= n 0) #t (test-tail (- n 1)))))
 (test-true (test-tail 7000) "(test-tail 7000) - fails without tail recursion")
+
+(display "          === Testing Advanced Math === ")
+(newline)
+(test-equal 1.0 (exp 0) "exp of 0 is 1.0")
+(test-true (> (exp 1) 2.718) "exp of 1 is > 2.718")
+(test-true (< (exp 1) 2.719) "exp of 1 is < 2.719")
+(test-equal 0.0 (log 1) "log of 1 is 0.0")
+(test-equal 1.0 (log (exp 1)) "log of exp of 1 is 1.0")
+(test-equal 0.0 (sin 0) "sin of 0 is 0.0")
+(test-equal 1.0 (cos 0) "cos of 0 is 1.0")
+(test-equal 0.0 (tan 0) "tan of 0 is 0.0")
+(test-equal 0.0 (asin 0) "asin of 0 is 0.0")
+(test-true (> (acos 0) 1.57) "acos of 0 is > 1.57")
+(test-true (< (acos 0) 1.58) "acos of 0 is < 1.58")
+(test-equal 0.0 (atan 0) "atan of 0 is 0.0")
+
+(display "          === Testing Char Case === ")
+(newline)
+(test-equal #\A (char-upcase #\a) "char-upcase on lowercase")
+(test-equal #\A (char-upcase #\A) "char-upcase on uppercase")
+(test-equal #\a (char-downcase #\A) "char-downcase on uppercase")
+(test-equal #\a (char-downcase #\a) "char-downcase on lowercase")
+(test-equal #\1 (char-upcase #\1) "char-upcase on non-alphabetic")
+(test-equal #\1 (char-downcase #\1) "char-downcase on non-alphabetic")
+
+(display "          === Testing More String Functions === ")
+(newline)
+(test-equal "abc" (string #\a #\b #\c) "string constructor")
+(test-true (string<=? "abc" "abd") "string<=? less")
+(test-true (string<=? "abc" "abc") "string<=? equal")
+(test-false (string<=? "abd" "abc") "string<=? greater")
+(test-equal "abc" (list->string '(#\a #\b #\c)) "list->string")
+(define s (string-copy "abc"))
+(string-fill! s #\z)
+(test-equal "zzz" s "string-fill!")
+
+

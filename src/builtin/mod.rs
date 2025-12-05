@@ -101,7 +101,11 @@ fn gc_threshold(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
                 }
                 _ => return Err("threshold must be an integer".to_string()),
             };
-            heap.threshold = new_threshold;
+            if new_threshold == 0 {
+                heap.threshold = usize::MAX;
+            } else {
+                heap.threshold = new_threshold;
+            }
             Ok(new_int(heap, num_bigint::BigInt::from(new_threshold)))
         }
         _ => Err("gc-threshold: expected 0 or 1 arguments".to_string()),

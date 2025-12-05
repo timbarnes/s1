@@ -36,7 +36,76 @@ pub fn register_string_builtins(heap: &mut GcHeap, env: EnvRef) {
         "make-string" => make_string,
         "string-set!" => string_set,
         "string->list" => string_to_list,
+        "string" => string,
+        "string<=?" => string_less_than_equal,
+        "list->string" => list_to_string,
+        "string-fill!" => string_fill,
     );
+}
+
+/// (string char1 [char2 ..])
+/// Create a string from the provided characters
+fn string(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    let mut s = String::new();
+    for arg in args {
+        let c = get_char(heap, *arg)?;
+        s.push(c);
+    }
+    Ok(new_string(heap, &s))
+}
+
+/// (string<=? s1 s2)
+fn string_less_than_equal(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() == 2 {
+        let s1 = get_string(heap, args[0])?;
+        let s2 = get_string(heap, args[1])?;
+        let result = new_bool(heap, s1 <= s2);
+        Ok(result)
+    } else {
+        Err("string<=? expects exactly two arguments".to_string())
+    }
+}
+
+/// (list->string list)
+/// Returns a newly allocated string of the characters that make up the given list.
+fn list_to_string(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() == 1 {
+        let mut s = String::new();
+        let mut current = args[0];
+        loop {
+            let (h, t) = match heap.get_value(current) {
+                SchemeValue::Pair(h, t) => (*h, *t),
+                SchemeValue::Nil => break,
+                _ => return Err("list->string: not a proper list".to_string()),
+            };
+            let c = get_char(heap, h)?;
+            s.push(c);
+            current = t;
+        }
+        Ok(new_string(heap, &s))
+    } else {
+        Err("list->string expects exactly one argument".to_string())
+    }
+}
+
+/// (string-fill! string char)
+/// Stores char in every element of string and returns an unspecified value.
+fn string_fill(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() == 2 {
+        let str_ref = args[0];
+        let c = get_char(heap, args[1])?;
+        match heap.get_value_mut(str_ref) {
+            SchemeValue::Str(s) => {
+                let len = s.chars().count();
+                let new_s: String = std::iter::repeat(c).take(len).collect();
+                *s = new_s;
+                Ok(heap.unspecified())
+            }
+            _ => Err("string-fill!: not a string".to_string()),
+        }
+    } else {
+        Err("string-fill! expects two arguments".to_string())
+    }
 }
 
 /// (>string arg)
