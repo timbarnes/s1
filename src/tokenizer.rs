@@ -10,12 +10,12 @@
 //! use s1::{Port, PortKind};
 //!
 //! // Create a string port for testing
-//! let port = Port { kind: PortKind::StringPort { content: "hello world.to_string(), pos: 0 } };
+//! let port = Port { kind: PortKind::StringPort { content: "hello world.to_string(), pos: 0" } };
 //!
 //! let mut tokenizer = Tokenizer::new(port);
 //!
 //! // Read tokens
-//! assert_eq!(tokenizer.next_token(), Some(Token::Symbol("hello.to_string())));
+//! assert_eq!(tokenizer.next_token(), Some(Token::Symbol("hello.to_string()')));
 //! assert_eq!(tokenizer.next_token(), Some(Token::Symbol("world.to_string())));
 //! assert_eq!(tokenizer.next_token(), None);
 //! ```
@@ -43,6 +43,8 @@ pub enum Token {
     LeftBracket,
     /// Right bracket (for vectors)
     RightBracket,
+    /// Hash paren (for vectors)
+    HashParen,
     /// Single quote (for quoted forms)
     Quote,
     /// Dot (for dotted pairs)
@@ -61,7 +63,6 @@ pub enum Token {
 pub struct Tokenizer<'a> {
     port_kind: &'a mut PortKind,
     buffer: Vec<char>,
-    vector_depth: usize,
 }
 
 impl<'a> Tokenizer<'a> {
@@ -69,7 +70,6 @@ impl<'a> Tokenizer<'a> {
         Tokenizer {
             port_kind,
             buffer: Vec::new(),
-            vector_depth: 0,
         }
     }
 
@@ -92,8 +92,9 @@ impl<'a> Tokenizer<'a> {
     fn skip_whitespace_and_comments(&mut self) {
         loop {
             match self.read_char() {
-                Some(c) if c.is_whitespace() => {}
+                Some(c) if c.is_whitespace() => {} // Whitespace is ignored
                 Some(';') => {
+                    // Skip comments until newline
                     while let Some(c) = self.read_char() {
                         if c == '\n' {
                             break;
@@ -104,7 +105,7 @@ impl<'a> Tokenizer<'a> {
                     self.unread_char(c);
                     break;
                 }
-                None => break,
+                None => break, // End of input
             }
         }
     }
@@ -119,13 +120,12 @@ impl<'a> Tokenizer<'a> {
         loop {
             match self.read_char() {
                 Some(c)
-                    if c.is_ascii_digit()
-                        || c == '.'
-                        || c == 'e'
-                        || c == 'E'
-                        || c == '+'
-                        || c == '-' =>
-                {
+                    if c.is_ascii_digit() 
+                        || c == '.' 
+                        || c == 'e' 
+                        || c == 'E' 
+                        || c == '+' 
+                        || c == '-' => {
                     number.push(c);
                 }
                 Some(c) => {
@@ -327,30 +327,20 @@ impl<'a> Tokenizer<'a> {
                     None => Some(Token::Symbol(self.read_symbol(c))),
                 }
             }
+            Some('\'') => Some(Token::Quote), // Inserted single quote arm
+            Some('"') => self.read_string().map(Token::String), // This is the string literal arm
             Some(c) if c.is_alphabetic() || "!$%&*/:<=>?^_~@".contains(c) => {
                 Some(Token::Symbol(self.read_symbol(c)))
             }
-            Some('"') => self.read_string().map(Token::String),
             Some('(') => Some(Token::LeftParen),
-            Some(')') => {
-                if self.vector_depth > 0 {
-                    self.vector_depth -= 1;
-                    Some(Token::RightBracket)
-                } else {
-                    Some(Token::RightParen)
-                }
-            }
+            Some(')') => Some(Token::RightParen),
             Some('[') => Some(Token::LeftBracket),
             Some(']') => Some(Token::RightBracket),
-            Some('\'') => Some(Token::Quote),
             Some('.') => Some(Token::Dot),
             Some('#') => {
-                // Check for vector start #( ... )
+                // Check for vector start #(" ... ")
                 match self.read_char() {
-                    Some('(') => {
-                        self.vector_depth += 1;
-                        Some(Token::LeftBracket)
-                    }
+                    Some('(') => Some(Token::HashParen),
                     Some(c) => {
                         self.unread_char(c);
                         self.read_boolean_or_char()

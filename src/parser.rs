@@ -130,6 +130,19 @@ fn parse_vector_token(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<Gc
     Ok(new_vector(heap, vec_elems))
 }
 
+fn parse_hash_vector(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<GcRef, ParseError> {
+    let list = parse_list(heap, tokenizer)?;
+    let vec = crate::gc::list_to_vec(heap, list);
+    match vec {
+        Ok(vec) => Ok(new_vector(heap, vec)),
+        Err(err) => Err(ParseError::Syntax(format!(
+            "Error converting list to vector: {}",
+            err
+        ))),
+    }
+    //Ok(new_vector(heap, vec))
+}
+
 /// Parse an s-expression from a given token (used for list elements and recursive parsing).
 fn parse_from_token(
     heap: &mut GcHeap,
@@ -148,6 +161,7 @@ fn parse_from_token(
         Some(Token::Quote) => parse_quoted_expression(heap, tokenizer, "quote".to_string()),
         Some(Token::LeftBracket) => parse_vector_token(heap, tokenizer),
         Some(Token::RightBracket) => Err(ParseError::Syntax("Unexpected ']'".to_string())),
+        Some(Token::HashParen) => parse_hash_vector(heap, tokenizer),
         Some(Token::QuasiQuote) => {
             parse_quoted_expression(heap, tokenizer, "quasiquote".to_string())
         }
@@ -241,7 +255,6 @@ mod tests {
         use crate::printer::print_value;
         let mut ev = crate::eval::RunTimeStruct::new();
         let ec = crate::eval::RunTime::from_eval(&mut ev);
-        let _port = crate::io::new_string_port_input("hello");
         let mut port = crate::io::new_string_port_input("\"hello world\"");
         let expr = parse(ec.heap, &mut port).unwrap();
         match &ec.heap.get_value(expr) {
@@ -255,11 +268,10 @@ mod tests {
         use crate::printer::print_value;
         let mut ev = crate::eval::RunTimeStruct::new();
         let ec = crate::eval::RunTime::from_eval(&mut ev);
-        let _port = crate::io::new_string_port_input("hello");
         let mut port = crate::io::new_string_port_input("nil");
         let expr = parse(ec.heap, &mut port).unwrap();
         match &ec.heap.get_value(expr) {
-            crate::gc::SchemeValue::Nil => assert!(true), // Success
+            crate::gc::SchemeValue::Nil => (),
             _ => panic!("Expected nil, got {}", print_value(&expr)),
         }
     }
@@ -270,7 +282,6 @@ mod tests {
         use crate::printer::print_value;
         let mut ev = crate::eval::RunTimeStruct::new();
         let ec = crate::eval::RunTime::from_eval(&mut ev);
-        //let mut str_port = crate::io::new_string_port_input("hello");
         let mut str_port = crate::io::new_string_port_input("(1 2 3)");
         let expr = parse(ec.heap, &mut str_port).unwrap();
 
@@ -299,7 +310,7 @@ mod tests {
                                     }
                                 }
                                 match &ec.heap.get_value(*cdr3) {
-                                    SchemeValue::Nil => assert!(true), // Success
+                                    SchemeValue::Nil => (),
                                     _ => panic!("Expected nil, got {}", print_value(cdr3)),
                                 }
                             }
@@ -339,17 +350,16 @@ mod tests {
         use crate::printer::print_value;
         let mut ev = crate::eval::RunTimeStruct::new();
         let ec = crate::eval::RunTime::from_eval(&mut ev);
-        let heap = GcHeap::new();
         let mut port = crate::io::new_string_port_input("#\\a #\\space");
 
         let expr = parse(ec.heap, &mut port).unwrap();
-        match &heap.get_value(expr) {
+        match &ec.heap.get_value(expr) {
             SchemeValue::Char(c) => assert_eq!(*c, 'a'),
             _ => panic!("Expected character 'a', got {}", print_value(&expr)),
         }
 
         let expr = parse(ec.heap, &mut port).unwrap();
-        match &heap.get_value(expr) {
+        match &ec.heap.get_value(expr) {
             SchemeValue::Char(c) => assert_eq!(*c, ' '),
             _ => panic!("Expected character ' ', got {}", print_value(&expr)),
         }
@@ -361,24 +371,23 @@ mod tests {
         use crate::printer::print_value;
         let mut ev = crate::eval::RunTimeStruct::new();
         let ec = crate::eval::RunTime::from_eval(&mut ev);
-        let heap = GcHeap::new();
         let mut port = crate::io::new_string_port_input("'hello");
         let expr = parse(ec.heap, &mut port).unwrap();
 
-        match &heap.get_value(expr) {
+        match &ec.heap.get_value(expr) {
             SchemeValue::Pair(quote_sym, quoted_expr) => {
-                match &heap.get_value(*quote_sym) {
+                match &ec.heap.get_value(*quote_sym) {
                     SchemeValue::Symbol(s) => assert_eq!(s, "quote"),
                     _ => panic!("Expected symbol 'quote', got {}", print_value(quote_sym)),
                 }
-                match &heap.get_value(*quoted_expr) {
+                match &ec.heap.get_value(*quoted_expr) {
                     SchemeValue::Pair(hello_sym, nil) => {
-                        match &heap.get_value(*hello_sym) {
+                        match &ec.heap.get_value(*hello_sym) {
                             SchemeValue::Symbol(s) => assert_eq!(s, "hello"),
                             _ => panic!("Expected symbol 'hello', got {}", print_value(hello_sym)),
                         }
-                        match &heap.get_value(*nil) {
-                            SchemeValue::Nil => assert!(true), // Success
+                        match &ec.heap.get_value(*nil) {
+                            SchemeValue::Nil => (),
                             _ => panic!("Expected nil, got {}", print_value(nil)),
                         }
                     }
