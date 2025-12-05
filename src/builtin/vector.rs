@@ -5,19 +5,19 @@ use crate::gc::{GcHeap, GcRef, SchemeValue, list_from_slice, list_to_vec, new_in
 use crate::register_builtin_family;
 use crate::{gc_value, gc_value_mut};
 use num_bigint::BigInt;
-use num_traits::{Signed, ToPrimitive, Zero};
+use num_traits::{Signed, ToPrimitive};
 use std::vec;
 
 pub fn register_vector_builtins(heap: &mut crate::gc::GcHeap, env: EnvRef) {
     register_builtin_family!(heap, env,
-        "vector" => vector,
-        "make-vector" => make_vector,
-        "vector-length" => vector_length,
-        "vector-ref" => vector_ref,
-        "vector-set!" => vector_set,
-        "vector->list" => vector_to_list,
-        "list->vector" => list_to_vector,
-        "vector-fill!" => vector_fill,
+        "vector" => (vector, "(vector arg1 arg2 ...) Create a new vector from a list of arguments"),
+        "make-vector" => (make_vector, "(make-vector length [default]) Make a vector of specified length and optionally initializes it with a default value"),
+        "vector-length" => (vector_length, "(vector-length vector) Get the length of a vector"),
+        "vector-ref" => (vector_ref, "(vector-ref vector index) Get the element at the specified index in a vector"),
+        "vector-set!" => (vector_set, "(vector-set! vector index value) Set the element at the specified index in a vector"),
+        "vector->list" => (vector_to_list, "(vector->list vector) Convert a vector to a list"),
+        "list->vector" => (list_to_vector, "(list->vector list) Convert a list to a vector"),
+        "vector-fill!" => (vector_fill, "(vector-fill! vector value) Fill a vector with a specified value"),
     );
 }
 

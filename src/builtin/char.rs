@@ -5,13 +5,14 @@ use num_bigint::BigInt;
 
 pub fn register_char_builtins(heap: &mut GcHeap, env: EnvRef) {
     register_builtin_family!(heap, env,
-        "char=?" => char_eq,
-        "char<?" => char_lt,
-        "char>?" => char_gt,
-        "char->integer" => char_to_integer,
-        "integer->char" => integer_to_char,
-        "char-upcase" => char_upcase,
-        "char-downcase" => char_downcase,
+        "char=?" => (char_eq, "(char=? char1 char2) Compare two characters for equality"),
+        "char<?" => (char_lt, "(char<? char1 char2) Compare two characters for less than"),
+        "char>?" => (char_gt, "(char>? char1 char2) Compare two characters for greater than"),
+        "char=?=" => (char_eq, "(char=? char1 char2) Compare two characters for equality"),
+        "char->integer" => (char_to_integer, "(char->integer char) Convert a character to an integer"),
+        "integer->char" => (integer_to_char, "(integer->char integer) Convert an integer to a character"),
+        "char-upcase" => (char_upcase, "(char-upcase char) Convert a character to uppercase"),
+        "char-downcase" => (char_downcase, "(char-downcase char) Convert a character to lowercase"),
     );
 }
 
@@ -44,7 +45,6 @@ fn char_downcase(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     let c = get_char(heap, args[0])?;
     Ok(new_char(heap, c.to_ascii_lowercase()))
 }
-
 
 fn char_eq(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 2 {

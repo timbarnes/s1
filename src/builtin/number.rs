@@ -7,32 +7,33 @@ use num_traits::{One, ToPrimitive, Zero};
 
 pub fn register_number_builtins(heap: &mut GcHeap, env: EnvRef) {
     register_builtin_family!(heap, env,
-        "+" => plus_b,
-        "-" => minus_b,
-        "*" => times_b,
-        "/" => div_b,
-        "modulo" => mod_b,
-        "=" => eq_b,
-        "<" => lt_b,
-        ">" => gt_b,
-        "quotient" => quotient_b,
-        "remainder" => remainder_b,
-        "numerator" => numerator_b,
-        "denominator" => denominator_b,
-        "floor" => floor_b,
-        "ceiling" => ceiling_b,
-        "truncate" => truncate_b,
-        "round" => round_b,
-        "sqrt" => sqrt_b,
-        "expt" => expt_b,
-        "exp" => exp_b,
-        "log" => log_b,
-        "sin" => sin_b,
-        "cos" => cos_b,
-        "tan" => tan_b,
-        "asin" => asin_b,
-        "acos" => acos_b,
-        "atan" => atan_b,
+        "+" => (plus_b, "(+ [n ..]) Returns the sum of all arguments"),
+        "-" => (minus_b, "(- [n ..]) Returns the difference of all arguments"),
+        "*" => (times_b, "(* [n ..]) Returns the product of all arguments"),
+        "/" => (div_b, "(/ [n ..]) Returns the quotient of all arguments"),
+        "modulo" => (mod_b, "(modulo n m) Returns the remainder of n divided by m"),
+        "remainder" => (remainder_b, "(remainder n m) Returns the remainder of n divided by m"),
+        "=" => (eq_b, "(= [n ..]) Returns true if all arguments are equal"),
+        "<" => (lt_b, "(< [n ..]) Returns true if all arguments are in ascending order"),
+        ">" => (gt_b, "(> [n ..]) Returns true if all arguments are in descending order"),
+        "quotient" => (quotient_b, "(quotient n m) Returns the integer quotient of n divided by m"),
+        "remainder" => (remainder_b, "(remainder n m) Returns the remainder of n divided by m"),
+        "numerator" => (numerator_b, "(numerator n) Returns the numerator of n"),
+        "denominator" => (denominator_b, "(denominator n) Returns the denominator of n"),
+        "floor" => (floor_b, "(floor n) Returns the largest integer less than or equal to n"),
+        "ceiling" => (ceiling_b, "(ceiling n) Returns the smallest integer greater than or equal to n"),
+        "truncate" => (truncate_b, "(truncate n) Returns the integer part of n"),
+        "round" => (round_b, "(round n) Returns the nearest integer to n"),
+        "sqrt" => (sqrt_b, "(sqrt n) Returns the square root of n"),
+        "expt" => (expt_b, "(expt n m) Returns n raised to the power of m"),
+        "exp" => (exp_b, "(exp n) Returns e raised to the power of n"),
+        "log" => (log_b, "(log n) Returns the natural logarithm of n"),
+        "sin" => (sin_b, "(sin n) Returns the sine of n"),
+        "cos" => (cos_b, "(cos n) Returns the cosine of n"),
+        "tan" => (tan_b, "(tan n) Returns the tangent of n"),
+        "asin" => (asin_b, "(asin n) Returns the arcsine of n"),
+        "acos" => (acos_b, "(acos n) Returns the arccosine of n"),
+        "atan" => (atan_b, "(atan n) Returns the arctangent of n"),
     );
 }
 
@@ -103,7 +104,6 @@ pub fn atan_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
         Err("atan: expects 1 or 2 arguments".to_string())
     }
 }
-
 
 pub fn plus_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     match args.len() {

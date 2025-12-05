@@ -24,11 +24,11 @@ pub fn register_builtins(heap: &mut GcHeap, env: EnvRef) {
     string::register_string_builtins(heap, env.clone());
     vector::register_vector_builtins(heap, env.clone());
     register_builtin_family!(heap, env.clone(),
-        "help" => help,
-        "exit" => exit,
-        "void" => void,
-        "gc-threshold" => gc_threshold,
-        "shell" => shell,
+        "help" => (help, "(help symbol) Get help for a symbol"),
+        "exit" => (exit, "(exit) Exit the interpreter"),
+        "void" => (void, "(void) Return the void object"),
+        "gc-threshold" => (gc_threshold, "(gc-threshold [new-threshold]) Get or set the GC threshold"),
+        "shell" => (shell, "(shell command-string) Execute a shell command"),
     );
 }
 

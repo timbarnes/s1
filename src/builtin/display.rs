@@ -10,9 +10,9 @@ use std::io::Write;
 
 pub fn register_display_builtins(heap: &mut GcHeap, env: EnvRef) {
     register_builtin_family!(heap, env,
-        "write" => write,
-        "display" => display,
-        "newline" => newline,
+        "write" => (write, "(write value [port]) write a SchemeValue in Scheme-readable format"),
+        "display" => (display, "(display value [port]) print a SchemeValue in human-readable format"),
+        "newline" => (newline, "(newline [port]) print a newline character"),
     );
 }
 

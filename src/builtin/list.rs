@@ -6,17 +6,17 @@ use num_traits::ToPrimitive;
 
 pub fn register_list_builtins(heap: &mut GcHeap, env: EnvRef) {
     register_builtin_family!(heap, env,
-        "car" => car_builtin,
-        "cdr" => cdr_builtin,
-        "set-car!" => set_car_builtin,
-        "set-cdr!" => set_cdr_builtin,
-        "cons" => cons_builtin,
-        "list" => list_builtin,
-        "append" => append_builtin,
-        "reverse" => reverse_builtin,
-        "list-tail" => list_tail_builtin,
-        "list-ref" => list_ref_builtin,
-        "length" => length_builtin,
+        "car" => (car_builtin, "(car pair) -> first element of pair"),
+        "cdr" => (cdr_builtin, "(cdr pair) -> second element of pair"),
+        "set-car!" => (set_car_builtin, "(set-car! pair value) -> set first element of pair"),
+        "set-cdr!" => (set_cdr_builtin, "(set-cdr! pair value) -> set second element of pair"),
+        "cons" => (cons_builtin, "(cons car cdr) -> create new pair"),
+        "list" => (list_builtin, "(list elem...) -> create new list"),
+        "append" => (append_builtin, "(append list...) -> append lists"),
+        "reverse" => (reverse_builtin, "(reverse list) -> reverse list"),
+        "list-tail" => (list_tail_builtin, "(list-tail list n) -> nth element of list"),
+        "list-ref" => (list_ref_builtin, "(list-ref list n) -> nth element of list"),
+        "length" => (length_builtin, "(length list) -> length of list"),
     );
 }
 

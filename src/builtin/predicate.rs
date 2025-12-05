@@ -5,10 +5,10 @@ use crate::register_builtin_family;
 
 pub fn register_predicate_builtins(heap: &mut crate::gc::GcHeap, env: EnvRef) {
     register_builtin_family!(heap, env,
-        "type-of" => type_of,
-        "equal?" => equal_q,
-        "number?" => number_q,
-        "eq?" => eq_q,
+        "type-of" => (type_of, "(type-of <value>) Returns a symbol representing the type of the value"),
+        "equal?" => (equal_q, "(equal? <value1> <value2>) Returns true if the values are equal"),
+        "number?" => (number_q, "(number? <value>) Returns true if the value is a number"),
+        "eq?" => (eq_q, "(eq? <value1> <value2>) Returns true if the values are the same object"),
     );
 }
 

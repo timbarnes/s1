@@ -11,11 +11,10 @@ use std::rc::Rc;
 
 #[macro_export]
 macro_rules! register_builtin_family {
-    ($heap:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
+    ($heap:expr, $env:expr, $($name:expr => ($func:expr, $doc:expr)),* $(,)?) => {
         $(
             $env.define($heap.intern_symbol($name),
-                crate::gc::new_builtin($heap, $func,
-                    concat!($name, ": builtin function").to_string()));
+                crate::gc::new_builtin($heap, $func, $doc.to_string()));
         )*
     };
 }

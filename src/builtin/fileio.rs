@@ -4,9 +4,9 @@ use crate::register_builtin_family;
 
 pub fn register_fileio_builtins(heap: &mut GcHeap, env: EnvRef) {
     register_builtin_family!(heap, env,
-        "eof-object?" => eof_object_q,
-        "input-port?" => input_port_q,
-        "output-port?" => output_port_q,
+        "eof-object?" => (eof_object_q, "(eof-object? obj) -> #t or #f"),
+        "input-port?" => (input_port_q, "(input-port? obj) -> #t or #f"),
+        "output-port?" => (output_port_q, "(output-port? obj) -> #t or #f"),
     );
 }
 
