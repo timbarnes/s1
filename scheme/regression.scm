@@ -3,6 +3,9 @@
 (displayln "         =====Basic Tests=====")
 (load "scheme/basic_tests.scm")
 
+(displayln "         =====Macro Tests=====")
+(load "scheme/macro_tests.scm")
+
 (displayln "         =====Advanced Tests=====")
 (load "scheme/advanced_tests.scm")
 
