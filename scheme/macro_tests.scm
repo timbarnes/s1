@@ -186,3 +186,92 @@
 ;; Macro generating quoted data (literal list)
 (define m-data (macro (a b) `'(,a ,b)))
 (test-equal '(1 2) (m-data 1 2) "macro generates quoted list literal")
+
+(display "          === Testing Quasiquote at top level ===")
+(newline)
+
+;; Quasiquote works outside any macro context
+(define **qq-a** 10)
+(test-equal '(1 10 3) `(1 ,**qq-a** 3) "top-level unquote")
+(test-equal '(1 2 3 4) `(1 ,@'(2 3) 4) "top-level splice")
+(test-equal '(3 12) `(,(+ 1 2) ,(* 3 4)) "top-level computed unquotes")
+(test-equal '(a b c) `(a b c) "top-level qq without unquotes")
+(test-equal '(1 2 3) `(,@'(1 2 3)) "top-level all-splice")
+(test-equal '(5 6 7 8) (let ((x 5) (y '(6 7))) `(,x ,@y 8)) "qq inside let")
+(test-equal '() `() "qq of empty list")
+
+(display "          === Testing defmacro-style macro bodies ===")
+(newline)
+
+;; Macro body is ordinary Scheme code, evaluated at expansion time.
+;; The returned value is the expansion.
+
+;; if at expansion time selects which template to return
+(define m-if (macro (x) (if x `(list ,x) `(list 22))))
+(test-equal '(7) (m-if 7) "if at expansion - truthy")
+(test-equal '(22) (m-if #f) "if at expansion - falsy")
+
+;; let at expansion time computes a value before quasiquoting
+(define m-let (macro (x) (let ((y (+ 1 2))) `(+ ,x ,y))))
+(test-equal 13 (m-let 10) "let at expansion time")
+
+;; cond at expansion time dispatches on literal arg
+(define m-cond (macro (n)
+    (cond ((eq? n 0) `'zero)
+          ((eq? n 1) `'one)
+          (else `'other))))
+(test-equal 'zero (m-cond 0) "cond at expansion - 0")
+(test-equal 'one (m-cond 1) "cond at expansion - 1")
+(test-equal 'other (m-cond 5) "cond at expansion - other")
+
+;; Direct list construction with cons, no quasiquote
+(define m-direct (macro args (cons 'list args)))
+(test-equal '(1 2 3) (m-direct 1 2 3) "direct list construction in body")
+
+;; Helper function called at expansion time builds the template
+(define (gen-add-tree n)
+  (if (eq? n 1) 'x `(+ x ,(gen-add-tree (- n 1)))))
+(define triple-add (macro () (gen-add-tree 3)))
+(define **ta-x** 10)
+(test-equal 30 (let ((x **ta-x**)) (triple-add)) "helper function called at expansion")
+
+(display "          === Testing recursive macros ===")
+(newline)
+
+;; my-and: expands to nested ifs
+(define my-and (macro args
+    (cond ((null? args) #t)
+          ((null? (cdr args)) (car args))
+          (else `(if ,(car args) (my-and ,@(cdr args)) #f)))))
+(test-equal #t (my-and) "my-and (no args)")
+(test-equal 3 (my-and 1 2 3) "my-and all truthy returns last")
+(test-equal #f (my-and 1 #f 3) "my-and short-circuits on #f")
+(test-equal 5 (my-and 5) "my-and single arg")
+
+;; my-or: expands to nested lets so each arg evaluates once
+(define my-or (macro args
+    (cond ((null? args) #f)
+          ((null? (cdr args)) (car args))
+          (else `(let ((tmp ,(car args)))
+                   (if tmp tmp (my-or ,@(cdr args))))))))
+(test-equal #f (my-or) "my-or (no args)")
+(test-equal 3 (my-or #f #f 3) "my-or returns first truthy")
+(test-equal #f (my-or #f #f #f) "my-or all falsy returns #f")
+
+(display "          === Testing expand debugging form ===")
+(newline)
+
+;; expand evaluates its argument, then macro-expands one level.
+
+;; Atom: returned unchanged
+(test-equal 42 (expand 42) "expand on atom")
+
+;; Non-macro list: returned unchanged
+(test-equal '(+ 1 2) (expand '(+ 1 2)) "expand on non-macro form")
+
+;; Macro call: one level of expansion
+(define when4 (macro (p . body) `(if ,p (begin ,@body) nil)))
+(test-equal '(if #t (begin 42 43) ()) (expand '(when4 #t 42 43)) "expand on macro call")
+
+;; Recursive macro: one level only
+(test-equal '(if 1 (my-and 2 3) #f) (expand '(my-and 1 2 3)) "expand shows one level for recursive macro")

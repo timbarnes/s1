@@ -6,13 +6,13 @@
 ///
 use crate::env::{EnvOps, EnvRef};
 use crate::eval::{
-    AndOrKind, CEKState, CondClause, RunTime, eval_main, expect_at_least_n_args, expect_n_args,
-    expect_symbol, insert_and_or, insert_bind, insert_cond, insert_eval, insert_if, insert_seq,
-    insert_value,
+    AndOrKind, CEKState, CondClause, RunTime, eval_macro, eval_main, expect_at_least_n_args,
+    expect_n_args, expect_symbol, insert_and_or, insert_bind, insert_cond, insert_eval, insert_if,
+    insert_seq, insert_value,
 };
 use crate::gc::{
-    GcHeap, GcRef, SchemeValue, car, cdr, cons, list_from_slice, list_to_vec, list2, matches_sym,
-    new_float, new_macro, new_special_form,
+    Callable, GcHeap, GcRef, SchemeValue, car, cdr, cons, list_from_slice, list_to_vec, list2,
+    matches_sym, new_float, new_macro, new_special_form,
 };
 use crate::macros::expand_macro;
 use crate::register_special_form;
@@ -51,6 +51,9 @@ pub fn register_special_forms(heap: &mut GcHeap, env: EnvRef) {
         "lambda" => create_callable,
         "macro" => create_callable,
         "expand" => expand_sf,
+        "quasiquote" => quasiquote_sf,
+        "unquote" => unquote_sf,
+        "unquote-splicing" => unquote_splicing_sf,
         "with-timer" => with_timer_sf,
     );
 }
@@ -512,15 +515,85 @@ pub fn letrec_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
     Ok(())
 }
 
+/// (expand form) — debugging aid.
+///
+/// Evaluates `form` in the current environment to obtain a value (typically a
+/// quoted list). If that value is a macro call (a list whose head symbol is
+/// bound to a `Callable::Macro`), expands it one level and returns the
+/// resulting form *without* evaluating it. Otherwise the value is returned
+/// unchanged.
 fn expand_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
-    let m = car(cdr(expr)?)?;
-    match expand_macro(&m, 0, ec, state) {
-        Ok(expr) => {
-            insert_value(state, expr);
-        }
+    let arg = car(cdr(expr)?)?;
+
+    // Evaluate the argument in the current env. eval_main clobbers kont/tail,
+    // so save and restore.
+    let saved_kont = std::rc::Rc::clone(&state.kont);
+    let saved_tail = state.tail;
+    let result = eval_main(arg, state, ec);
+    state.kont = saved_kont;
+    state.tail = saved_tail;
+    let form = match result {
+        Ok(vals) => vals[0],
         Err(err) => return Err(err),
+    };
+
+    // If form is a list whose head names a macro, expand one level.
+    let (head, tail) = match ec.heap.get_value(form) {
+        SchemeValue::Pair(h, t) => (*h, *t),
+        _ => {
+            insert_value(state, form);
+            return Ok(());
+        }
+    };
+    if let SchemeValue::Symbol(_) = ec.heap.get_value(head) {
+        if let Some(callable) = state.env.lookup(head) {
+            if let SchemeValue::Callable(Callable::Macro { params, body, env }) =
+                ec.heap.get_value(callable)
+            {
+                let params = params.clone();
+                let body = *body;
+                let env = env.clone();
+                let raw_args = list_to_vec(ec.heap, tail)?;
+                let expanded = eval_macro(&params, body, env, &raw_args, state, ec)?;
+                insert_value(state, expanded);
+                return Ok(());
+            }
+        }
     }
+    insert_value(state, form);
     Ok(())
+}
+
+/// (quasiquote template)
+/// Walks the template, evaluating (unquote x) and splicing (unquote-splicing x)
+/// in the current environment. Re-uses the macro-expander's quasiquote walker.
+///
+/// `expand_macro` calls `eval_main` internally to evaluate unquoted subexpressions;
+/// that overwrites `state.kont` and `state.tail`, so we save and restore them here
+/// to avoid losing the outer continuation.
+fn quasiquote_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
+    let saved_kont = std::rc::Rc::clone(&state.kont);
+    let saved_tail = state.tail;
+    let result = expand_macro(&expr, 0, ec, state);
+    state.kont = saved_kont;
+    state.tail = saved_tail;
+    match result {
+        Ok(val) => {
+            insert_value(state, val);
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
+}
+
+/// (unquote x) at the top level is an error: it must appear inside a quasiquote.
+fn unquote_sf(_expr: GcRef, _ec: &mut RunTime, _state: &mut CEKState) -> Result<(), String> {
+    Err("unquote: not inside a quasiquote".to_string())
+}
+
+/// (unquote-splicing x) at the top level is an error.
+fn unquote_splicing_sf(_expr: GcRef, _ec: &mut RunTime, _state: &mut CEKState) -> Result<(), String> {
+    Err("unquote-splicing: not inside a quasiquote".to_string())
 }
 
 /// (and expr1 expr2 ... exprN)

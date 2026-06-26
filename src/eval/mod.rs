@@ -4,7 +4,6 @@ pub mod kont;
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{GcHeap, GcRef, SchemeValue, list_from_slice, list_to_vec, new_port};
 use crate::io::{FileTable, PortKind};
-use crate::macros::expand_macro;
 use crate::parser::parse;
 pub use cek::eval_main;
 pub use kont::{
@@ -145,23 +144,30 @@ pub fn eval_string(
 }
 
 /// Macro handler
+///
+/// Defmacro-style: the macro body is ordinary Scheme code, evaluated at
+/// expansion time with the parameters bound to the unevaluated argument forms
+/// and lexical scope inherited from the macro's definition environment. The
+/// returned value is the expanded form, which the caller will then evaluate
+/// in the call site's environment.
 pub fn eval_macro(
     params: &[GcRef],
     body: GcRef,
-    _env: EnvRef,
+    env: EnvRef,
     args: &[GcRef],
     state: &mut CEKState,
     rt: &mut RunTime,
 ) -> Result<GcRef, String> {
-    let new_env = bind_params(params, args, &state.env, rt.heap)?;
-    let original_env = state.env.clone();
-    //println!("Before expansion: {}", print_value(&body));
+    let new_env = bind_params(params, args, &env, rt.heap)?;
+    let saved_env = state.env.clone();
+    let saved_kont = std::rc::Rc::clone(&state.kont);
+    let saved_tail = state.tail;
     state.env = new_env;
-    let expanded = expand_macro(&body, 0, rt, state)?;
-    //println!("After expansion: {}", print_value(&expanded));
-    state.env = original_env;
-    // Review for tail recursion
-    Ok(expanded)
+    let result = eval_main(body, state, rt);
+    state.env = saved_env;
+    state.kont = saved_kont;
+    state.tail = saved_tail;
+    result.map(|vals| vals[0])
 }
 
 // ============================================================================
