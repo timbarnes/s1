@@ -320,7 +320,7 @@ fn call_with_values_sp(
     ec: &mut RunTime,
     args: &[GcRef],
     state: &mut CEKState,
-    next: KontRef,
+    _next: KontRef,
 ) -> Result<(), String> {
     if args.len() != 2 {
         return Err("call-with-values: expected 2 arguments".to_string());
