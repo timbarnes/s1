@@ -60,7 +60,11 @@ fn run_cek(mut state: &mut CEKState, rt: &mut RunTime) -> Result<Vec<GcRef>, Str
 
 fn step(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> {
     //dump_cek("  step", &state);
-    debugger("", &state, ec);
+    // Hoisted out of debugger() so the common (tracing off) case is a branch on
+    // an already-hot field instead of a call. This runs on every CEK step.
+    if !matches!(*ec.trace, crate::eval::TraceType::Off) {
+        debugger("", &state, ec);
+    }
 
     let control = std::mem::replace(&mut state.control, Control::Empty);
     match control {
@@ -143,13 +147,18 @@ pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
 
             let prev = Rc::clone(&state.kont);
 
+            // Whether *this* application is in tail position. Operator and
+            // argument evaluation are not, so stash it in the frame and hand it
+            // back to apply_proc once the arguments are done.
+            let is_tail = state.tail;
+
             state.control = Control::Expr(*car);
             state.tail = false; // reset after using it
             state.kont = Rc::new(Kont::EvalArg {
                 proc: None,
                 remaining: args_vec.into_iter().rev().collect(),
                 evaluated: vec![],
-                tail: true,
+                tail: is_tail,
                 original_call: expr,
                 env: state.env.clone(),
                 next: prev,
@@ -201,9 +210,12 @@ fn dispatch_kont(
             original_call,
             next,
         } => handle_apply_special(state, ec, *proc, *original_call, Rc::clone(next)),
-        Kont::Bind { symbol, env, next } => {
-            handle_bind(state, ec, *symbol, env.clone(), Rc::clone(next))
-        }
+        Kont::Bind {
+            symbol,
+            env,
+            is_define,
+            next,
+        } => handle_bind(state, ec, *symbol, env.clone(), *is_define, Rc::clone(next)),
         Kont::Cond { remaining, next } => {
             handle_cond(state, ec, remaining.clone(), Rc::clone(next))
         }
@@ -331,23 +343,22 @@ fn handle_bind(
     state: &mut CEKState,
     ec: &mut RunTime,
     symbol: GcRef,
-    env: Option<EnvRef>,
+    env: EnvRef,
+    is_define: bool,
     next: KontRef,
 ) -> Result<(), String> {
     // borrow cont fields
     if let Control::Value(val) = state.control {
-        match env {
-            Some(frame) => {
-                // global and set! path: update specific frame
-                frame.set_local(symbol, val)?;
-                state.control = Control::Value(ec.heap.unspecified());
-            }
-            None => {
-                // local define path: bind in current frame
-                state.env.define(symbol, val);
-                state.control = Control::Value(symbol);
-            }
-        }
+        // `env` is the frame captured where the define/set! was written. Using
+        // state.env here would bind into whatever frame happens to be current,
+        // which is the wrong one after a non-local exit through this frame.
+        // For set! the frame already holds the binding, so insert overwrites it.
+        env.define(symbol, val);
+        state.control = if is_define {
+            Control::Value(symbol)
+        } else {
+            Control::Value(ec.heap.unspecified())
+        };
         state.tail = false;
         state.kont = next;
         Ok(())
@@ -602,9 +613,14 @@ fn handle_eval_arg(
     mut evaluated: Vec<GcRef>,
     original_call: GcRef,
     tail: bool,
-    _env: EnvRef,
+    env: EnvRef,
     next: KontRef,
 ) -> Result<(), String> {
+    // The argument we just finished may have been a tail call, which by design
+    // leaves `state.env` inside the callee. EvalArg saved the call's own env for
+    // exactly this reason: restore it before evaluating the remaining arguments.
+    state.env = env;
+
     if proc.is_none() {
         // Evaluating operator (car of the call)
         match gc_value!(val) {
@@ -626,7 +642,7 @@ fn handle_eval_arg(
                         evaluated_args: Rc::new(evaluated),
                         next,
                     });
-                    state.tail = true;
+                    state.tail = tail;
                     apply_proc(state, ec)?;
                     return Ok(());
                 } else {
@@ -670,6 +686,7 @@ fn handle_eval_arg(
                 evaluated_args: Rc::new(evaluated),
                 next,
             });
+            state.tail = tail;
             apply_proc(state, ec)?;
         }
         return Ok(());

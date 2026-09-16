@@ -209,11 +209,7 @@ pub fn dbg_one_kont(loc: &str, frame: &Kont) -> String {
             )
             .as_str(),
         ),
-        Kont::Bind {
-            symbol,
-            env: _,
-            next,
-        } => result
+        Kont::Bind { symbol, next, .. } => result
             .push_str(format!("Bind{{symbol={}, next={:?}}}", print_value(symbol), next).as_str()),
         Kont::DynamicWind { after, next, .. } => result.push_str(
             format!(

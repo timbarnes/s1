@@ -26,7 +26,11 @@ pub enum Kont {
     },
     Bind {
         symbol: GcRef, // body expression (or begin)
-        env: Option<EnvRef>,
+        // The frame to bind into, captured where the define/set! was written.
+        // Must NOT be re-derived from state.env when the frame runs: a
+        // non-local exit (call/cc) can arrive here with an unrelated env.
+        env: EnvRef,
+        is_define: bool, // define returns the symbol; set! returns unspecified
         next: KontRef,
     },
     CallWithValues {
@@ -158,11 +162,7 @@ impl std::fmt::Debug for Kont {
                     proc, original_call, next
                 )
             }
-            Kont::Bind {
-                symbol,
-                env: _,
-                next,
-            } => {
+            Kont::Bind { symbol, next, .. } => {
                 write!(
                     f,
                     "Bind {{ symbol: {}, next: {:?} }}",
@@ -377,11 +377,11 @@ impl crate::gc::Mark for KontRef {
                     visit(*original_call);
                     worklist.push(Rc::clone(next));
                 }
-                Kont::Bind { symbol, env, next } => {
+                Kont::Bind {
+                    symbol, env, next, ..
+                } => {
                     visit(*symbol);
-                    if let Some(env) = env {
-                        env.mark(visit);
-                    }
+                    env.mark(visit);
                     worklist.push(Rc::clone(next));
                 }
                 Kont::CallWithValues { consumer, next } => {
@@ -590,12 +590,13 @@ pub fn insert_eval_eval(state: &mut CEKState, expr: GcRef, env: Option<GcRef>, t
 /// The bind operation takes the value returned by the previous continuation.
 /// Supports both define and set! semantics.
 ///
-pub fn insert_bind(state: &mut CEKState, symbol: GcRef, env: Option<EnvRef>) {
+pub fn insert_bind(state: &mut CEKState, symbol: GcRef, env: EnvRef, is_define: bool) {
     // clone the current continuation and link it under the new Bind
     let prev = Rc::clone(&state.kont);
     state.kont = Rc::new(Kont::Bind {
         symbol,
         env,
+        is_define,
         next: prev,
     });
 }

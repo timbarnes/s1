@@ -500,7 +500,7 @@
 (test-true (> (exp 1) 2.718) "exp of 1 is > 2.718")
 (test-true (< (exp 1) 2.719) "exp of 1 is < 2.719")
 (test-equal 0.0 (log 1) "log of 1 is 0.0")
-(test-equal 1.0 (log (exp 1))) "log of exp of 1 is 1.0")
+(test-equal 1.0 (log (exp 1)) "log of exp of 1 is 1.0")
 (test-equal 0.0 (sin 0) "sin of 0 is 0.0")
 (test-equal 1.0 (cos 0) "cos of 0 is 1.0")
 (test-equal 0.0 (tan 0) "tan of 0 is 0.0")

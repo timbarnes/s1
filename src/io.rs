@@ -122,6 +122,7 @@ impl PortKind {
                 Some(ch)
             }
             PortKind::Stdin => {
+                io::stdout().flush().ok();
                 let stdin = io::stdin();
                 let mut handle = stdin.lock();
                 let mut buf = [0u8; 4]; // max size of UTF-8 char
@@ -262,6 +263,7 @@ pub fn read_line(port_kind: &mut PortKind, file_table: &mut FileTable) -> Option
     // Handle other port types
     match port_kind {
         PortKind::Stdin => {
+            io::stdout().flush().ok();
             let mut buf = String::new();
             let n = io::stdin().read_line(&mut buf).ok()?;
             if n == 0 { None } else { Some(buf) }
@@ -279,8 +281,10 @@ pub fn read_line(port_kind: &mut PortKind, file_table: &mut FileTable) -> Option
 pub fn write_line(port_kind: &mut PortKind, file_table: &mut FileTable, line: &str) -> bool {
     match port_kind {
         PortKind::Stdout => {
+            // No flush here: Stdout is line-buffered, so a newline flushes.
+            // Flushing per call cost one write(2) syscall per display. Partial
+            // lines are flushed before any stdin read and at exit.
             print!("{}", line);
-            io::stdout().flush().ok();
             true
         }
         PortKind::File { id, .. } => {
@@ -308,6 +312,7 @@ pub fn write_line(port_kind: &mut PortKind, file_table: &mut FileTable, line: &s
 pub fn read_char(port_kind: &PortKind, file_table: &mut FileTable) -> Option<char> {
     match port_kind {
         PortKind::Stdin => {
+            io::stdout().flush().ok();
             let mut buf = [0u8; 1];
             match std::io::stdin().read_exact(&mut buf) {
                 Ok(_) => Some(buf[0] as char),
@@ -354,8 +359,7 @@ pub fn read_char(port_kind: &PortKind, file_table: &mut FileTable) -> Option<cha
 pub fn write_char(port_kind: &PortKind, file_table: &mut FileTable, ch: char) -> bool {
     match port_kind {
         PortKind::Stdout => {
-            print!("{}", ch);
-            io::stdout().flush().ok();
+            print!("{}", ch); // see write_line: no per-call flush
             true
         }
         PortKind::File { id, .. } => {

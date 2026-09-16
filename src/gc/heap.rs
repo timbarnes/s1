@@ -15,8 +15,6 @@ pub struct GcHeap {
     pub eof_obj: Option<GcRef>,
     pub undefined_obj: Option<GcRef>,
     pub void_obj: Option<GcRef>,
-    // Free list for GcRef objects
-    free_list: Vec<GcObject>,
     // All allocated GcRef objects (for potential future GC)
     objects: Vec<GcRef>,
     // For objects allocated since the last GC
@@ -42,7 +40,6 @@ impl GcHeap {
             eof_obj: None,
             undefined_obj: None,
             void_obj: None,
-            free_list: Vec::new(),
             objects: Vec::new(),
             nursery: Vec::with_capacity(gc_threshold),
             worklist: Vec::with_capacity(gc_threshold + 1000),

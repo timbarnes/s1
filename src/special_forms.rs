@@ -233,7 +233,7 @@ pub fn define_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
             let sym = args[1];
             let value_expr = args[2];
 
-            insert_bind(state, sym, None);
+            insert_bind(state, sym, state.env.clone(), true);
             insert_eval(state, value_expr, false);
             Ok(())
         }
@@ -250,7 +250,7 @@ pub fn define_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
 
             let lambda_list = list_from_slice(&[lambda_sym, params, body_expr], &mut ec.heap);
 
-            insert_bind(state, name, None);
+            insert_bind(state, name, state.env.clone(), true);
             insert_eval(state, lambda_list, false);
             Ok(())
         }
@@ -266,7 +266,7 @@ pub fn set_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(),
 
     match &state.env.lookup_with_frame(args[1]) {
         Some((_val, binding_env)) => {
-            insert_bind(state, args[1], Some(binding_env.clone()));
+            insert_bind(state, args[1], binding_env.clone(), false);
             insert_eval(state, args[2], false);
             Ok(())
         }

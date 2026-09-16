@@ -11,7 +11,7 @@ mod sys_builtins;
 mod tokenizer;
 mod utilities;
 
-use crate::env::Frame;
+use crate::env::{EnvRef, Frame};
 use crate::eval::{
     CEKState, RunTime, RunTimeStruct, eval_main, eval_string, initialize_scheme_globals,
 };
@@ -90,10 +90,10 @@ fn main() {
     }
 
     // Drop into the REPL
-    repl(&mut rt, &mut state, args.quit);
+    repl(&mut rt, &mut state, args.quit, env);
 }
 
-fn repl(rt: &mut RunTime, state: &mut CEKState, quit_after_load: bool) {
+fn repl(rt: &mut RunTime, state: &mut CEKState, quit_after_load: bool, global: EnvRef) {
     use crate::io::PortKind;
     use std::io as stdio;
     use stdio::Write;
@@ -135,6 +135,11 @@ fn repl(rt: &mut RunTime, state: &mut CEKState, quit_after_load: bool) {
         };
         match expr {
             Ok(expr) => {
+                // Every form read from a port is a top-level form and must be
+                // evaluated in the global environment. Without this, definitions
+                // made by a file that `load` pulled in land in `load`'s own frame,
+                // and the chain grows by a frame per load and never unwinds.
+                state.env = global.clone();
                 let returned = eval_main(expr, state, rt);
                 match returned {
                     Ok(result) => {
@@ -170,4 +175,6 @@ fn repl(rt: &mut RunTime, state: &mut CEKState, quit_after_load: bool) {
             }
         }
     }
+    // Output is line-buffered now; emit any trailing partial line.
+    stdio::stdout().flush().ok();
 }
