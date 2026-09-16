@@ -21,7 +21,7 @@ pub fn eval_main(
     ec: &mut RunTime,
 ) -> Result<Vec<GcRef>, String> {
     state.control = Control::Expr(expr);
-    state.kont = Rc::new(Kont::Halt);
+    state.kont = Rc::clone(&state.halt);
     state.tail = true;
     run_cek(state, ec)
 }
@@ -76,7 +76,7 @@ fn step(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> {
         Control::Value(val) => {
             *ec.depth -= 1;
             state.control = Control::Value(val);
-            dispatch_kont(state, ec, val, Rc::clone(&state.kont))
+            dispatch_kont(state, ec, val)
         }
         Control::Values(vals) => {
             eprintln!("step::Values");
@@ -86,15 +86,6 @@ fn step(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> {
         Control::Empty => Err("Unexpected Control::Halt in step()".to_string()),
     }
 }
-
-// #[inline]
-// fn take_kont(state: &mut CEKState) -> Kont {
-//     let old = std::mem::replace(&mut state.kont, Rc::new(Kont::Halt));
-//     match Rc::try_unwrap(old) {
-//         Ok(k) => k,                             // fast path: unique Rc → owned Kont
-//         Err(shared) => shared.as_ref().clone(), // fallback: shallow clone
-//     }
-// }
 
 /// Capture the current environment and control state, then pass the CEKState to the CEK loop.
 ///
@@ -194,34 +185,59 @@ fn dispatch_values_kont(
     }
 }
 
+/// Take ownership of the top continuation frame.
+///
+/// Frames carry `Vec`s (`EvalArg`'s pending and evaluated arguments, `Cond`'s
+/// remaining clauses, ...). Borrowing the frame forces those to be cloned on
+/// every single dispatch — measured at 19 clones per Scheme call on `fib`.
+/// Taking the frame by value lets the handlers consume them instead.
+///
+/// `try_unwrap` succeeds whenever we hold the only reference, which is the
+/// common case. A continuation captured by `call/cc` keeps its own `Rc`, so
+/// that path still clones, exactly as before.
+///
+/// The frame we hand back is no longer reachable from the GC roots, so
+/// `state.kont` is left pointing at the frame's `next`. That keeps the rest of
+/// the continuation chain rooted for the duration of the dispatch; every handler
+/// overwrites `state.kont` anyway, either with `next` or with a new frame built
+/// on it, so this is only a safer transient value than `Halt`.
+///
+/// INVARIANT: the frame's own payload (`GcRef`s such as `EvalArg`'s evaluated
+/// arguments) is *not* rooted while the handler runs, so a handler must install
+/// them into `state` before anything can collect. The only collection points
+/// are `handle_restore_env`, whose frame holds no `GcRef`s and which now
+/// restores before collecting, and the `(gc)` builtin, which runs after
+/// `apply_proc` has installed its frame.
 #[inline]
-fn dispatch_kont(
-    state: &mut CEKState,
-    ec: &mut RunTime,
-    val: GcRef,
-    kont: KontRef,
-) -> Result<(), String> {
-    match &*kont {
-        Kont::AndOr { kind, rest, next } => {
-            handle_and_or(state, *kind, rest.clone(), Rc::clone(next))
-        }
+fn take_kont(state: &mut CEKState) -> Kont {
+    let parent = match state.kont.next() {
+        Some(next) => Rc::clone(next),
+        None => Rc::clone(&state.halt),
+    };
+    let kont = std::mem::replace(&mut state.kont, parent);
+    match Rc::try_unwrap(kont) {
+        Ok(k) => k,
+        Err(shared) => (*shared).clone(),
+    }
+}
+
+#[inline]
+fn dispatch_kont(state: &mut CEKState, ec: &mut RunTime, val: GcRef) -> Result<(), String> {
+    match take_kont(state) {
+        Kont::AndOr { kind, rest, next } => handle_and_or(state, kind, rest, next),
         Kont::ApplySpecial {
             proc,
             original_call,
             next,
-        } => handle_apply_special(state, ec, *proc, *original_call, Rc::clone(next)),
+        } => handle_apply_special(state, ec, proc, original_call, next),
         Kont::Bind {
             symbol,
             env,
             is_define,
             next,
-        } => handle_bind(state, ec, *symbol, env.clone(), *is_define, Rc::clone(next)),
-        Kont::Cond { remaining, next } => {
-            handle_cond(state, ec, remaining.clone(), Rc::clone(next))
-        }
-        Kont::CondClause { clause, next } => {
-            handle_cond_clause(state, ec, clause.clone(), Rc::clone(next))
-        }
+        } => handle_bind(state, ec, symbol, env, is_define, next),
+        Kont::Cond { remaining, next } => handle_cond(state, ec, remaining, next),
+        Kont::CondClause { clause, next } => handle_cond_clause(state, ec, clause, next),
         Kont::DynamicWind {
             before,
             thunk,
@@ -233,12 +249,12 @@ fn dispatch_kont(
         } => handle_dynamic_wind(
             state,
             ec.dynamic_wind,
-            *before,
-            *thunk,
-            *after,
-            *thunk_result,
-            *phase,
-            Rc::clone(next),
+            before,
+            thunk,
+            after,
+            thunk_result,
+            phase,
+            next,
         ),
         Kont::EvalArg {
             proc,
@@ -252,42 +268,33 @@ fn dispatch_kont(
             state,
             ec,
             val,
-            *proc,
-            remaining.clone(),
-            evaluated.clone(),
-            *original_call,
-            *tail,
-            env.clone(),
-            Rc::clone(next),
+            proc,
+            remaining,
+            evaluated,
+            original_call,
+            tail,
+            env,
+            next,
         ),
         Kont::Eval {
             expr,
             env,
             phase,
             next,
-        } => handle_eval(state, *expr, *env, *phase, Rc::clone(next)),
+        } => handle_eval(state, expr, env, phase, next),
         Kont::If {
             then_branch,
             else_branch,
             next,
-        } => handle_if(state, *then_branch, *else_branch, Rc::clone(next)),
-        Kont::RestoreEnv { old_env, next } => {
-            handle_restore_env(state, ec, old_env.clone(), Rc::clone(next))
-        }
+        } => handle_if(state, then_branch, else_branch, next),
+        Kont::RestoreEnv { old_env, next } => handle_restore_env(state, ec, old_env, next),
         Kont::Escape {
             result,
             thunks,
             new_kont,
             new_dw_stack,
-        } => handle_escape(
-            state,
-            ec,
-            *result,
-            thunks.clone(),
-            Rc::clone(new_kont),
-            new_dw_stack.clone(),
-        ),
-        Kont::Seq { rest, next } => handle_seq(state, rest.clone(), Rc::clone(next)),
+        } => handle_escape(state, ec, result, thunks, new_kont, new_dw_stack),
+        Kont::Seq { rest, next } => handle_seq(state, rest, next),
         Kont::Halt => Ok(()),
         _ => Err("unexpected continuation".to_string()),
     }
@@ -721,14 +728,24 @@ fn handle_restore_env(
     old_env: EnvRef,
     next: Rc<Kont>,
 ) -> Result<(), String> {
-    if ec.heap.needs_gc() {
-        ec.heap
-            .collect_garbage(state, *ec.current_output_port, ec.port_stack, ec.dynamic_wind);
-    }
     // Restore environment
     state.env = old_env;
     // Pop this frame unconditionally
     state.kont = next;
+
+    // Collect only after the restore. dispatch_kont owns the frame it is
+    // dispatching, so it is not reachable from the GC roots; collecting before
+    // the two assignments above would have swept the continuation we are about
+    // to return into. This is also the tighter root set: the callee's
+    // environment is genuinely dead by now.
+    if ec.heap.needs_gc() {
+        ec.heap.collect_garbage(
+            state,
+            *ec.current_output_port,
+            ec.port_stack,
+            ec.dynamic_wind,
+        );
+    }
 
     Ok(())
 }

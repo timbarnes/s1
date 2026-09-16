@@ -315,15 +315,21 @@ pub struct CEKState {
     pub env: EnvRef,      // Current environment (linked frame or hashmap)
     pub kont: KontRef,    // Continuation (enum)
     pub tail: bool,
+    /// A shared `Kont::Halt` used as a placeholder when `dispatch_kont` takes
+    /// ownership of the top frame. Cloning this is a refcount bump; allocating
+    /// a fresh `Rc::new(Kont::Halt)` each time would undo the saving.
+    pub halt: KontRef,
 }
 
 impl CEKState {
     pub fn new(env: EnvRef) -> Self {
+        let halt = KontRef::new(Kont::Halt);
         CEKState {
             control: Control::Empty,
             env,
-            kont: KontRef::new(Kont::Halt),
+            kont: Rc::clone(&halt),
             tail: false,
+            halt,
         }
     }
 }
