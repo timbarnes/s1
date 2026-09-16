@@ -509,6 +509,81 @@
 (test-true (< (acos 0) 1.58) "acos of 0 is < 1.58")
 (test-equal 0.0 (atan 0) "atan of 0 is 0.0")
 
+(display "          === Testing Bignums === ")
+(newline)
+;; These pin down the exactness guarantees that any fixnum/bignum split must
+;; preserve: promotion at the i64 boundary, demotion back into fixnum range,
+;; and exact comparison of values too large for a double.
+(define **i64max** 9223372036854775807)
+(define **i64min** -9223372036854775808)
+(define **big** 85070591730234615847396907784232501249) ; **i64max** squared
+
+;; Literals at and past the i64 boundary
+(test-equal **i64max** 9223372036854775807 "bignum: i64 max literal")
+(test-equal **i64min** -9223372036854775808 "bignum: i64 min literal")
+
+;; Promotion on overflow, in both directions
+(test-equal 9223372036854775808 (+ **i64max** 1) "bignum: add past i64 max")
+(test-equal -9223372036854775809 (- **i64min** 1) "bignum: subtract past i64 min")
+(test-equal **big** (* **i64max** **i64max**) "bignum: multiply past i64 max")
+
+;; Demotion: a bignum computation landing back in fixnum range stays exact
+(test-equal **i64max** (- (+ **i64max** 1) 1) "bignum: round trip back to i64 max")
+(test-equal 0 (+ **big** (* -1 **big**)) "bignum: cancels exactly to zero")
+(test-equal **i64max** (quotient **big** **i64max**) "bignum: quotient back to i64 max")
+(test-equal 7 (remainder (+ **big** 7) **i64max**) "bignum: remainder in fixnum range")
+
+;; Exact comparison. These all went through f64 before, so adjacent values
+;; above 2^53 compared equal and (< i64max i64max+1) was false.
+(test-true (< **i64max** (+ **i64max** 1)) "bignum: < across i64 boundary")
+(test-true (> (+ **i64max** 1) **i64max**) "bignum: > across i64 boundary")
+(test-false (= **i64max** (+ **i64max** 1)) "bignum: = across i64 boundary")
+(test-true (< 9007199254740992 9007199254740993) "bignum: < adjacent above 2^53")
+(test-false (= 9007199254740992 9007199254740993) "bignum: = adjacent above 2^53")
+(test-true (< 5 **big**) "bignum: fixnum < bignum")
+(test-true (> **big** 5) "bignum: bignum > fixnum")
+(test-true (< **i64min** 0 **i64max** **big**) "bignum: chained comparison")
+
+;; Exact exponentiation (also exercises big literal parsing)
+(test-equal 9223372036854775808 (expt 2 63) "bignum: expt 2^63 exact")
+(test-equal 18446744073709551616 (expt 2 64) "bignum: expt 2^64 exact")
+(test-equal 1267650600228229401496703205376 (expt 2 100) "bignum: expt 2^100 exact")
+(test-equal -8 (expt -2 3) "bignum: expt negative base, odd exponent")
+(test-equal 16 (expt -2 4) "bignum: expt negative base, even exponent")
+
+;; Sign handling
+(test-equal -85070591730234615847396907784232501249 (* -1 **big**)
+    "bignum: negative product")
+(test-equal **big** (abs (* -1 **big**)) "bignum: abs of a negative bignum")
+(test-equal **big** (- 0 (* -1 **big**)) "bignum: negate a negative bignum")
+
+;; Bignums are still exact integers
+(test-true (integer? **big**) "bignum: integer?")
+(test-true (exact? **big**) "bignum: exact?")
+(test-false (inexact? **big**) "bignum: not inexact?")
+(test-true (number? **big**) "bignum: number?")
+(test-true (equal? **big** (* **i64max** **i64max**)) "bignum: equal?")
+(test-true (odd? **big**) "bignum: odd?")
+(test-true (even? (expt 2 70)) "bignum: even?")
+(test-false (zero? **big**) "bignum: not zero?")
+(test-true (positive? **big**) "bignum: positive?")
+(test-true (negative? (* -1 **big**)) "bignum: negative?")
+
+;; Repeated multiplication growing well past i64
+(define **fact** (lambda (n) (if (= n 0) 1 (* n (**fact** (- n 1))))))
+(test-equal 2432902008176640000 (**fact** 20) "bignum: 20! still fits i64")
+(test-equal 15511210043330985984000000 (**fact** 25) "bignum: 25! needs a bignum")
+(test-equal 265252859812191058636308480000000 (**fact** 30) "bignum: 30!")
+
+;; Division and modulo on bignums. Non-negative operands only: modulo's sign
+;; handling for negative arguments is a separate pre-existing bug (it currently
+;; behaves like remainder), so it is deliberately not pinned down here.
+(test-equal 9 (modulo **big** 10) "bignum: modulo")
+(test-equal 1000000000000000 (quotient (expt 10 30) (expt 10 15))
+    "bignum: quotient of powers of ten")
+(test-equal 1180591620717411303424 (max 1 (expt 2 70) 3) "bignum: max picks the bignum")
+(test-equal 3 (min (expt 2 70) 3) "bignum: min over a bignum")
+
 (display "          === Testing Char Case === ")
 (newline)
 (test-equal #\A (char-upcase #\a) "char-upcase on lowercase")

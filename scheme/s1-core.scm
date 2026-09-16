@@ -179,7 +179,7 @@
 (define zero? (lambda (n) (= n 0)))
 (define positive? (lambda (n) (>= n 0)))
 (define negative? (lambda (n) (< n 0)))
-(define even? (lambda (n) (zero? (mod n 2))))
+(define even? (lambda (n) (zero? (modulo n 2))))
 (define odd? (lambda (n) (not (even? n))))
 
 (define max (lambda x

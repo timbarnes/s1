@@ -287,83 +287,61 @@ pub fn mod_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     Ok(new_int(heap, a % b))
 }
 
-pub fn eq_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+/// Compare two Scheme numbers.
+///
+/// Integer/integer pairs are compared exactly. Previously every comparison went
+/// through `f64`, which silently loses precision above 2^53 — `(< 9223372036854775807
+/// 9223372036854775808)` returned #f because both round to the same double.
+/// A mix of exact and inexact still goes through `f64`; that is lossy for huge
+/// magnitudes but is the usual approximation and keeps `(= 5 5.0)` true.
+///
+/// Returns `None` for unordered pairs (NaN), which callers treat as false.
+fn num_cmp(a: &SchemeValue, b: &SchemeValue) -> Option<std::cmp::Ordering> {
+    use SchemeValue::{Float, Int};
+    match (a, b) {
+        (Int(x), Int(y)) => Some(x.cmp(y)),
+        (Int(x), Float(y)) => x.to_f64()?.partial_cmp(y),
+        (Float(x), Int(y)) => x.partial_cmp(&y.to_f64()?),
+        (Float(x), Float(y)) => x.partial_cmp(y),
+        _ => None,
+    }
+}
+
+/// Shared implementation of the chained numeric comparisons (`=`, `<`, `>`).
+fn compare_chain(
+    heap: &mut GcHeap,
+    args: &[GcRef],
+    name: &str,
+    want: std::cmp::Ordering,
+) -> Result<GcRef, String> {
     if args.len() < 2 {
-        return Err("=: expects at least 2 arguments".to_string());
+        return Err(format!("{}: expects at least 2 arguments", name));
     }
-
-    // Convert all arguments to f64 for comparison
-    let mut numbers = Vec::new();
     for arg in args {
-        let num = match &gc_value!(*arg) {
-            SchemeValue::Int(i) => i.to_f64().unwrap(),
-            SchemeValue::Float(f) => *f,
-            _ => return Err("=: all arguments must be numbers".to_string()),
-        };
-        numbers.push(num);
+        match gc_value!(*arg) {
+            SchemeValue::Int(_) | SchemeValue::Float(_) => {}
+            _ => return Err(format!("{}: all arguments must be numbers", name)),
+        }
     }
+    for pair in args.windows(2) {
+        let ord = num_cmp(gc_value!(pair[0]), gc_value!(pair[1]));
+        if ord != Some(want) {
+            return Ok(new_bool(heap, false));
+        }
+    }
+    Ok(new_bool(heap, true))
+}
 
-    // Check if all numbers are equal
-    let first = numbers[0];
-    let all_equal = numbers.iter().all(|&n| n == first);
-
-    Ok(new_bool(heap, all_equal))
+pub fn eq_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    compare_chain(heap, args, "=", std::cmp::Ordering::Equal)
 }
 
 pub fn lt_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() < 2 {
-        return Err("<: expects at least 2 arguments".to_string());
-    }
-
-    // Convert all arguments to f64 for comparison
-    let mut numbers = Vec::new();
-    for arg in args {
-        let num = match &gc_value!(*arg) {
-            SchemeValue::Int(i) => i.to_f64().unwrap(),
-            SchemeValue::Float(f) => *f,
-            _ => return Err("<: all arguments must be numbers".to_string()),
-        };
-        numbers.push(num);
-    }
-
-    // Check if numbers are in strictly increasing order
-    let mut prev = numbers[0];
-    for &num in &numbers[1..] {
-        if prev >= num {
-            return Ok(new_bool(heap, false));
-        }
-        prev = num;
-    }
-
-    Ok(new_bool(heap, true))
+    compare_chain(heap, args, "<", std::cmp::Ordering::Less)
 }
 
 pub fn gt_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() < 2 {
-        return Err(">: expects at least 2 arguments".to_string());
-    }
-
-    // Convert all arguments to f64 for comparison
-    let mut numbers = Vec::new();
-    for arg in args {
-        let num = match &gc_value!(*arg) {
-            SchemeValue::Int(i) => i.to_f64().unwrap(),
-            SchemeValue::Float(f) => *f,
-            _ => return Err(">: all arguments must be numbers".to_string()),
-        };
-        numbers.push(num);
-    }
-
-    // Check if numbers are in strictly decreasing order
-    let mut prev = numbers[0];
-    for &num in &numbers[1..] {
-        if prev <= num {
-            return Ok(new_bool(heap, false));
-        }
-        prev = num;
-    }
-
-    Ok(new_bool(heap, true))
+    compare_chain(heap, args, ">", std::cmp::Ordering::Greater)
 }
 
 /// (quotient n1 n2)
@@ -522,6 +500,15 @@ pub fn expt_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 2 {
         return Err("expt: expects exactly 2 arguments".to_string());
     }
+    // Exact path: integer base raised to a non-negative integer exponent. The
+    // f64 path below is wrong for anything past 2^53 — (expt 2 63) came back as
+    // 9223372036854776000 rather than 9223372036854775808.
+    if let (SchemeValue::Int(b), SchemeValue::Int(e)) = (gc_value!(args[0]), gc_value!(args[1])) {
+        if let Some(e) = e.to_u32() {
+            return Ok(new_int(heap, b.pow(e)));
+        }
+    }
+
     let base = match &gc_value!(args[0]) {
         SchemeValue::Int(i) => i.to_f64().unwrap(),
         SchemeValue::Float(f) => *f,
