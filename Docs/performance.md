@@ -3,19 +3,66 @@
 Measured 2026-09-15 on darwin/arm64, `--release` (`debug = true`).
 Re-run the numbers with `bench/bench.sh [reps]`.
 
-## Baseline and Phase 1 result
+## Results
 
-| Workload | Baseline | After Phase 1 | |
-|---|---|---|---|
-| `regression 1x` (`s1 -r -q`) | 0.04 s | 0.04 s | process start + core load bound |
-| `regression 5x` in-process | 0.37 s | 0.21 s | |
-| `regression 20x` in-process | 5.33 s | **0.82 s** | **6.5×**; now linear (4× work → 4× time) |
-| `fib 25` (call + arith) | 0.32 s | 0.31 s | unchanged — allocator bound, see F2/F3 |
-| `list/map` 300 × 200 elems | 0.59 s | 0.59 s | unchanged, same reason |
-| `tail loop 300k` | 0.75 s | **0.30 s** | **2.5×** |
+| Workload | Baseline | Phase 1 | + F10(1) | total |
+|---|---|---|---|---|
+| `regression 1x` (`s1 -r -q`) | 0.04 s | 0.04 s | 0.03 s | process-start bound |
+| `regression 5x` in-process | 0.37 s | 0.21 s | 0.16 s | **2.3×** |
+| `regression 20x` in-process | 5.33 s | 0.82 s | **0.65 s** | **8.2×**, now linear |
+| `fib 25` (call + arith) | 0.32 s | 0.31 s | **0.24 s** | **1.3×** |
+| `list/map` 300 × 200 elems | 0.59 s | 0.59 s | **0.50 s** | **1.2×** |
+| `tail loop 300k` | 0.75 s | 0.30 s | **0.24 s** | **3.1×** |
 
-Test count went 484 → 486: two tests that previously aborted their top-level
-form now run and pass (see F1).
+Phase 1 = F1, F4, F8, dead `free_list` (commit 7db8e1e).
+F10(1) = consume continuation frames instead of cloning (commit d2796a4).
+
+Test count went 484 → 528: two tests previously aborted their top-level form
+and never ran (F1), one was swallowed by a stray paren, and 42 bignum tests
+were added (commit dbc6fa7, which also fixed exact comparison, `expt`, and
+`even?`/`odd?`).
+
+## OPEN: memory-safety bug under GC pressure
+
+**The interpreter segfaults if the GC actually runs often.** The default
+threshold is 100,000 allocations and the regression suite allocates 55,848, so
+GC never fires in normal use and this is invisible — but it is a live
+use-after-free, not a theoretical one.
+
+Reproduce:
+
+```
+printf '(gc-threshold 20)\n(load "scheme/test-harness.scm")\n(load "scheme/macro_tests.scm")\n' > /tmp/mt.scm
+./target/release/s1 -f /tmp/mt.scm -q < /dev/null   # exit 139 (SIGSEGV)
+```
+
+It crashes right after "my-or returns first truthy", i.e. during macro
+expansion. Thresholds ≥50 pass. This is **pre-existing** — it reproduces
+identically at threshold ≤10 on commit 7db8e1e, before the dispatch_kont work.
+That work shifted the triggering threshold from ≤10 to ≤20 by changing the
+allocation pattern, not by adding a hazard (rooting the continuation chain in
+`take_kont` made no difference to it).
+
+Likely cause, from reading rather than a minimal repro: `eval_macro`
+(`src/eval/mod.rs:153-171`) runs a *nested* `eval_main`, which overwrites
+`state.kont` with `Kont::Halt`. The outer continuation and environment survive
+only in Rust locals (`saved_kont`, `saved_env`), and `Mark for CEKState` marks
+`state.kont` — so the whole outer continuation is unreachable from the GC roots
+for the duration of the expansion. A collection during macro expansion sweeps
+it, and restoring `state.kont = saved_kont` then yields dangling pointers.
+
+Why it is hard to reproduce minimally: `GcHeap.nursery` — everything allocated
+since the last collection — is itself part of the root set, so recently
+allocated objects are accidentally protected. The bug only bites when the outer
+continuation references objects that predate the previous collection, which
+needs an accumulated heap.
+
+This is the same class as the `take_kont` invariant: **saved interpreter state
+held in Rust locals is not a GC root.** Suggested fix: a `Vec<(KontRef, EnvRef)>`
+save stack in `RunTimeStruct` that `collect_garbage` marks alongside
+`dynamic_wind` (which already works this way), pushed and popped by
+`eval_macro`. Worth doing before F6/F7, and certainly before lowering the
+default threshold.
 
 Counters for one `s1 -r -q` run (temporary instrumentation, since reverted):
 
@@ -264,10 +311,10 @@ A fresh `Vec<GcRef>` for every call's argument list: 1,092,719 calls for
 Fix: a reusable argument stack — one `Vec<GcRef>` in `RunTime`; push args, pass
 a slice, `truncate` on return.
 
-### F10 — continuation churn — expected payoff **~15-20 %**  ← THE PRIZE
+### F10 — continuation churn — part (1) DONE, measured **16-17 %**
 
-This is the largest single item, and the original ranking had it last. Two
-parts, both in the evaluator's bookkeeping rather than in Scheme values:
+The largest single item, and the original ranking had it last. Two parts, both
+in the evaluator's bookkeeping rather than in Scheme values:
 
 **(a) `Rc<Kont>` per continuation frame** — 3,641,973 allocations for `fib 25`,
 **15 per Scheme call**, 33 % of all malloc traffic. `Kont` is 96 bytes.
@@ -279,10 +326,12 @@ so it cannot move the fields out, and clones instead.
 
 Fixes, cheapest first:
 
-1. (b) is partly free: when `state.kont` is uniquely owned, `Rc::try_unwrap` the
-   frame and move its vectors out instead of cloning. There is already a
-   commented-out `take_kont` helper in `src/eval/cek.rs` that does exactly this —
-   the author had the idea and left it unwired.
+1. **DONE** (commit d2796a4, 16-17 % across all workloads — better than the
+   5-7 % predicted, because it also removed the `Rc::clone` in `step` and the
+   per-top-level-form `Kont::Halt` allocation). `dispatch_kont` now takes the
+   frame by value via `Rc::try_unwrap` and moves its vectors into the handler.
+   The commented-out `take_kont` draft the author had left in the file was the
+   right idea; it is now real, plus the GC rooting it needed.
 2. `EvalArg` carries `remaining` + `evaluated` as two `Vec`s that are pushed and
    popped one element at a time. A single shared argument stack in `RunTime`
    (indices into it, per F9) removes both allocations and both clones.
@@ -304,14 +353,16 @@ measurement: total allocation cost is ~30 %, and Scheme-object allocation is
 
 | Item | Expected | Effort |
 |---|---|---|
-| F10(1) `Rc::try_unwrap` instead of cloning frame vectors | ~5-7 % | small — helper already drafted in-tree |
+| ~~F10(1) `Rc::try_unwrap` instead of cloning frame vectors~~ | **DONE, 16-17 %** | — |
 | F10(2) + F9 shared argument stack | ~8-10 % | medium |
 | F5 small-vec frames | ~3-4 % | medium |
 | F3 fixnums (+ optional small-int cache) | ~4-6 % | medium; needs bignum tests first |
 | F10(3) `Vec<Kont>` stack instead of `Rc` chain | rest of the ~30 % | large, touches call/cc |
 | F2 slab allocator | ~1 % | skip unless doing it for GC pressure |
 
-Start with F10(1): smallest diff, largest ratio, and it is measurable on its own.
+F10(1) is done. Next by ratio is F10(2)+F9 (the shared argument stack), which
+removes both remaining `EvalArg` vectors. But consider fixing the GC rooting bug
+above first — it is a correctness issue in the same area of the code.
 
 **Phase 3 — only if GC shows up after Phase 2.** F6, F7. Remember GC does not
 fire at all on the current regression suite; validate against a workload that
