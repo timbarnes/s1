@@ -3,7 +3,6 @@ mod env;
 mod eval;
 mod gc;
 mod io;
-mod macros;
 mod parser;
 mod printer;
 mod special_forms;

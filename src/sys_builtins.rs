@@ -61,6 +61,14 @@ pub fn register_sys_builtins(runtime: &mut RunTime, env: EnvRef) {
     );
 }
 
+/// (eval-string string)
+///
+/// Parses every form in `string` up front, then drives them one at a time
+/// from a `Kont::EvalSeq` frame (see `handle_eval_seq` in `eval/cek.rs`)
+/// instead of calling back into `eval_main`: a nested `eval_main` call would
+/// reset `state.kont` to `Halt`, making the remaining forms and results
+/// (held only in Rust locals) invisible to the GC for the duration of the
+/// call. Returns a list of the results.
 fn eval_string_sp(
     rt: &mut RunTime,
     args: &[GcRef],
@@ -74,15 +82,32 @@ fn eval_string_sp(
         SchemeValue::Str(string) => string.clone(),
         _ => return Err("eval-string: argument must be a string".to_string()),
     };
-    // Evaluate the string
-    let result = crate::eval::eval_string(&string, state, rt)?;
-    if result.len() == 1 {
-        state.control = Control::Value(result[0]);
-    } else {
-        state.control = Control::Values(result);
+
+    let mut port_kind = crate::io::new_string_port_input(&string);
+    let mut forms = Vec::new();
+    loop {
+        match parse(&mut rt.heap, &mut port_kind) {
+            Err(ParseError::Syntax(e)) => return Err(e),
+            Err(ParseError::Eof) => break,
+            Ok(expr) => forms.push(expr),
+        }
     }
 
-    state.kont = next;
+    if forms.is_empty() {
+        state.control = Control::Value(rt.heap.nil_s());
+        state.kont = next;
+        return Ok(());
+    }
+
+    forms.reverse(); // so .pop() below yields the forms in source order
+    let first = forms.pop().unwrap();
+    state.kont = Rc::new(Kont::EvalSeq {
+        remaining: forms,
+        results: Vec::new(),
+        next,
+    });
+    state.control = Control::Expr(first);
+    state.tail = true;
     Ok(())
 }
 

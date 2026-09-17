@@ -240,6 +240,21 @@ pub fn dbg_one_kont(loc: &str, frame: &Kont) -> String {
         }
         Kont::Escape { .. } => result.push_str("Escape"),
         Kont::Seq { .. } => result.push_str("Seq"),
+        Kont::MacroExpand { mode, .. } => {
+            result.push_str(format!("MacroExpand{{mode={:?}}}", mode).as_str())
+        }
+        Kont::ExpandArg { .. } => result.push_str("ExpandArg"),
+        Kont::EvalSeq {
+            remaining, results, ..
+        } => result.push_str(
+            format!(
+                "EvalSeq{{remaining={}, results={}}}",
+                remaining.len(),
+                results.len()
+            )
+            .as_str(),
+        ),
+        Kont::Timer { .. } => result.push_str("Timer"),
     }
     result
 }
@@ -280,6 +295,10 @@ pub fn _dbg_short_kont(kont: &KontRef) {
         Kont::RestoreEnv { .. } => print!("RestoreEnv "),
         Kont::Escape { .. } => print!("Escape "),
         Kont::Seq { .. } => print!("Seq "),
+        Kont::MacroExpand { .. } => print!("MacroExpand "),
+        Kont::ExpandArg { .. } => print!("ExpandArg "),
+        Kont::EvalSeq { .. } => print!("EvalSeq "),
+        Kont::Timer { .. } => print!("Timer "),
     }
 }
 

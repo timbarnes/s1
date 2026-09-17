@@ -3,6 +3,7 @@ use crate::eval::DynamicWind;
 use crate::gc::GcRef;
 use crate::printer::print_value;
 use std::rc::Rc;
+use std::time::Instant;
 
 pub type KontRef = Rc<Kont>;
 
@@ -66,6 +67,35 @@ pub enum Kont {
         phase: EvalPhase,
         next: KontRef,
     },
+    /// Runs a macro body (already installed as `state.control`/`state.env`)
+    /// and, once it yields the expansion, restores the call site's
+    /// environment and either evaluates the expansion (`mode: Evaluate`) or
+    /// returns it as a value (`mode: Expand`, for the `expand` debugging aid).
+    MacroExpand {
+        call_env: EnvRef,
+        mode: MacroMode,
+        next: KontRef,
+    },
+    /// Evaluates `(expand form)`'s argument, then, if the result is a
+    /// macro call, pushes `MacroExpand { mode: Expand }` to expand it one
+    /// level.
+    ExpandArg {
+        env: EnvRef,
+        next: KontRef,
+    },
+    /// Drives a sequence of top-level forms (from `eval-string`), collecting
+    /// each result; `remaining` holds the not-yet-evaluated forms (tail
+    /// first), `results` the values collected so far.
+    EvalSeq {
+        remaining: Vec<GcRef>,
+        results: Vec<GcRef>,
+        next: KontRef,
+    },
+    /// Times the evaluation of the wrapped body (`with-timer`).
+    Timer {
+        start: Instant,
+        next: KontRef,
+    },
     EvalArg {
         proc: Option<GcRef>,
         remaining: Vec<GcRef>,
@@ -113,10 +143,20 @@ impl Kont {
             Kont::EvalArg { next, .. } => Some(next),
             Kont::Halt => None,
             Kont::If { next, .. } => Some(next),
+            Kont::MacroExpand { next, .. } => Some(next),
+            Kont::ExpandArg { next, .. } => Some(next),
+            Kont::EvalSeq { next, .. } => Some(next),
+            Kont::Timer { next, .. } => Some(next),
             Kont::RestoreEnv { next, .. } => Some(next),
             Kont::Seq { next, .. } => Some(next),
         }
     }
+}
+
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum MacroMode {
+    Evaluate,
+    Expand,
 }
 
 impl std::fmt::Debug for Kont {
@@ -272,12 +312,48 @@ impl std::fmt::Debug for Kont {
                     new_kont
                 )
             }
-            _ => write!(f, "Unknown continuation"),
+            Kont::MacroExpand {
+                call_env: _,
+                mode,
+                next,
+            } => {
+                write!(f, "MacroExpand {{ mode: {:?}, next: {:?} }}", mode, next)
+            }
+            Kont::ExpandArg { env: _, next } => {
+                write!(f, "ExpandArg {{ next: {:?} }}", next)
+            }
+            Kont::EvalSeq {
+                remaining,
+                results,
+                next,
+            } => {
+                write!(
+                    f,
+                    "EvalSeq {{ remaining: {}, results: {}, next: {:?} }}",
+                    remaining.len(),
+                    results.len(),
+                    next
+                )
+            }
+            Kont::Timer { next, .. } => {
+                write!(f, "Timer {{ next: {:?} }}", next)
+            }
+            Kont::Eval {
+                expr, phase, next, ..
+            } => {
+                write!(
+                    f,
+                    "Eval {{ expr: {:?}, phase: {:?}, next: {:?} }}",
+                    print_value(expr),
+                    phase,
+                    next
+                )
+            }
         }
     }
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum EvalPhase {
     EvalEnv,
     EvalExpr,
@@ -488,6 +564,32 @@ impl crate::gc::Mark for KontRef {
                     for item in rest {
                         visit(*item);
                     }
+                    worklist.push(Rc::clone(next));
+                }
+                Kont::MacroExpand {
+                    call_env, next, ..
+                } => {
+                    call_env.mark(visit);
+                    worklist.push(Rc::clone(next));
+                }
+                Kont::ExpandArg { env, next } => {
+                    env.mark(visit);
+                    worklist.push(Rc::clone(next));
+                }
+                Kont::EvalSeq {
+                    remaining,
+                    results,
+                    next,
+                } => {
+                    for item in remaining {
+                        visit(*item);
+                    }
+                    for item in results {
+                        visit(*item);
+                    }
+                    worklist.push(Rc::clone(next));
+                }
+                Kont::Timer { next, .. } => {
                     worklist.push(Rc::clone(next));
                 }
             }

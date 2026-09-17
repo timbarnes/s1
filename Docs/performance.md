@@ -24,6 +24,12 @@ were added (commit dbc6fa7, which also fixed exact comparison, `expt`, and
 
 ## OPEN: memory-safety bug under GC pressure
 
+> **Superseded by [nested-evaluation.md](nested-evaluation.md)** (2026-09-16).
+> The hypothesis below was confirmed, but it is one of five defects in the
+> nested-`eval_main` mechanism, and the save-stack fix suggested here covers
+> only two of them. Read that document before acting on this section.
+
+
 **The interpreter segfaults if the GC actually runs often.** The default
 threshold is 100,000 allocations and the regression suite allocates 55,848, so
 GC never fires in normal use and this is invisible — but it is a live

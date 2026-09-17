@@ -1,17 +1,18 @@
 use super::kont::{
-    AndOrKind, CEKState, CondClause, Control, EvalPhase, Kont, KontRef, insert_eval,
+    AndOrKind, CEKState, CondClause, Control, EvalPhase, Kont, KontRef, MacroMode, insert_eval,
 };
 /// Continuation-Passing Style (CPS) evaluator.
 ///
 use crate::env::{EnvOps, EnvRef};
 use crate::eval::kont::DynamicWindPhase;
-use crate::eval::{DynamicWind, RunTime, bind_params, eval_macro};
+use crate::eval::{DynamicWind, RunTime, bind_params};
 use crate::gc::SchemeValue::*;
-use crate::gc::{Callable, GcRef, cons, is_false, list_to_vec};
+use crate::gc::{Callable, GcRef, cons, is_false, list_to_vec, new_float};
 use crate::gc_value;
 use crate::printer::print_value;
 use crate::utilities::{debugger, post_error};
 use std::rc::Rc;
+use std::time::Instant;
 
 /// CEK evaluator entry point from the repl (not used recursively)
 ///
@@ -295,8 +296,25 @@ fn dispatch_kont(state: &mut CEKState, ec: &mut RunTime, val: GcRef) -> Result<(
             new_dw_stack,
         } => handle_escape(state, ec, result, thunks, new_kont, new_dw_stack),
         Kont::Seq { rest, next } => handle_seq(state, rest, next),
+        Kont::MacroExpand {
+            call_env,
+            mode,
+            next,
+        } => handle_macro_expand(state, call_env, mode, next),
+        Kont::ExpandArg { env, next } => handle_expand_arg(state, ec, env, next),
+        Kont::EvalSeq {
+            remaining,
+            results,
+            next,
+        } => handle_eval_seq(state, ec, remaining, results, next),
+        Kont::Timer { start, next } => handle_timer(state, ec, start, next),
         Kont::Halt => Ok(()),
-        _ => Err("unexpected continuation".to_string()),
+        Kont::CallWithValues { .. } => {
+            Err("Kont::CallWithValues reached dispatch_kont with a single value".to_string())
+        }
+        Kont::ApplyProc { .. } => {
+            Err("Kont::ApplyProc reached dispatch_kont instead of being run directly".to_string())
+        }
     }
 }
 
@@ -768,6 +786,134 @@ fn handle_seq(state: &mut CEKState, mut rest: Vec<GcRef>, next: Rc<Kont>) -> Res
     Ok(())
 }
 
+/// Restore the call site's environment once a macro body (or an `(expand
+/// form)` argument that turned out to be a macro call) has produced a
+/// value, then either evaluate it as the expansion or return it as-is.
+fn handle_macro_expand(
+    state: &mut CEKState,
+    call_env: EnvRef,
+    mode: MacroMode,
+    next: KontRef,
+) -> Result<(), String> {
+    match state.control {
+        Control::Value(val) => {
+            state.env = call_env;
+            match mode {
+                MacroMode::Evaluate => {
+                    state.control = Control::Expr(val);
+                    state.tail = true;
+                }
+                MacroMode::Expand => {
+                    state.control = Control::Value(val);
+                    state.tail = false;
+                }
+            }
+            state.kont = next;
+            Ok(())
+        }
+        _ => Err("Kont::MacroExpand reached but control is not a Value".to_string()),
+    }
+}
+
+/// `(expand form)`: `form` has just been evaluated. If it is a macro call,
+/// expand it one level (via `Kont::MacroExpand`); otherwise return it
+/// unchanged.
+fn handle_expand_arg(
+    state: &mut CEKState,
+    ec: &mut RunTime,
+    env: EnvRef,
+    next: KontRef,
+) -> Result<(), String> {
+    let form = match state.control {
+        Control::Value(v) => v,
+        _ => return Err("Kont::ExpandArg reached but control is not a Value".to_string()),
+    };
+    // Restore the env captured before evaluating the argument, for the same
+    // reason EvalArg does: a tail call inside that evaluation may have left
+    // state.env inside the callee.
+    state.env = env;
+
+    let (head, tail) = match gc_value!(form) {
+        Pair(h, t) => (*h, *t),
+        _ => {
+            state.control = Control::Value(form);
+            state.kont = next;
+            return Ok(());
+        }
+    };
+    if let Symbol(_) = gc_value!(head) {
+        if let Some(callable) = state.env.lookup(head) {
+            if let Callable(Callable::Macro { params, body, env }) = gc_value!(callable) {
+                let raw_args = list_to_vec(ec.heap, tail)?;
+                let macro_env = bind_params(params, &raw_args, env, ec.heap)?;
+                let call_env = state.env.clone();
+                let body = *body;
+                state.kont = Rc::new(Kont::MacroExpand {
+                    call_env,
+                    mode: MacroMode::Expand,
+                    next,
+                });
+                state.env = macro_env;
+                state.control = Control::Expr(body);
+                state.tail = false;
+                return Ok(());
+            }
+        }
+    }
+    state.control = Control::Value(form);
+    state.kont = next;
+    Ok(())
+}
+
+/// Drives the forms parsed from an `eval-string` argument one at a time,
+/// collecting each result into `results`.
+fn handle_eval_seq(
+    state: &mut CEKState,
+    ec: &mut RunTime,
+    mut remaining: Vec<GcRef>,
+    mut results: Vec<GcRef>,
+    next: KontRef,
+) -> Result<(), String> {
+    match state.control {
+        Control::Value(val) => results.push(val),
+        _ => return Err("Kont::EvalSeq reached but control is not a Value".to_string()),
+    }
+    if let Some(next_form) = remaining.pop() {
+        state.control = Control::Expr(next_form);
+        state.tail = true;
+        state.kont = Rc::new(Kont::EvalSeq {
+            remaining,
+            results,
+            next,
+        });
+    } else {
+        let list = crate::gc::list_from_slice(&results, ec.heap);
+        state.control = Control::Value(list);
+        state.kont = next;
+    }
+    Ok(())
+}
+
+/// `(with-timer body)`: the body has finished; replace its value with the
+/// elapsed wall-clock time.
+fn handle_timer(
+    state: &mut CEKState,
+    ec: &mut RunTime,
+    start: Instant,
+    next: KontRef,
+) -> Result<(), String> {
+    match state.control {
+        Control::Value(_) => {
+            let elapsed = start.elapsed().as_secs_f64();
+            let time = new_float(ec.heap, elapsed);
+            state.control = Control::Value(time);
+            state.kont = next;
+            Ok(())
+        }
+        _ => Err("Kont::Timer reached but control is not a Value".to_string()),
+    }
+}
+
 fn apply_special_direct(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let op_sym = crate::gc::car(expr)?;
     let op_val = state.env.lookup(op_sym).ok_or("unbound special form")?;
@@ -800,18 +946,22 @@ fn apply_unevaluated(state: &mut CEKState, ec: &mut RunTime) -> Result<(), Strin
             Ok(())
         }
         Callable(Callable::Macro { params, body, env }) => {
-            let (_, cdr) = match gc_value!(*original_call) {
-                Pair(_, cdr) => ((), *cdr),
+            let cdr = match gc_value!(*original_call) {
+                Pair(_, cdr) => *cdr,
                 _ => return Err("macro: not a proper call".to_string()),
             };
             let raw_args = list_to_vec(ec.heap, cdr)?;
-            let expanded = eval_macro(&params, *body, env.clone(), &raw_args, state, ec);
-            match expanded {
-                Ok(exp) => state.control = Control::Expr(exp),
-                Err(err) => post_error(state, ec, &err),
-            }
-            state.tail = true;
-            state.kont = Rc::clone(&next);
+            let macro_env = bind_params(params, &raw_args, env, ec.heap)?;
+            let call_env = state.env.clone();
+            let body = *body;
+            state.kont = Rc::new(Kont::MacroExpand {
+                call_env,
+                mode: MacroMode::Evaluate,
+                next,
+            });
+            state.env = macro_env;
+            state.control = Control::Expr(body);
+            state.tail = false;
             Ok(())
         }
         _ => Err("ApplySpecial: not a special form or macro".to_string()),

@@ -6,18 +6,19 @@
 ///
 use crate::env::{EnvOps, EnvRef};
 use crate::eval::{
-    AndOrKind, CEKState, CondClause, RunTime, eval_macro, eval_main, expect_at_least_n_args,
+    AndOrKind, CEKState, CondClause, Control, Kont, RunTime, expect_at_least_n_args,
     expect_n_args, expect_symbol, insert_and_or, insert_bind, insert_cond, insert_eval, insert_if,
     insert_seq, insert_value,
 };
 use crate::gc::{
-    Callable, GcHeap, GcRef, SchemeValue, car, cdr, cons, list_from_slice, list_to_vec, list2,
-    matches_sym, new_float, new_macro, new_special_form,
+    GcHeap, GcRef, SchemeValue, car, cdr, cons, list_from_slice, list_to_vec, list2, matches_sym,
+    new_macro, new_special_form,
 };
-use crate::macros::expand_macro;
+use crate::gc_value;
 use crate::register_special_form;
 use crate::utilities::post_error;
 use rustc_hash::FxHashMap as HashMap;
+use std::rc::Rc;
 use std::time::Instant;
 
 enum Ptype {
@@ -517,73 +518,172 @@ pub fn letrec_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
 
 /// (expand form) — debugging aid.
 ///
-/// Evaluates `form` in the current environment to obtain a value (typically a
-/// quoted list). If that value is a macro call (a list whose head symbol is
-/// bound to a `Callable::Macro`), expands it one level and returns the
-/// resulting form *without* evaluating it. Otherwise the value is returned
-/// unchanged.
-fn expand_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
+/// Evaluates `form` (via a `Kont::ExpandArg` frame — see `handle_expand_arg`
+/// in `eval/cek.rs`) to obtain a value (typically a quoted list). If that
+/// value is a macro call (a list whose head symbol is bound to a
+/// `Callable::Macro`), expands it one level and returns the resulting form
+/// *without* evaluating it. Otherwise the value is returned unchanged.
+fn expand_sf(expr: GcRef, _ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let arg = car(cdr(expr)?)?;
-
-    // Evaluate the argument in the current env. eval_main clobbers kont/tail,
-    // so save and restore.
-    let saved_kont = std::rc::Rc::clone(&state.kont);
-    let saved_tail = state.tail;
-    let result = eval_main(arg, state, ec);
-    state.kont = saved_kont;
-    state.tail = saved_tail;
-    let form = match result {
-        Ok(vals) => vals[0],
-        Err(err) => return Err(err),
-    };
-
-    // If form is a list whose head names a macro, expand one level.
-    let (head, tail) = match ec.heap.get_value(form) {
-        SchemeValue::Pair(h, t) => (*h, *t),
-        _ => {
-            insert_value(state, form);
-            return Ok(());
-        }
-    };
-    if let SchemeValue::Symbol(_) = ec.heap.get_value(head) {
-        if let Some(callable) = state.env.lookup(head) {
-            if let SchemeValue::Callable(Callable::Macro { params, body, env }) =
-                ec.heap.get_value(callable)
-            {
-                let params = params.clone();
-                let body = *body;
-                let env = env.clone();
-                let raw_args = list_to_vec(ec.heap, tail)?;
-                let expanded = eval_macro(&params, body, env, &raw_args, state, ec)?;
-                insert_value(state, expanded);
-                return Ok(());
-            }
-        }
-    }
-    insert_value(state, form);
+    let prev = Rc::clone(&state.kont);
+    state.kont = Rc::new(Kont::ExpandArg {
+        env: state.env.clone(),
+        next: prev,
+    });
+    state.control = Control::Expr(arg);
+    state.tail = false;
     Ok(())
 }
 
 /// (quasiquote template)
-/// Walks the template, evaluating (unquote x) and splicing (unquote-splicing x)
-/// in the current environment. Re-uses the macro-expander's quasiquote walker.
 ///
-/// `expand_macro` calls `eval_main` internally to evaluate unquoted subexpressions;
-/// that overwrites `state.kont` and `state.tail`, so we save and restore them here
-/// to avoid losing the outer continuation.
+/// Lowers the template into an ordinary expression built from `cons`,
+/// `append`, `list->vector` and `quote` (see `lower_quasiquote` below), then
+/// hands that expression to the machine like any other expression. No nested
+/// evaluation happens here: expansion is pure allocation, so there is
+/// nothing to save or root.
 fn quasiquote_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
-    let saved_kont = std::rc::Rc::clone(&state.kont);
-    let saved_tail = state.tail;
-    let result = expand_macro(&expr, 0, ec, state);
-    state.kont = saved_kont;
-    state.tail = saved_tail;
-    match result {
-        Ok(val) => {
-            insert_value(state, val);
-            Ok(())
-        }
-        Err(err) => Err(err),
+    let template = car(cdr(expr)?)?;
+    let procs = qq_procs(&state.env, ec)?;
+    let lowered = lower_quasiquote(1, template, &procs, ec)?;
+    insert_eval(state, lowered, true);
+    Ok(())
+}
+
+/// The `cons` / `append` / `list->vector` procedures used to build quasiquote
+/// expansions, resolved once from the *global* environment (bypassing any
+/// lexical shadowing at the quasiquote's call site) and embedded into the
+/// lowered code as literal `Callable` values rather than symbols. This makes
+/// expansion immune to a user rebinding `append` (etc.) — see
+/// `Docs/nested-evaluation.md`.
+struct QqProcs {
+    cons: GcRef,
+    append: GcRef,
+    list_to_vector: GcRef,
+}
+
+fn qq_procs(env: &EnvRef, ec: &mut RunTime) -> Result<QqProcs, String> {
+    let mut global = env.clone();
+    while let Some(parent) = global.parent() {
+        global = parent;
     }
+    let cons_sym = ec.heap.intern_symbol("cons");
+    let append_sym = ec.heap.intern_symbol("append");
+    let list_to_vector_sym = ec.heap.intern_symbol("list->vector");
+    let cons = global
+        .lookup_local(cons_sym)
+        .ok_or_else(|| "quasiquote: cons is not bound".to_string())?;
+    let append = global
+        .lookup_local(append_sym)
+        .ok_or_else(|| "quasiquote: append is not bound".to_string())?;
+    let list_to_vector = global
+        .lookup_local(list_to_vector_sym)
+        .ok_or_else(|| "quasiquote: list->vector is not bound".to_string())?;
+    Ok(QqProcs {
+        cons,
+        append,
+        list_to_vector,
+    })
+}
+
+/// Lower a quasiquote template at nesting `depth` (the immediate children of
+/// the outermost quasiquote start at depth 1) into an expression that
+/// computes the same value:
+///
+/// ```text
+/// qq(d, atom)                       ->  (quote atom)
+/// qq(1, (unquote x))                ->  x
+/// qq(d, (unquote x))          d > 1 ->  (list 'unquote qq(d-1, x))
+/// qq(d, (quasiquote x))             ->  (list 'quasiquote qq(d+1, x))
+/// qq(1, ((unquote-splicing x) . r)) ->  (append x qq(1, r))
+/// qq(d, (a . b))                    ->  (cons qq(d, a) qq(d, b))
+/// qq(d, #(e ...))                   ->  (list->vector qq(d, (e ...)))
+/// ```
+fn lower_quasiquote(
+    depth: usize,
+    form: GcRef,
+    procs: &QqProcs,
+    ec: &mut RunTime,
+) -> Result<GcRef, String> {
+    match gc_value!(form) {
+        SchemeValue::Pair(car_ref, cdr_ref) => {
+            let head = *car_ref;
+            let rest = *cdr_ref;
+            if let SchemeValue::Symbol(sym) = gc_value!(head) {
+                match sym.as_str() {
+                    "quasiquote" => {
+                        if let Some(inner) = qq_single_arg(rest) {
+                            let lowered_inner = lower_quasiquote(depth + 1, inner, procs, ec)?;
+                            return Ok(wrap_tag("quasiquote", lowered_inner, procs, ec));
+                        }
+                    }
+                    "unquote" => {
+                        if let Some(inner) = qq_single_arg(rest) {
+                            return if depth == 1 {
+                                Ok(inner)
+                            } else {
+                                let lowered_inner =
+                                    lower_quasiquote(depth - 1, inner, procs, ec)?;
+                                Ok(wrap_tag("unquote", lowered_inner, procs, ec))
+                            };
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            // `((unquote-splicing x) . r)` at depth 1 splices x into the list.
+            if depth == 1 {
+                if let SchemeValue::Pair(h2, t2) = gc_value!(head) {
+                    if let SchemeValue::Symbol(s2) = gc_value!(*h2) {
+                        if s2 == "unquote-splicing" {
+                            if let Some(spliced) = qq_single_arg(*t2) {
+                                let rest_code = lower_quasiquote(depth, rest, procs, ec)?;
+                                return Ok(list_from_slice(
+                                    &[procs.append, spliced, rest_code],
+                                    ec.heap,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            // Generic pair: (cons qq(head) qq(rest))
+            let car_code = lower_quasiquote(depth, head, procs, ec)?;
+            let cdr_code = lower_quasiquote(depth, rest, procs, ec)?;
+            Ok(list_from_slice(&[procs.cons, car_code, cdr_code], ec.heap))
+        }
+        SchemeValue::Vector(elems) => {
+            let elems = elems.clone();
+            let as_list = list_from_slice(&elems, ec.heap);
+            let list_code = lower_quasiquote(depth, as_list, procs, ec)?;
+            Ok(list2(procs.list_to_vector, list_code, ec.heap).unwrap())
+        }
+        SchemeValue::Symbol(_) => {
+            let quote_sym = ec.heap.intern_symbol("quote");
+            Ok(list2(quote_sym, form, ec.heap).unwrap())
+        }
+        // Self-evaluating atoms (Int, Float, Str, Bool, Char, Nil, ...) need
+        // no quoting.
+        _ => Ok(form),
+    }
+}
+
+fn qq_single_arg(rest: GcRef) -> Option<GcRef> {
+    match gc_value!(rest) {
+        SchemeValue::Pair(car, _) => Some(*car),
+        _ => None,
+    }
+}
+
+/// Build code that evaluates to `(tag inner-value)`, e.g. `(list 'unquote
+/// qq(d-1, x))` from the grammar above.
+fn wrap_tag(tag: &str, inner_code: GcRef, procs: &QqProcs, ec: &mut RunTime) -> GcRef {
+    let tag_sym = ec.heap.intern_symbol(tag);
+    let quote_sym = ec.heap.intern_symbol("quote");
+    let quoted_tag = list2(quote_sym, tag_sym, ec.heap).unwrap();
+    let nil = ec.heap.nil_s();
+    let inner_cons = list_from_slice(&[procs.cons, inner_code, nil], ec.heap);
+    list_from_slice(&[procs.cons, quoted_tag, inner_cons], ec.heap)
 }
 
 /// (unquote x) at the top level is an error: it must appear inside a quasiquote.
@@ -637,11 +737,13 @@ pub fn or_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), 
 
 fn with_timer_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let args = expect_n_args(&ec.heap, expr, 2)?;
-    let timer = Instant::now();
-    eval_main(args[1], state, ec)?;
-    let elapsed_time = timer.elapsed().as_secs_f64();
-    let time = new_float(&mut ec.heap, elapsed_time);
-    insert_value(state, time);
+    let prev = Rc::clone(&state.kont);
+    state.kont = Rc::new(Kont::Timer {
+        start: Instant::now(),
+        next: prev,
+    });
+    state.control = Control::Expr(args[1]);
+    state.tail = false;
     Ok(())
 }
 
