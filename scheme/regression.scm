@@ -9,6 +9,9 @@
 (displayln "         =====Advanced Tests=====")
 (load "scheme/advanced_tests.scm")
 
+(displayln "         =====Help System Tests=====")
+(load "scheme/help_tests.scm")
+
 (displayln "         =====GC Stress Tests=====")
 (load "scheme/gc_stress_tests.scm")
 
