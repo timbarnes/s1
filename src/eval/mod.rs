@@ -761,6 +761,7 @@ mod tests {
             vec![nil, x_param, y_param],
             plus_expr,
             captured_env,
+            None,
         );
 
         // Apply the closure: (closure 3 4)
@@ -857,7 +858,13 @@ mod tests {
         let captured_env = Rc::clone(&state.env);
         let closure;
         deduplicated_body = plus_expr; //deduplicate_symbols(plus_expr, heap);
-        closure = new_closure(ec.heap, vec![nil, x_param], deduplicated_body, captured_env);
+        closure = new_closure(
+            ec.heap,
+            vec![nil, x_param],
+            deduplicated_body,
+            captured_env,
+            None,
+        );
 
         // Apply the closure: (closure 5)
         let five;

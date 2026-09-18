@@ -28,6 +28,7 @@ pub fn register_builtins(heap: &mut GcHeap, env: EnvRef) {
         "void" => (void, "(void) Return the void object"),
         "gc-threshold" => (gc_threshold, "(gc-threshold [new-threshold]) Get or set the GC threshold"),
         "shell" => (shell, "(shell command-string) Execute a shell command"),
+        "add-doc" => (add_doc, "(add-doc symbol doc-string) Attach or replace documentation for a symbol"),
     );
 }
 
@@ -75,6 +76,25 @@ fn exit(_heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     std::process::exit(0);
 }
 
+/// (add-doc symbol doc-string)
+/// Attaches or replaces documentation for a symbol, independent of whatever
+/// (if anything) it's currently bound to. Takes priority over any doc
+/// string built into the symbol's bound value; see `help_sp`.
+fn add_doc(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 2 {
+        return Err("add-doc: expected 2 arguments".to_string());
+    }
+    if !matches!(&heap.get_value(args[0]), SchemeValue::Symbol(_)) {
+        return Err("add-doc: first argument must be a symbol".to_string());
+    }
+    let doc = match &heap.get_value(args[1]) {
+        SchemeValue::Str(s) => s.clone(),
+        _ => return Err("add-doc: second argument must be a string".to_string()),
+    };
+    heap.set_doc(args[0], doc);
+    Ok(heap.void())
+}
+
 fn gc_threshold(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     match args.len() {
         0 => Ok(new_int(heap, num_bigint::BigInt::from(heap.threshold))),
@@ -116,6 +136,58 @@ mod tests {
         let result = void(heap, &[arg]);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "void: expected 0 arguments");
+    }
+
+    #[test]
+    fn test_add_doc_on_unbound_symbol() {
+        let mut ev = RunTimeStruct::new();
+        let mut ec = RunTime::from_eval(&mut ev);
+        let heap = &mut ec.heap;
+
+        let sym = heap.intern_symbol("my-unbound-var");
+        let doc = new_string(heap, "a global counter");
+        let result = add_doc(heap, &[sym, doc]).unwrap();
+        assert!(matches!(&heap.get_value(result), SchemeValue::Void));
+        assert_eq!(heap.get_doc(sym).unwrap(), "a global counter");
+    }
+
+    #[test]
+    fn test_add_doc_replaces_existing_doc() {
+        let mut ev = RunTimeStruct::new();
+        let mut ec = RunTime::from_eval(&mut ev);
+        let heap = &mut ec.heap;
+
+        let sym = heap.intern_symbol("car");
+        let doc1 = new_string(heap, "first doc");
+        add_doc(heap, &[sym, doc1]).unwrap();
+        let doc2 = new_string(heap, "second doc");
+        add_doc(heap, &[sym, doc2]).unwrap();
+        assert_eq!(heap.get_doc(sym).unwrap(), "second doc");
+    }
+
+    #[test]
+    fn test_add_doc_errors() {
+        let mut ev = RunTimeStruct::new();
+        let mut ec = RunTime::from_eval(&mut ev);
+        let heap = &mut ec.heap;
+
+        let sym = heap.intern_symbol("x");
+        let doc = new_string(heap, "doc");
+        let non_symbol = new_int(heap, BigInt::from(1));
+        let non_string = new_int(heap, BigInt::from(2));
+
+        assert_eq!(
+            add_doc(heap, &[sym]).unwrap_err(),
+            "add-doc: expected 2 arguments"
+        );
+        assert_eq!(
+            add_doc(heap, &[non_symbol, doc]).unwrap_err(),
+            "add-doc: first argument must be a symbol"
+        );
+        assert_eq!(
+            add_doc(heap, &[sym, non_string]).unwrap_err(),
+            "add-doc: second argument must be a string"
+        );
     }
 
     #[test]

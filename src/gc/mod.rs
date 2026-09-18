@@ -101,12 +101,16 @@ pub enum Callable {
         params: Vec<GcRef>,
         body: GcRef,
         env: Rc<RefCell<crate::env::Frame>>,
+        // Extracted from a leading string literal in the lambda/define body, if present.
+        doc: Option<String>,
     },
     // Scheme-implemented macros
     Macro {
         params: Vec<GcRef>,
         body: GcRef,
         env: Rc<RefCell<crate::env::Frame>>,
+        // Extracted from a leading string literal in the macro body, if present.
+        doc: Option<String>,
     },
 }
 

@@ -23,6 +23,9 @@ pub struct GcHeap {
     worklist: Vec<GcRef>,
     // Symbol table for interning symbols (name -> symbol object)
     symbol_table: HashMap<String, GcRef>,
+    // Documentation attached to symbols via add-doc, independent of what
+    // (if anything) the symbol is currently bound to.
+    doc_table: HashMap<GcRef, String>,
     // Number of allocations since last GC
     allocations: usize,
     pub threshold: usize,
@@ -44,6 +47,7 @@ impl GcHeap {
             nursery: Vec::with_capacity(gc_threshold),
             worklist: Vec::with_capacity(gc_threshold + 1000),
             symbol_table: HashMap::default(),
+            doc_table: HashMap::default(),
             allocations: 0,
             threshold: gc_threshold,
         };
@@ -200,6 +204,17 @@ impl GcHeap {
     /// Get statistics about the symbol table.
     pub fn symbol_table_stats(&self) -> usize {
         self.symbol_table.len()
+    }
+
+    /// Attach or replace the documentation for a symbol, independent of
+    /// whatever value (if any) it's currently bound to.
+    pub fn set_doc(&mut self, symbol: GcRef, doc: String) {
+        self.doc_table.insert(symbol, doc);
+    }
+
+    /// Look up documentation attached to a symbol via `set_doc`/`add-doc`.
+    pub fn get_doc(&self, symbol: GcRef) -> Option<&String> {
+        self.doc_table.get(&symbol)
     }
 
     /// Perform garbage collection.

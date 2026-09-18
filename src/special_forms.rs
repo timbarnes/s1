@@ -133,8 +133,20 @@ fn create_lambda_or_macro(
         }
     }
 
+    // A leading string literal in the body, when followed by at least one
+    // more form, is a docstring (Common Lisp/Guile convention) rather than
+    // a body expression to evaluate.
+    let (doc, body_forms) = if form.len() > 3 {
+        match &ec.heap.get_value(form[2]) {
+            SchemeValue::Str(s) => (Some(s.clone()), &form[3..]),
+            _ => (None, &form[2..]),
+        }
+    } else {
+        (None, &form[2..])
+    };
+
     // Transform internal defines to letrec
-    let wrapped_body = transform_internal_defines(&form[2..], ec.heap)?;
+    let wrapped_body = transform_internal_defines(body_forms, ec.heap)?;
 
     // Intern and preserve parameter symbols
     let mut param_map = HashMap::default();
@@ -159,6 +171,7 @@ fn create_lambda_or_macro(
                     wrapped_body,
                     //deduplicated_body,
                     captured_frame,
+                    doc,
                 );
                 Ok(new_closure)
             } else if name == "macro" {
@@ -168,6 +181,7 @@ fn create_lambda_or_macro(
                     wrapped_body,
                     //deduplicated_body,
                     captured_frame,
+                    doc,
                 );
                 Ok(new_macro)
             } else {
@@ -247,9 +261,14 @@ pub fn define_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
             let params = cdr(signature)?;
 
             let lambda_sym = ec.heap.intern_symbol("lambda");
-            let body_expr = wrap_body_in_begin(body, &mut ec.heap);
-
-            let lambda_list = list_from_slice(&[lambda_sym, params, body_expr], &mut ec.heap);
+            // Pass the body forms through unwrapped, exactly as a literal
+            // (lambda params body...) would, so create_lambda_or_macro's
+            // leading-docstring detection and internal-define handling
+            // (which both operate on the raw body forms) apply identically
+            // whether the lambda came from `define` or was written directly.
+            let mut lambda_form = vec![lambda_sym, params];
+            lambda_form.extend_from_slice(body);
+            let lambda_list = list_from_slice(&lambda_form, &mut ec.heap);
 
             insert_bind(state, name, state.env.clone(), true);
             insert_eval(state, lambda_list, false);

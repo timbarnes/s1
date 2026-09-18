@@ -341,8 +341,14 @@ pub fn new_closure(
     params: Vec<GcRef>,
     body: GcRef,
     env: Rc<RefCell<crate::env::Frame>>,
+    doc: Option<String>,
 ) -> GcRef {
-    let closure = SchemeValue::Callable(Callable::Closure { params, body, env });
+    let closure = SchemeValue::Callable(Callable::Closure {
+        params,
+        body,
+        env,
+        doc,
+    });
     let obj = GcObject {
         value: closure,
         marked: false,
@@ -356,8 +362,14 @@ pub fn new_macro(
     params: Vec<GcRef>,
     body: GcRef,
     env: Rc<RefCell<crate::env::Frame>>,
+    doc: Option<String>,
 ) -> GcRef {
-    let new_macro = SchemeValue::Callable(Callable::Macro { params, body, env });
+    let new_macro = SchemeValue::Callable(Callable::Macro {
+        params,
+        body,
+        env,
+        doc,
+    });
     let obj = GcObject {
         value: new_macro,
         marked: false,

@@ -173,6 +173,7 @@ fn apply_sp(
                 params,
                 body,
                 env: closure_env,
+                ..
             } => {
                 let applied_args = list_to_vec(ec.heap, arglist)?;
                 let new_env =
@@ -212,8 +213,15 @@ fn garbage_collect_sp(
 }
 
 /// (help symbol)
-/// Looks up `symbol` in the current environment and returns the doc string
-/// attached to its bound `Callable`, as a Scheme string.
+/// Returns the documentation for `symbol` as a Scheme string. Resolution
+/// order:
+///   1. A doc attached directly to the symbol via `add-doc`, which works
+///      whether or not the symbol is bound to anything.
+///   2. Otherwise, if the symbol is bound, the doc intrinsic to its value
+///      (a builtin/sys-builtin/special-form's doc, or a closure/macro's
+///      leading-docstring, if any).
+///   3. Otherwise "no documentation available".
+/// An unbound symbol with no `add-doc` entry is still an error.
 fn help_sp(
     rt: &mut RunTime,
     args: &[GcRef],
@@ -227,23 +235,24 @@ fn help_sp(
         SchemeValue::Symbol(sym) => sym.clone(),
         _ => return Err("help: argument must be a symbol".to_string()),
     };
-    let binding = state
-        .env
-        .lookup(args[0])
-        .ok_or_else(|| format!("help: unbound variable: {}", sym_name))?;
-    let doc = match &rt.heap.get_value(binding) {
-        SchemeValue::Callable(
-            Callable::Builtin { doc, .. }
-            | Callable::SysBuiltin { doc, .. }
-            | Callable::SpecialForm { doc, .. },
-        ) => doc.clone(),
-        SchemeValue::Callable(Callable::Closure { .. }) => {
-            format!("{}: no documentation available", sym_name)
+    let doc = if let Some(doc) = rt.heap.get_doc(args[0]) {
+        doc.clone()
+    } else {
+        let binding = state
+            .env
+            .lookup(args[0])
+            .ok_or_else(|| format!("help: unbound variable: {}", sym_name))?;
+        match &rt.heap.get_value(binding) {
+            SchemeValue::Callable(
+                Callable::Builtin { doc, .. }
+                | Callable::SysBuiltin { doc, .. }
+                | Callable::SpecialForm { doc, .. },
+            ) => doc.clone(),
+            SchemeValue::Callable(
+                Callable::Closure { doc: Some(doc), .. } | Callable::Macro { doc: Some(doc), .. },
+            ) => doc.clone(),
+            _ => format!("{}: no documentation available", sym_name),
         }
-        SchemeValue::Callable(Callable::Macro { .. }) => {
-            format!("{}: no documentation available", sym_name)
-        }
-        _ => format!("{}: not a procedure", sym_name),
     };
     let result = new_string(rt.heap, &doc);
     state.control = Control::Value(result);
@@ -1140,9 +1149,23 @@ pub fn schedule_dynamic_wind_transitions(
 mod tests {
     use super::*;
     use crate::env::Frame;
-    use crate::eval::{RunTimeStruct, initialize_scheme_globals};
-    use crate::gc::new_int;
+    use crate::eval::{RunTimeStruct, eval_string, initialize_scheme_globals};
+    use crate::gc::{car, cdr, new_int};
     use std::cell::RefCell;
+
+    /// Walks `eval_string`'s bundled result list to the `index`-th (0-based)
+    /// per-form result and asserts it's a string equal to `expected`.
+    fn assert_nth_result_is_string(results: &[GcRef], heap: &GcHeap, index: usize, expected: &str) {
+        let mut cursor = results[0];
+        for _ in 0..index {
+            cursor = cdr(cursor).unwrap();
+        }
+        let value = car(cursor).unwrap();
+        match &heap.get_value(value) {
+            SchemeValue::Str(s) => assert_eq!(s, expected),
+            _ => panic!("Expected a string result, got something else"),
+        }
+    }
 
     /// `help_sp` is called directly (bypassing the CEK dispatch loop), so its
     /// `Result::Err` is observed directly instead of being converted into a
@@ -1207,5 +1230,99 @@ mod tests {
         let halt = Rc::new(Kont::Halt);
         let err = help_sp(&mut ec, &[], &mut state, halt).unwrap_err();
         assert_eq!(err, "help: expected 1 argument");
+    }
+
+    #[test]
+    fn test_add_doc_documents_unbound_symbol() {
+        let mut runtime = RunTimeStruct::new();
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut ec = RunTime::from_eval(&mut runtime);
+        initialize_scheme_globals(&mut ec, env.clone()).unwrap();
+        let mut state = CEKState::new(env);
+
+        let results = eval_string(
+            "(add-doc 'my-global \"a global counter\") (help 'my-global)",
+            &mut state,
+            &mut ec,
+        )
+        .unwrap();
+        assert_nth_result_is_string(&results, ec.heap, 1, "a global counter");
+    }
+
+    #[test]
+    fn test_add_doc_overrides_builtin_doc() {
+        let mut runtime = RunTimeStruct::new();
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut ec = RunTime::from_eval(&mut runtime);
+        initialize_scheme_globals(&mut ec, env.clone()).unwrap();
+        let mut state = CEKState::new(env);
+
+        let results = eval_string(
+            "(add-doc 'car \"overridden doc\") (help 'car)",
+            &mut state,
+            &mut ec,
+        )
+        .unwrap();
+        assert_nth_result_is_string(&results, ec.heap, 1, "overridden doc");
+    }
+
+    #[test]
+    fn test_lambda_docstring_is_extracted_and_not_evaluated() {
+        let mut runtime = RunTimeStruct::new();
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut ec = RunTime::from_eval(&mut runtime);
+        initialize_scheme_globals(&mut ec, env.clone()).unwrap();
+        let mut state = CEKState::new(env);
+
+        let results = eval_string(
+            "(define (f x) \"doubles x\" (* x 2)) (help 'f) (f 5)",
+            &mut state,
+            &mut ec,
+        )
+        .unwrap();
+        assert_nth_result_is_string(&results, ec.heap, 1, "doubles x");
+        let call_result = car(cdr(cdr(results[0]).unwrap()).unwrap()).unwrap();
+        match &ec.heap.get_value(call_result) {
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "10"),
+            _ => panic!("Expected (f 5) to evaluate to 10, docstring should not be in the body"),
+        }
+    }
+
+    #[test]
+    fn test_single_string_body_is_not_mistaken_for_docstring() {
+        let mut runtime = RunTimeStruct::new();
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut ec = RunTime::from_eval(&mut runtime);
+        initialize_scheme_globals(&mut ec, env.clone()).unwrap();
+        let mut state = CEKState::new(env);
+
+        // A lambda whose entire body is a single string literal: that
+        // string is the return value, not a docstring (there's no body
+        // left over if it were treated as one).
+        let results = eval_string(
+            "(define g (lambda () \"just a string\")) (g) (help 'g)",
+            &mut state,
+            &mut ec,
+        )
+        .unwrap();
+        assert_nth_result_is_string(&results, ec.heap, 1, "just a string");
+        assert_nth_result_is_string(&results, ec.heap, 2, "g: no documentation available");
+    }
+
+    #[test]
+    fn test_add_doc_overrides_closure_own_docstring() {
+        let mut runtime = RunTimeStruct::new();
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut ec = RunTime::from_eval(&mut runtime);
+        initialize_scheme_globals(&mut ec, env.clone()).unwrap();
+        let mut state = CEKState::new(env);
+
+        let results = eval_string(
+            "(define (h x) \"own doc\" x) (add-doc 'h \"override\") (help 'h)",
+            &mut state,
+            &mut ec,
+        )
+        .unwrap();
+        assert_nth_result_is_string(&results, ec.heap, 2, "override");
     }
 }

@@ -843,7 +843,7 @@ fn handle_expand_arg(
     };
     if let Symbol(_) = gc_value!(head) {
         if let Some(callable) = state.env.lookup(head) {
-            if let Callable(Callable::Macro { params, body, env }) = gc_value!(callable) {
+            if let Callable(Callable::Macro { params, body, env, .. }) = gc_value!(callable) {
                 let raw_args = list_to_vec(ec.heap, tail)?;
                 let macro_env = bind_params(params, &raw_args, env, ec.heap)?;
                 let call_env = state.env.clone();
@@ -945,7 +945,7 @@ fn apply_unevaluated(state: &mut CEKState, ec: &mut RunTime) -> Result<(), Strin
             }
             Ok(())
         }
-        Callable(Callable::Macro { params, body, env }) => {
+        Callable(Callable::Macro { params, body, env, .. }) => {
             let cdr = match gc_value!(*original_call) {
                 Pair(_, cdr) => *cdr,
                 _ => return Err("macro: not a proper call".to_string()),
@@ -1002,6 +1002,7 @@ pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> 
                 params,
                 body,
                 env: closure_env,
+                ..
             } => {
                 let new_env = bind_params(&params[..], &evaluated_args, &closure_env, ec.heap)?;
                 let old_env = state.env.clone();
