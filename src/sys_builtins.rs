@@ -6,7 +6,7 @@ use crate::eval::{
 };
 use crate::gc::{
     Callable, GcHeap, GcRef, SchemeValue, get_symbol, list, list_to_vec, list3, new_bool,
-    new_continuation, new_float, new_port, new_sys_builtin,
+    new_continuation, new_float, new_port, new_string, new_sys_builtin,
 };
 use crate::gc_value;
 use crate::io::{PortKind, port_kind_from_scheme_port};
@@ -58,6 +58,7 @@ pub fn register_sys_builtins(runtime: &mut RunTime, env: EnvRef) {
         "flush-output" => flush_output_sp,
         "garbage-collect" => garbage_collect_sp,
         "gc" => garbage_collect_sp,
+        "help" => help_sp,
     );
 }
 
@@ -206,6 +207,46 @@ fn garbage_collect_sp(
     let elapsed_time = timer.elapsed().as_secs_f64();
     let time = new_float(&mut ec.heap, elapsed_time);
     state.control = Control::Value(time);
+    state.kont = next;
+    Ok(())
+}
+
+/// (help symbol)
+/// Looks up `symbol` in the current environment and returns the doc string
+/// attached to its bound `Callable`, as a Scheme string.
+fn help_sp(
+    rt: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
+    if args.len() != 1 {
+        return Err("help: expected 1 argument".to_string());
+    }
+    let sym_name = match &gc_value!(args[0]) {
+        SchemeValue::Symbol(sym) => sym.clone(),
+        _ => return Err("help: argument must be a symbol".to_string()),
+    };
+    let binding = state
+        .env
+        .lookup(args[0])
+        .ok_or_else(|| format!("help: unbound variable: {}", sym_name))?;
+    let doc = match &rt.heap.get_value(binding) {
+        SchemeValue::Callable(
+            Callable::Builtin { doc, .. }
+            | Callable::SysBuiltin { doc, .. }
+            | Callable::SpecialForm { doc, .. },
+        ) => doc.clone(),
+        SchemeValue::Callable(Callable::Closure { .. }) => {
+            format!("{}: no documentation available", sym_name)
+        }
+        SchemeValue::Callable(Callable::Macro { .. }) => {
+            format!("{}: no documentation available", sym_name)
+        }
+        _ => format!("{}: not a procedure", sym_name),
+    };
+    let result = new_string(rt.heap, &doc);
+    state.control = Control::Value(result);
     state.kont = next;
     Ok(())
 }
@@ -1095,54 +1136,76 @@ pub fn schedule_dynamic_wind_transitions(
     thunks
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::eval::RunTimeStruct;
-//     use crate::gc::{SchemeValue, new_int, new_string};
-//     use std::io::Write;
-//     use tempfile::NamedTempFile;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::env::Frame;
+    use crate::eval::{RunTimeStruct, initialize_scheme_globals};
+    use crate::gc::new_int;
+    use std::cell::RefCell;
 
-//     #[test]
-//     fn test_open_input_file_success() {
-//         let mut ev = RunTimeStruct::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
-//         // Create a temp file with some content
-//         let mut tmpfile = NamedTempFile::new().unwrap();
-//         write!(tmpfile, "hello world").unwrap();
-//         let path = tmpfile.path().to_str().unwrap().to_string();
-//         let filename = new_string(&mut ec.heap, &path);
-//         let result = open_input_file_sp(&mut ec, &[filename], &mut state);
-//         assert!(result.is_ok());
-//         let port = result.unwrap();
-//         match &ec.heap.get_value(port) {
-//             SchemeValue::Port(kind) => match kind {
-//                 crate::io::PortKind::StringPortInput { content, .. } => {
-//                     assert_eq!(content, "hello world");
-//                 }
-//                 _ => panic!("Expected StringPortInput"),
-//             },
-//             _ => panic!("Expected Port"),
-//         }
-//     }
+    /// `help_sp` is called directly (bypassing the CEK dispatch loop), so its
+    /// `Result::Err` is observed directly instead of being converted into a
+    /// halted, void-valued state by `post_error`.
+    #[test]
+    fn test_help_returns_real_doc_string() {
+        let mut runtime = RunTimeStruct::new();
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut ec = RunTime::from_eval(&mut runtime);
+        initialize_scheme_globals(&mut ec, env.clone()).unwrap();
+        let mut state = CEKState::new(env);
 
-//     #[test]
-//     fn test_open_input_file_nonexistent() {
-//         let mut ev = RunTimeStruct::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
-//         let filename = new_string(&mut ec.heap, "/no/such/file/hopefully.txt");
-//         let result = open_input_file(&mut ec.heap, &[filename]);
-//         assert!(result.is_err());
-//         assert!(result.unwrap_err().contains("could not open file"));
-//     }
+        let sym = ec.heap.intern_symbol("car");
+        let halt = Rc::new(Kont::Halt);
+        help_sp(&mut ec, &[sym], &mut state, halt).unwrap();
 
-//     #[test]
-//     fn test_open_input_file_nonstring_arg() {
-//         let mut ev = RunTimeStruct::new();
-//         let mut ec = crate::eval::RunTime::from_eval(&mut ev);
-//         let not_a_string = new_int(&mut ec.heap, 42.into());
-//         let result = open_input_file(&mut ec.heap, &[not_a_string]);
-//         assert!(result.is_err());
-//         assert!(result.unwrap_err().contains("argument must be a string"));
-//     }
-// }
+        match &state.control {
+            Control::Value(v) => match &ec.heap.get_value(*v) {
+                SchemeValue::Str(s) => assert_eq!(s, "(car pair) -> first element of pair"),
+                _ => panic!("Expected a doc string"),
+            },
+            _ => panic!("Expected Control::Value"),
+        }
+    }
+
+    #[test]
+    fn test_help_unbound_symbol_is_error() {
+        let mut runtime = RunTimeStruct::new();
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut ec = RunTime::from_eval(&mut runtime);
+        initialize_scheme_globals(&mut ec, env.clone()).unwrap();
+        let mut state = CEKState::new(env);
+
+        let sym = ec.heap.intern_symbol("no-such-symbol");
+        let halt = Rc::new(Kont::Halt);
+        let err = help_sp(&mut ec, &[sym], &mut state, halt).unwrap_err();
+        assert!(err.contains("Unbound") || err.contains("help"));
+    }
+
+    #[test]
+    fn test_help_non_symbol_arg_is_error() {
+        let mut runtime = RunTimeStruct::new();
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut ec = RunTime::from_eval(&mut runtime);
+        initialize_scheme_globals(&mut ec, env.clone()).unwrap();
+        let mut state = CEKState::new(env);
+
+        let arg = new_int(ec.heap, num_bigint::BigInt::from(42));
+        let halt = Rc::new(Kont::Halt);
+        let err = help_sp(&mut ec, &[arg], &mut state, halt).unwrap_err();
+        assert_eq!(err, "help: argument must be a symbol");
+    }
+
+    #[test]
+    fn test_help_wrong_arity_is_error() {
+        let mut runtime = RunTimeStruct::new();
+        let env = Rc::new(RefCell::new(Frame::new(None)));
+        let mut ec = RunTime::from_eval(&mut runtime);
+        initialize_scheme_globals(&mut ec, env.clone()).unwrap();
+        let mut state = CEKState::new(env);
+
+        let halt = Rc::new(Kont::Halt);
+        let err = help_sp(&mut ec, &[], &mut state, halt).unwrap_err();
+        assert_eq!(err, "help: expected 1 argument");
+    }
+}

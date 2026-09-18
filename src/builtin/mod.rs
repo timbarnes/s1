@@ -24,7 +24,6 @@ pub fn register_builtins(heap: &mut GcHeap, env: EnvRef) {
     string::register_string_builtins(heap, env.clone());
     vector::register_vector_builtins(heap, env.clone());
     register_builtin_family!(heap, env.clone(),
-        "help" => (help, "(help symbol) Get help for a symbol"),
         "exit" => (exit, "(exit) Exit the interpreter"),
         "void" => (void, "(void) Return the void object"),
         "gc-threshold" => (gc_threshold, "(gc-threshold [new-threshold]) Get or set the GC threshold"),
@@ -76,21 +75,6 @@ fn exit(_heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     std::process::exit(0);
 }
 
-// (help 'symbol): returns the doc string for the given symbol as a Scheme string
-fn help(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if let Some(arg) = args.get(0) {
-        if let SchemeValue::Symbol(sym) = &heap.get_value(*arg) {
-            // In a real implementation, you would have access to the environment here.
-            // For now, return a placeholder string.
-            Ok(new_string(heap, &format!("Help for {}: ...", sym)))
-        } else {
-            Err("help: argument must be a symbol".to_string())
-        }
-    } else {
-        Err("help: expected 1 argument".to_string())
-    }
-}
-
 fn gc_threshold(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     match args.len() {
         0 => Ok(new_int(heap, num_bigint::BigInt::from(heap.threshold))),
@@ -132,29 +116,6 @@ mod tests {
         let result = void(heap, &[arg]);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "void: expected 0 arguments");
-    }
-
-    #[test]
-    fn test_help_builtin() {
-        let mut ev = RunTimeStruct::new();
-        let mut ec = RunTime::from_eval(&mut ev);
-        let heap = &mut ec.heap;
-
-        let sym = heap.intern_symbol("my-symbol");
-        let result = help(heap, &[sym]).unwrap();
-        assert!(matches!(&heap.get_value(result), SchemeValue::Str(_)));
-        if let SchemeValue::Str(s) = heap.get_value(result) {
-            assert_eq!(s, "Help for my-symbol: ...");
-        }
-
-        let result = help(heap, &[]);
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "help: expected 1 argument");
-
-        let arg = new_int(heap, BigInt::from(1));
-        let result = help(heap, &[arg]);
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "help: argument must be a symbol");
     }
 
     #[test]
