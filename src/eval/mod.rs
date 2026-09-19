@@ -22,6 +22,16 @@ pub struct RunTimeStruct {
     pub dw_next: u32,
     pub trace: TraceType,
     pub depth: i32,
+    /// Shared scratch space for evaluated call arguments. Every in-flight
+    /// application's `Kont::EvalArg` claims a suffix of this stack (from its
+    /// own `args_base` to the current top) instead of owning a private
+    /// `Vec`; nested calls simply extend it further and the innermost one
+    /// truncates back on return, exactly like a native call stack. Safe to
+    /// share because a captured continuation never retains an `EvalArg`
+    /// frame (`capture_call_site_kont` strips those on capture — this
+    /// evaluator's continuations are escape-only), so nothing outlives the
+    /// LIFO discipline this relies on. Rooted whole in `GcHeap::mark_from`.
+    pub arg_stack: Vec<GcRef>,
 }
 
 pub struct RunTime<'a> {
@@ -33,6 +43,7 @@ pub struct RunTime<'a> {
     pub dw_next: &'a mut u32,
     pub trace: &'a mut TraceType,
     pub depth: &'a mut i32,
+    pub arg_stack: &'a mut Vec<GcRef>,
 }
 
 impl<'a> RunTime<'a> {
@@ -46,6 +57,7 @@ impl<'a> RunTime<'a> {
             dw_next: &mut eval.dw_next,
             trace: &mut eval.trace,
             depth: &mut eval.depth,
+            arg_stack: &mut eval.arg_stack,
         }
     }
 }
@@ -88,6 +100,7 @@ impl RunTimeStruct {
             dw_next: 0,
             trace: TraceType::Reset,
             depth: 0,
+            arg_stack: Vec::new(),
         }
     }
 }

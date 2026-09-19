@@ -14,20 +14,78 @@ use std::rc::Rc;
 
 pub type EnvRef = Rc<RefCell<Frame>>;
 
+/// Variable bindings for one frame.
+///
+/// Non-global frames (closure calls, `let`, ...) almost always hold a
+/// handful of bindings, where a linear scan over a `Vec` beats hashing —
+/// and skips allocating a hash table's bucket array entirely. The global
+/// frame holds hundreds of bindings (every builtin, special form, and
+/// top-level `define`), where the hash map earns its keep. Frames are
+/// classified once, at creation (`Frame::new`), based on whether they have
+/// a parent: `extend()`-created frames are never global.
+#[derive(Debug, PartialEq)]
+pub enum Bindings {
+    Small(Vec<(GcRef, GcRef)>),
+    Large(HashMap<GcRef, GcRef>),
+}
+
+impl Bindings {
+    fn get(&self, symbol: GcRef) -> Option<GcRef> {
+        match self {
+            Bindings::Small(v) => v.iter().find(|(k, _)| *k == symbol).map(|(_, v)| *v),
+            Bindings::Large(m) => m.get(&symbol).copied(),
+        }
+    }
+
+    fn contains_key(&self, symbol: GcRef) -> bool {
+        match self {
+            Bindings::Small(v) => v.iter().any(|(k, _)| *k == symbol),
+            Bindings::Large(m) => m.contains_key(&symbol),
+        }
+    }
+
+    fn insert(&mut self, symbol: GcRef, val: GcRef) {
+        match self {
+            Bindings::Small(v) => {
+                if let Some(slot) = v.iter_mut().find(|(k, _)| *k == symbol) {
+                    slot.1 = val;
+                } else {
+                    v.push((symbol, val));
+                }
+            }
+            Bindings::Large(m) => {
+                m.insert(symbol, val);
+            }
+        }
+    }
+
+    /// Iterate `(&symbol, &value)` pairs, for GC marking and debug dumps.
+    pub fn iter(&self) -> Box<dyn Iterator<Item = (&GcRef, &GcRef)> + '_> {
+        match self {
+            Bindings::Small(v) => Box::new(v.iter().map(|(k, val)| (k, val))),
+            Bindings::Large(m) => Box::new(m.iter()),
+        }
+    }
+}
+
 /// A single environment frame containing variable bindings
 #[derive(Debug, PartialEq)]
 pub struct Frame {
-    pub bindings: HashMap<GcRef, GcRef>,
+    pub bindings: Bindings,
     pub parent: Option<EnvRef>,
 }
 
 impl Frame {
-    /// Create a new frame with an optional parent
+    /// Create a new frame with an optional parent. Only a frame with no
+    /// parent (the global frame) gets the hash-map representation; every
+    /// frame created via `extend()` is local and gets the small-vector one.
     pub fn new(parent: Option<EnvRef>) -> Self {
-        Self {
-            bindings: HashMap::default(),
-            parent,
-        }
+        let bindings = if parent.is_none() {
+            Bindings::Large(HashMap::default())
+        } else {
+            Bindings::Small(Vec::new())
+        };
+        Self { bindings, parent }
     }
 }
 
@@ -49,8 +107,8 @@ impl EnvOps for EnvRef {
         let mut current = Some(self.clone());
         while let Some(env) = current {
             let frame = env.borrow();
-            if let Some(val) = frame.bindings.get(&symbol) {
-                return Some(*val);
+            if let Some(val) = frame.bindings.get(symbol) {
+                return Some(val);
             }
             current = frame.parent.clone();
         }
@@ -60,19 +118,15 @@ impl EnvOps for EnvRef {
     // Search only this frame
     fn lookup_local(&self, symbol: GcRef) -> Option<GcRef> {
         let frame = self.borrow();
-        if let Some(val) = frame.bindings.get(&symbol) {
-            Some(*val)
-        } else {
-            None
-        }
+        frame.bindings.get(symbol)
     }
 
     fn lookup_with_frame(&self, symbol: GcRef) -> Option<(GcRef, EnvRef)> {
         let mut current = Some(self.clone());
         while let Some(env) = current {
             let frame = env.borrow();
-            if let Some(val) = frame.bindings.get(&symbol) {
-                return Some((*val, env.clone()));
+            if let Some(val) = frame.bindings.get(symbol) {
+                return Some((val, env.clone()));
             }
             current = frame.parent.clone();
         }
@@ -90,8 +144,8 @@ impl EnvOps for EnvRef {
         let mut current = Some(self.clone());
         while let Some(env) = current {
             let mut frame = env.borrow_mut();
-            if frame.bindings.contains_key(&symbol) {
-                frame.bindings.insert(symbol.clone(), val);
+            if frame.bindings.contains_key(symbol) {
+                frame.bindings.insert(symbol, val);
                 return Ok(());
             }
             current = frame.parent.clone();
@@ -101,8 +155,8 @@ impl EnvOps for EnvRef {
 
     fn set_local(&self, symbol: GcRef, val: GcRef) -> Result<(), String> {
         let mut frame = self.borrow_mut();
-        if frame.bindings.contains_key(&symbol) {
-            frame.bindings.insert(symbol.clone(), val);
+        if frame.bindings.contains_key(symbol) {
+            frame.bindings.insert(symbol, val);
             Ok(())
         } else {
             Err(format!("Unbound variable: {}", print_value(&symbol)))
@@ -110,7 +164,7 @@ impl EnvOps for EnvRef {
     }
 
     fn has_symbol(&self, symbol: GcRef) -> bool {
-        self.borrow().bindings.contains_key(&symbol)
+        self.borrow().bindings.contains_key(symbol)
     }
 
     // Add a new frame with this frame as parent

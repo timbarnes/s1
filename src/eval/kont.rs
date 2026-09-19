@@ -98,8 +98,19 @@ pub enum Kont {
     },
     EvalArg {
         proc: Option<GcRef>,
-        remaining: Vec<GcRef>,
-        evaluated: Vec<GcRef>,
+        /// The not-yet-evaluated argument expressions, as the tail of the
+        /// original call's cons-list (`Nil` once all are evaluated). Walking
+        /// this directly instead of copying it into a `Vec` up front avoids
+        /// an allocation per application; the GC marker follows it for free
+        /// since it's ordinary list structure.
+        remaining_exprs: GcRef,
+        /// Index into `RunTime::arg_stack` where this call's evaluated
+        /// arguments begin; they run from `args_base` to the stack's current
+        /// top. The stack is shared and reused across all in-flight calls
+        /// (nested calls simply extend it further and truncate back on
+        /// return), which turns per-call argument accumulation into pushes
+        /// onto one long-lived buffer instead of a fresh `Vec` each time.
+        args_base: usize,
         original_call: GcRef,
         tail: bool,
         env: EnvRef,
@@ -168,16 +179,20 @@ impl std::fmt::Debug for Kont {
             }
             Kont::EvalArg {
                 proc,
-                remaining,
-                evaluated,
+                remaining_exprs,
+                args_base,
                 original_call,
                 next,
                 ..
             } => {
                 write!(
                     f,
-                    "EvalArg {{ proc: {:?}, remaining: {:?}, evaluated: {:?}, original_call: {:?}, next: {:?} }}",
-                    proc, remaining, evaluated, original_call, next
+                    "EvalArg {{ proc: {:?}, remaining_exprs: {}, args_base: {}, original_call: {:?}, next: {:?} }}",
+                    proc,
+                    print_value(remaining_exprs),
+                    args_base,
+                    original_call,
+                    next
                 )
             }
             Kont::ApplyProc {
@@ -527,8 +542,7 @@ impl crate::gc::Mark for KontRef {
                 }
                 Kont::EvalArg {
                     proc,
-                    remaining,
-                    evaluated,
+                    remaining_exprs,
                     original_call,
                     env,
                     next,
@@ -537,12 +551,13 @@ impl crate::gc::Mark for KontRef {
                     if let Some(proc) = proc {
                         visit(*proc);
                     }
-                    for item in remaining {
-                        visit(*item);
-                    }
-                    for item in evaluated {
-                        visit(*item);
-                    }
+                    // Transitively marks the whole not-yet-evaluated tail:
+                    // `visit` (== `mark_reachable`) already knows how to walk
+                    // Pair structure.
+                    visit(*remaining_exprs);
+                    // The already-evaluated arguments for this and every
+                    // other in-flight call live in `RunTime::arg_stack`,
+                    // rooted directly in `GcHeap::mark_from` — not here.
                     visit(*original_call);
                     env.mark(visit);
                     worklist.push(Rc::clone(next));

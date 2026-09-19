@@ -170,20 +170,28 @@ pub fn dbg_one_kont(loc: &str, frame: &Kont) -> String {
         Kont::CondClause { .. } => result.push_str("CondClause"),
         Kont::EvalArg {
             proc,
-            remaining,
-            evaluated,
+            remaining_exprs,
+            args_base,
             original_call,
             ..
-        } => result.push_str(
-            format!(
-                "EvalArg{{proc={}, rem={}, eval={}, orig={:?}}}",
-                if proc.is_some() { "Some" } else { "None" },
-                remaining.len(),
-                evaluated.len(),
-                original_call,
+        } => {
+            let mut remaining_count = 0usize;
+            let mut cursor = *remaining_exprs;
+            while let crate::gc::SchemeValue::Pair(_, cdr) = gc_value!(cursor) {
+                remaining_count += 1;
+                cursor = *cdr;
+            }
+            result.push_str(
+                format!(
+                    "EvalArg{{proc={}, remaining={}, args_base={}, orig={:?}}}",
+                    if proc.is_some() { "Some" } else { "None" },
+                    remaining_count,
+                    args_base,
+                    original_call,
+                )
+                .as_str(),
             )
-            .as_str(),
-        ),
+        }
         Kont::ApplyProc {
             proc,
             evaluated_args,

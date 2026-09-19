@@ -117,25 +117,30 @@ pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
         }
         // Pair: potentially a function application
         Pair(car, cdr) => {
+            // If the head is a symbol, resolve it once here. A regular
+            // application reuses this value below instead of throwing it
+            // away and re-looking it up via EvalArg's operator-evaluation
+            // phase — that redundant second lookup used to happen on every
+            // non-special-form application.
+            let op_val = if let Symbol(_) = &gc_value!(*car) {
+                state.env.lookup(*car)
+            } else {
+                None
+            };
+
             // Quick path: is this a special form?
-            if let Symbol(_) = &gc_value!(*car) {
-                if let Some(op) = state.env.lookup(*car) {
-                    if matches!(gc_value!(op), Callable(Callable::SpecialForm { .. })) {
-                        // Call the special-form handler in-place.
-                        state.control = Control::Expr(*car); // or set Value/Expr as your handler expects
-                        let result = apply_special_direct(expr, rt, state);
-                        match result {
-                            Ok(_) => {}
-                            Err(err) => post_error(state, rt, &err),
-                        }
-                        return; // let run_cek loop continue
+            if let Some(op) = op_val {
+                if matches!(gc_value!(op), Callable(Callable::SpecialForm { .. })) {
+                    // Call the special-form handler in-place.
+                    state.control = Control::Expr(*car); // or set Value/Expr as your handler expects
+                    let result = apply_special_direct(expr, rt, state);
+                    match result {
+                        Ok(_) => {}
+                        Err(err) => post_error(state, rt, &err),
                     }
+                    return; // let run_cek loop continue
                 }
             }
-
-            let args_vec = list_to_vec(&rt.heap, *cdr)
-                .map_err(|_| "invalid argument list".to_string())
-                .unwrap();
 
             let prev = Rc::clone(&state.kont);
 
@@ -144,12 +149,34 @@ pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
             // back to apply_proc once the arguments are done.
             let is_tail = state.tail;
 
-            state.control = Control::Expr(*car);
+            // `*cdr` is already the argument list in the right (forward)
+            // order — walk it directly with EvalArg instead of copying it
+            // into a `Vec` up front (that used to cost a `list_to_vec`
+            // allocation plus a `.rev().collect()` on every application).
+            // Evaluated arguments accumulate on the shared `arg_stack`
+            // rather than in a private `Vec` per call; `args_base` marks
+            // where this call's slice of it begins.
+            let args_base = rt.arg_stack.len();
+
+            match op_val {
+                Some(op) => {
+                    // Already resolved above (and confirmed not a special
+                    // form): hand it to EvalArg as a Value directly rather
+                    // than re-evaluating `car`. Control::Value dispatch
+                    // always decrements `rt.depth`, so bump it here to
+                    // balance the Control::Expr step this replaces.
+                    *rt.depth += 1;
+                    state.control = Control::Value(op);
+                }
+                None => {
+                    state.control = Control::Expr(*car);
+                }
+            }
             state.tail = false; // reset after using it
             state.kont = Rc::new(Kont::EvalArg {
                 proc: None,
-                remaining: args_vec.into_iter().rev().collect(),
-                evaluated: vec![],
+                remaining_exprs: *cdr,
+                args_base,
                 tail: is_tail,
                 original_call: expr,
                 env: state.env.clone(),
@@ -259,8 +286,8 @@ fn dispatch_kont(state: &mut CEKState, ec: &mut RunTime, val: GcRef) -> Result<(
         ),
         Kont::EvalArg {
             proc,
-            remaining,
-            evaluated,
+            remaining_exprs,
+            args_base,
             original_call,
             tail,
             env,
@@ -270,8 +297,8 @@ fn dispatch_kont(state: &mut CEKState, ec: &mut RunTime, val: GcRef) -> Result<(
             ec,
             val,
             proc,
-            remaining,
-            evaluated,
+            remaining_exprs,
+            args_base,
             original_call,
             tail,
             env,
@@ -634,8 +661,8 @@ fn handle_eval_arg(
     ec: &mut RunTime,
     val: GcRef,
     proc: Option<GcRef>,
-    mut remaining: Vec<GcRef>,
-    mut evaluated: Vec<GcRef>,
+    remaining_exprs: GcRef,
+    args_base: usize,
     original_call: GcRef,
     tail: bool,
     env: EnvRef,
@@ -660,59 +687,69 @@ fn handle_eval_arg(
             }
             _ => {
                 let proc = Some(val);
-                if remaining.is_empty() {
-                    // zero-arg call
-                    state.kont = Rc::new(Kont::ApplyProc {
-                        proc: proc.unwrap(),
-                        evaluated_args: Rc::new(evaluated),
-                        next,
-                    });
-                    state.tail = tail;
-                    apply_proc(state, ec)?;
-                    return Ok(());
-                } else {
-                    // evaluate next arg
-                    if let Some(next_expr) = remaining.pop() {
-                        state.control = Control::Expr(next_expr);
+                match gc_value!(remaining_exprs) {
+                    Nil => {
+                        // zero-arg call
+                        let evaluated_args = Rc::new(ec.arg_stack.split_off(args_base));
+                        state.kont = Rc::new(Kont::ApplyProc {
+                            proc: proc.unwrap(),
+                            evaluated_args,
+                            next,
+                        });
+                        state.tail = tail;
+                        apply_proc(state, ec)?;
+                    }
+                    Pair(head, rest) => {
+                        state.control = Control::Expr(*head);
+                        let rest = *rest;
                         state.tail = false;
                         state.kont = Rc::new(Kont::EvalArg {
                             proc,
-                            remaining,
-                            evaluated,
+                            remaining_exprs: rest,
+                            args_base,
                             original_call,
                             tail,
                             env: state.env.clone(),
                             next,
                         });
                     }
-                    return Ok(());
+                    _ => return Err("apply: improper argument list".to_string()),
                 }
+                return Ok(());
             }
         }
     } else {
-        // We already have a proc; val is an evaluated argument
-        evaluated.push(val);
-        if let Some(next_expr) = remaining.pop() {
-            state.control = Control::Expr(next_expr);
-            state.tail = false;
-            state.kont = Rc::new(Kont::EvalArg {
-                proc,
-                remaining,
-                evaluated,
-                original_call,
-                tail,
-                env: state.env.clone(),
-                next,
-            });
-        } else {
-            // Done: apply with evaluated args
-            state.kont = Rc::new(Kont::ApplyProc {
-                proc: proc.unwrap(),
-                evaluated_args: Rc::new(evaluated),
-                next,
-            });
-            state.tail = tail;
-            apply_proc(state, ec)?;
+        // We already have a proc; val is an evaluated argument. It joins
+        // the shared stack rather than a private Vec — safe because nothing
+        // outlives this call's LIFO extent: a captured continuation never
+        // retains an EvalArg frame (see RunTimeStruct::arg_stack).
+        ec.arg_stack.push(val);
+        match gc_value!(remaining_exprs) {
+            Nil => {
+                let evaluated_args = Rc::new(ec.arg_stack.split_off(args_base));
+                state.kont = Rc::new(Kont::ApplyProc {
+                    proc: proc.unwrap(),
+                    evaluated_args,
+                    next,
+                });
+                state.tail = tail;
+                apply_proc(state, ec)?;
+            }
+            Pair(head, rest) => {
+                state.control = Control::Expr(*head);
+                let rest = *rest;
+                state.tail = false;
+                state.kont = Rc::new(Kont::EvalArg {
+                    proc,
+                    remaining_exprs: rest,
+                    args_base,
+                    original_call,
+                    tail,
+                    env: state.env.clone(),
+                    next,
+                });
+            }
+            _ => return Err("apply: improper argument list".to_string()),
         }
         return Ok(());
     }
@@ -762,6 +799,7 @@ fn handle_restore_env(
             *ec.current_output_port,
             ec.port_stack,
             ec.dynamic_wind,
+            ec.arg_stack,
         );
     }
 
@@ -1024,6 +1062,7 @@ pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> 
                             *ec.current_output_port,
                             ec.port_stack,
                             ec.dynamic_wind,
+                            ec.arg_stack,
                         );
                     }
 

@@ -204,6 +204,7 @@ fn garbage_collect_sp(
         *ec.current_output_port,
         ec.port_stack,
         ec.dynamic_wind,
+        ec.arg_stack,
     );
     let elapsed_time = timer.elapsed().as_secs_f64();
     let time = new_float(&mut ec.heap, elapsed_time);

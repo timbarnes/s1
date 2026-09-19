@@ -150,6 +150,7 @@ fn repl(rt: &mut RunTime, state: &mut CEKState, quit_after_load: bool, global: E
                                     *rt.current_output_port,
                                     &rt.port_stack,
                                     &rt.dynamic_wind,
+                                    &rt.arg_stack,
                                 );
                             }
                         }

@@ -227,6 +227,7 @@ impl GcHeap {
         current_output_port: GcRef,
         port_stack: &[GcRef],
         dynamic_wind: &[DynamicWind],
+        arg_stack: &[GcRef],
     ) {
         // println!("GC: Starting collection, {} objects, {} ports in stack",
         //          self.objects.len(), port_stack.len());
@@ -236,7 +237,7 @@ impl GcHeap {
         for obj in &self.objects {
             crate::gc::unmark(*obj);
         }
-        self.mark_from(state, current_output_port, port_stack, dynamic_wind);
+        self.mark_from(state, current_output_port, port_stack, dynamic_wind, arg_stack);
         self.sweep();
     }
 
@@ -246,6 +247,7 @@ impl GcHeap {
         current_output_port: GcRef,
         port_stack: &[GcRef],
         dynamic_wind: &[DynamicWind],
+        arg_stack: &[GcRef],
     ) {
         // Temporary vector for all roots (we’ll reuse it)
         // let mut root_set: Vec<GcRef> = Vec::new();
@@ -263,6 +265,15 @@ impl GcHeap {
         for dw in dynamic_wind {
             mark_reachable(dw.before, &mut self.worklist);
             mark_reachable(dw.after, &mut self.worklist);
+        }
+
+        // Evaluated-argument scratch stack: every in-flight `EvalArg`'s
+        // already-evaluated arguments live here rather than in the frame
+        // itself, so the whole stack is a root (not just the top frame's
+        // slice — outer calls with pending sibling arguments still have
+        // live entries below the innermost call's `args_base`).
+        for arg in arg_stack {
+            mark_reachable(*arg, &mut self.worklist);
         }
 
         // Singleton objects
