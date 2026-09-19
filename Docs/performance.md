@@ -453,4 +453,8 @@ specifically was validated against a purpose-built workload (many closures
 sharing a deep environment chain) since fib/tail-loop/list-map barely
 collect even at the new default — see F6 above.
 
+For a CPU profile of the regression suite under this new default (what the
+now-firing GC actually costs), see
+[regression-suite-profile.md](regression-suite-profile.md).
+
 Re-run `bench/bench.sh` after each phase and record the numbers here.
