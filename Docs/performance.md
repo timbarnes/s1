@@ -3,6 +3,11 @@
 Measured 2026-09-15 on darwin/arm64, `--release` (`debug = true`).
 Re-run the numbers with `bench/bench.sh [reps]`.
 
+**Status, 2026-09-18: Phases 1-3 all done.** Everything below is done except
+F3 (skipped by decision) and F10(3) (deferred by decision, full design in
+`Docs/kont-flat-stack-design.md`) — see "Suggested order" at the end for the
+final per-item status table.
+
 ## Results
 
 | Workload | Baseline | Phase 1 | + F10(1) | total |
@@ -226,7 +231,13 @@ threaded through dead slots. (A never-read `free_list: Vec<GcObject>` field used
 to sit in `GcHeap` as a stub for this; it was removed in Phase 1 rather than
 left to rot. Reintroduce it as an actual free list when doing this work.)
 
-### F3 — `SchemeValue::Int(BigInt)` — expected payoff **~4-6 %**
+### F3 — `SchemeValue::Int(BigInt)` — SKIPPED, expected payoff **~4-6 %**
+
+Decided against, 2026-09-18: of everything left in this doc, F3 has the
+smallest expected payoff, and the actual workload mix doesn't favor it
+enough to justify touching every arithmetic builtin plus adding the bignum
+test coverage this section already flags as missing. The analysis below is
+otherwise unchanged and left for reference in case this is revisited.
 
 `src/gc/mod.rs:116`. Every integer heap-allocates a `BigUint` backing `Vec`, so
 each number costs *two* mallocs, and arithmetic allocates temporaries on top
@@ -260,7 +271,7 @@ that does nothing in normal operation.
 Fixed: hoisted the test to the call site in `step()`. Together with F1 this took
 `tail loop 300k` from 0.75 s to 0.30 s.
 
-### F5 — `Rc<RefCell<Frame>>` + `FxHashMap` per call
+### F5 — `Rc<RefCell<Frame>>` + `FxHashMap` per call — DONE
 
 `src/env.rs:117-119` and `src/eval/mod.rs:184`. Each call allocates an `Rc`
 control block, a `Frame`, and a hash table — for `fib`, a table holding a single
@@ -272,7 +283,13 @@ hashing, and it removes the table allocation. Keep the `FxHashMap` only for the
 global frame — e.g. an enum, or keep the map but construct it with the exact
 capacity.
 
-### F6 — GC mark re-pushes already-marked objects
+Fixed (commit f5b9894): `Frame.bindings` is now a `Bindings` enum —
+`Small(Vec<(GcRef, GcRef)>)` for every frame created via `extend()`,
+`Large(HashMap<GcRef, GcRef>)` kept only for the global frame (identified
+structurally by `parent.is_none()`). Bundled with the F9/F10(2) work below;
+measured together at 18-22 % across fib/tail-loop/list-map.
+
+### F6 — GC mark re-pushes already-marked objects — DONE
 
 `src/gc/heap.rs:298-336`. The mark bit is checked *after* popping, so an object
 reachable by k paths is pushed k times. Measured 4.17 M worklist pushes against
@@ -285,7 +302,21 @@ which is why `env_mark_frames` hit 167,030 frame-walks over 8 GCs.
 Fix: check the mark bit before pushing, and give `Frame` its own visited flag so
 a shared chain is traversed once per collection instead of once per closure.
 
-### F7 — full unmark pass every GC
+Fixed (commit ad59cc1): `mark_reachable`'s worklist now marks on push
+(`push_if_unmarked`) instead of on pop, and `env::Frame` carries its own
+`gc_mark_epoch: Cell<u64>` so `Mark for EnvRef`'s walk stops the instant it
+hits a frame already visited this cycle — correct because the walk always
+continues to the root, so an already-visited frame means everything above
+it was too. (`Frame` isn't a `GcObject`, so it reads a small `AtomicU64`
+mirror, `crate::gc::GC_EPOCH`, rather than needing an epoch parameter
+threaded through the whole `Mark` trait.) Measured on a workload built to
+exercise exactly this case (3,000 closures sharing a 200-deep environment
+chain, forced through ~150 collections): **2.16 s → 0.34 s, ~6.4×**. The
+existing fib/tail-loop/list-map benchmarks barely collect at the current
+default threshold, so they don't show this off — see F7's threshold change
+below for why that stopped being true for the regression suite specifically.
+
+### F7 — full unmark pass every GC — DONE
 
 `src/gc/heap.rs:221-223` pointer-chases every object in `objects` to clear one
 bool (718 K unmarks over 8 GCs).
@@ -294,6 +325,20 @@ Fix: replace the boolean with a generation counter compared against the current
 GC epoch, so no reset pass is needed; or move mark bits into a side bitmap
 adjacent to the F2 slabs so mark and sweep become linear scans of contiguous
 memory.
+
+Fixed (commit ad59cc1): `GcObject.marked` is now a `u64` GC epoch (0 = never
+marked) instead of a `bool`. `collect_garbage` just bumps
+`GcHeap::current_epoch`; sweep keeps whatever has `marked == current_epoch`.
+No side bitmap / F2 slabs needed — this works against the existing per-object
+`Box` allocation.
+
+Also, separately: the default `gc_threshold` was lowered from 100,000 to
+20,000 (same commit) specifically so the regression suite exercises ordinary
+collections on its own — previously it allocated only ~55,848 objects total
+and never collected outside `gc_stress_tests.scm`'s own deliberately extreme
+thresholds, so F6/F7 (and any future GC work) would otherwise be invisible to
+the standard `-r` run. Verified clean at `gc-threshold` 1/5/20/200/2000 with
+`S1_GC_POISON=1` before and after.
 
 ### F8 — stdout flushed on every `display` — DONE
 
@@ -309,13 +354,24 @@ flushed before any stdin read and at the end of `repl`. The ~2,400 saved
 `write(2)` calls per run only matter on a real terminal, which is not measured
 here.
 
-### F9 — `list_to_vec` allocates per application — expected payoff **~3 %**
+### F9 — `list_to_vec` allocates per application — DONE, expected payoff **~3 %**
 
 A fresh `Vec<GcRef>` for every call's argument list: 1,092,719 calls for
 `fib 25` (4.5 per Scheme call), 10 % of malloc traffic.
 
 Fix: a reusable argument stack — one `Vec<GcRef>` in `RunTime`; push args, pass
 a slice, `truncate` on return.
+
+Fixed, bundled with F10(2) below (commit f5b9894): `Kont::EvalArg` no longer
+calls `list_to_vec` at all — `remaining_exprs: GcRef` walks the call's
+cons-list directly instead of copying it into a `Vec` up front, and
+evaluated arguments accumulate on the new shared `RunTime::arg_stack`
+(F10(2)) rather than a fresh per-call `Vec`. Safe under `call/cc` because
+`capture_call_site_kont` already strips `EvalArg`/`ApplyProc` frames on
+capture — verified by diffing output of the exact "capture mid-argument-
+evaluation, store it, invoke repeatedly after intervening calls" pattern
+before/after, byte-identical. Measured with F5 at 18-22 % across
+fib/tail-loop/list-map.
 
 ### F10 — continuation churn — part (1) DONE, measured **16-17 %**
 
@@ -338,12 +394,28 @@ Fixes, cheapest first:
    frame by value via `Rc::try_unwrap` and moves its vectors into the handler.
    The commented-out `take_kont` draft the author had left in the file was the
    right idea; it is now real, plus the GC rooting it needed.
-2. `EvalArg` carries `remaining` + `evaluated` as two `Vec`s that are pushed and
-   popped one element at a time. A single shared argument stack in `RunTime`
-   (indices into it, per F9) removes both allocations and both clones.
-3. (a) needs a `Vec<Kont>` stack with indices rather than an `Rc` chain. That is
-   a redesign, and `call/cc` + `dynamic-wind` depend on the current sharing
-   semantics — do it last, if at all, and only behind the now-solid test suite.
+2. **DONE** (commit f5b9894, bundled with F5/F9, 18-22 % together). `EvalArg`
+   no longer carries `remaining`/`evaluated` `Vec`s at all — see F9 above.
+3. **DEFERRED**, 2026-09-18. (a) needs a `Vec<Kont>` stack with indices rather
+   than an `Rc` chain — full design in `Docs/kont-flat-stack-design.md`
+   (written before any code was touched, per this project's usual practice).
+   Test gaps that design identified were closed first (commit 8adbd2a: no
+   `call/cc`/`dynamic-wind` test ran under GC pressure; nothing captured from
+   deep inside a long non-tail chain), and doing that surfaced a correction
+   to the design itself: capture is O(1)-ish *today* for ordinary chains
+   (`capture_call_site_kont` shares via one `Rc::clone` once it hits the
+   first non-skippable frame), not O(depth) as first assumed, so a flat
+   `Vec` design's O(depth) capture is a real regression for that case, not a
+   wash. Decided not to implement it: parts 1 and 2 above already removed
+   two of the three per-call allocations this item was chasing, so what's
+   left (removing the `Rc<Kont>` node itself) is now the smallest remaining
+   item on this list by expected payoff, while being by a wide margin the
+   largest and riskiest to implement — it touches nearly every handler in
+   `src/eval/cek.rs` and `src/eval/kont.rs` plus `call/cc`/`dynamic-wind` in
+   `src/sys_builtins.rs`, all at once, with no partial-compile checkpoint
+   along the way. Worth revisiting only if it becomes load-bearing for a
+   future bytecode-VM redesign rather than pursued as a standalone
+   optimization — see the design doc's final section.
 
 ## Suggested order
 
@@ -352,26 +424,33 @@ Fixes, cheapest first:
 tests and 87/87 cargo tests pass. `fib` and `list/map` are unchanged, as
 predicted — they are allocator-bound, which is Phase 2.
 
-**Phase 2 — REVISED. Was "F3 then F2"; that was wrong.** The 61 % figure it was
-sized against came from `sample`'s leaf attribution and does not survive direct
-measurement: total allocation cost is ~30 %, and Scheme-object allocation is
-3.3 % of malloc traffic. Correct order by measured payoff:
+**Phase 2 — DONE, 2026-09-18.** Was "F3 then F2"; that was wrong. The 61 %
+figure it was originally sized against came from `sample`'s leaf attribution
+and does not survive direct measurement: total allocation cost is ~30 %, and
+Scheme-object allocation is 3.3 % of malloc traffic. Corrected order by
+measured payoff, with final status:
 
-| Item | Expected | Effort |
-|---|---|---|
-| ~~F10(1) `Rc::try_unwrap` instead of cloning frame vectors~~ | **DONE, 16-17 %** | — |
-| F10(2) + F9 shared argument stack | ~8-10 % | medium |
-| F5 small-vec frames | ~3-4 % | medium |
-| F3 fixnums (+ optional small-int cache) | ~4-6 % | medium; needs bignum tests first |
-| F10(3) `Vec<Kont>` stack instead of `Rc` chain | rest of the ~30 % | large, touches call/cc |
-| F2 slab allocator | ~1 % | skip unless doing it for GC pressure |
+| Item | Expected | Effort | Status |
+|---|---|---|---|
+| ~~F10(1) `Rc::try_unwrap` instead of cloning frame vectors~~ | 16-17 % | — | **DONE** |
+| F10(2) + F9 shared argument stack | ~8-10 % | medium | **DONE**, bundled with F5, measured 18-22 % |
+| F5 small-vec frames | ~3-4 % | medium | **DONE**, see above |
+| F3 fixnums (+ optional small-int cache) | ~4-6 % | medium; needs bignum tests first | **SKIPPED** |
+| F10(3) `Vec<Kont>` stack instead of `Rc` chain | rest of the ~30 % | large, touches call/cc | **DEFERRED** — see F10 above, `Docs/kont-flat-stack-design.md` |
+| F2 slab allocator | ~1 % | skip unless doing it for GC pressure | not started |
 
-F10(1) is done. Next by ratio is F10(2)+F9 (the shared argument stack), which
-removes both remaining `EvalArg` vectors. But consider fixing the GC rooting bug
-above first — it is a correctness issue in the same area of the code.
+Also fixed along the way, not originally in this table: the redundant
+operator-symbol lookup in `eval_cek` (every application looked its operator
+up twice — once to check for a special form, again via `EvalArg`'s operator
+phase — commit f5b9894).
 
-**Phase 3 — only if GC shows up after Phase 2.** F6, F7. Remember GC does not
-fire at all on the current regression suite; validate against a workload that
-actually collects, or lower `threshold` for the measurement.
+**Phase 3 — DONE, 2026-09-18.** F6, F7. GC did not fire at all on the
+regression suite at the time this phase was written; fixed alongside F6/F7
+by lowering the default `gc_threshold` (100,000 → 20,000, commit ad59cc1) so
+it now does, without resorting to the artificially extreme thresholds
+`gc_stress_tests.scm` already used for targeted defect coverage. F6
+specifically was validated against a purpose-built workload (many closures
+sharing a deep environment chain) since fib/tail-loop/list-map barely
+collect even at the new default — see F6 above.
 
 Re-run `bench/bench.sh` after each phase and record the numbers here.
