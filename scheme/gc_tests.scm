@@ -17,4 +17,4 @@
 (test-equal 'escaped gc-test-side-effect-result "side effects: escape result")
 (test-equal 11 gc-test-side-effect-counter "side effects: counter value")
 
-(gc-threshold 100000)
+(gc-threshold 20000)

@@ -9,7 +9,7 @@
 use crate::gc::GcRef;
 use crate::printer::print_value;
 use rustc_hash::FxHashMap as HashMap;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 pub type EnvRef = Rc<RefCell<Frame>>;
@@ -73,6 +73,13 @@ impl Bindings {
 pub struct Frame {
     pub bindings: Bindings,
     pub parent: Option<EnvRef>,
+    /// The GC epoch (see `crate::gc::GC_EPOCH`) this frame was last visited
+    /// in during marking. Since a mark walk always continues to the root,
+    /// a frame at this epoch means everything above it was already walked
+    /// too this cycle — `Mark for EnvRef` uses this to stop early instead
+    /// of re-walking a chain shared by many closures (typically all the
+    /// way to the global frame) once per closure.
+    gc_mark_epoch: Cell<u64>,
 }
 
 impl Frame {
@@ -85,7 +92,11 @@ impl Frame {
         } else {
             Bindings::Small(Vec::new())
         };
-        Self { bindings, parent }
+        Self {
+            bindings,
+            parent,
+            gc_mark_epoch: Cell::new(0),
+        }
     }
 }
 
@@ -181,11 +192,19 @@ impl EnvOps for EnvRef {
 
 impl crate::gc::Mark for EnvRef {
     fn mark(&self, visit: &mut dyn FnMut(GcRef)) {
+        let epoch = crate::gc::GC_EPOCH.load(std::sync::atomic::Ordering::Relaxed);
         let mut current = Some(self.clone());
         while let Some(env) = current {
             let frame = env.borrow();
+            if frame.gc_mark_epoch.get() == epoch {
+                // Already walked this frame (and, since this walk always
+                // continues to the root, everything above it) earlier in
+                // the same collection via another closure sharing this
+                // chain — stop instead of re-walking it again.
+                break;
+            }
+            frame.gc_mark_epoch.set(epoch);
             for (&key, &val) in frame.bindings.iter() {
-                // Changed this line
                 visit(key); // Mark the symbol key
                 visit(val); // Mark the bound value
             }

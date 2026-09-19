@@ -199,7 +199,7 @@ mod tests {
         // Get current threshold
         let initial_threshold_val = gc_threshold(heap, &[]).unwrap();
         if let SchemeValue::Int(i) = heap.get_value(initial_threshold_val) {
-            assert_eq!(*i, BigInt::from(100000)); // Default threshold from GcHeap::new()
+            assert_eq!(*i, BigInt::from(20000)); // Default threshold from GcHeap::new()
         } else {
             panic!("Expected integer");
         }

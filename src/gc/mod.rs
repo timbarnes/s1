@@ -8,6 +8,17 @@ use num_bigint::BigInt;
 pub use objects::*;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::atomic::AtomicU64;
+
+/// Mirrors `GcHeap::current_epoch`, bumped in lockstep at the start of every
+/// collection. `env::Frame` reads this directly so `Mark for EnvRef`
+/// (env.rs) can tell whether it's already walked a given frame (and, since
+/// the walk always continues to the root, everything above it) during the
+/// current cycle — without threading an epoch parameter through the whole
+/// `Mark` trait, which every `mark` impl (Control, Kont, CondClause, ...)
+/// would otherwise need. This interpreter is single-threaded, so `Relaxed`
+/// is enough: it's a plain shared counter, not a synchronization point.
+pub static GC_EPOCH: AtomicU64 = AtomicU64::new(0);
 
 #[macro_export]
 macro_rules! register_builtin_family {
@@ -76,7 +87,12 @@ pub type GcRef = *mut GcObject;
 
 pub struct GcObject {
     pub value: SchemeValue,
-    pub marked: bool,
+    /// The GC epoch this object was last marked reachable in (0 = never
+    /// marked). Comparing against `GcHeap`'s current epoch instead of
+    /// resetting a `bool` on every object at the start of every collection
+    /// removes the full-heap unmark pass entirely — the epoch bump does its
+    /// job implicitly. See `GcHeap::collect_garbage`.
+    pub marked: u64,
 }
 
 #[derive(Debug, PartialEq)]
@@ -139,8 +155,3 @@ pub trait Mark {
     fn mark(&self, visit: &mut dyn FnMut(GcRef));
 }
 
-pub fn unmark(gcref: GcRef) {
-    unsafe {
-        (*gcref).marked = false;
-    }
-}

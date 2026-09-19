@@ -27,6 +27,11 @@ pub struct GcHeap {
     // Number of allocations since last GC
     allocations: usize,
     pub threshold: usize,
+    // Bumped at the start of every collection; an object is "marked" for
+    // the current cycle when its own `marked` field equals this. Avoids a
+    // full-heap pass to reset every object's mark bit before each GC (F7)
+    // — see `collect_garbage`.
+    current_epoch: u64,
     // When set (via the S1_GC_POISON env var), sweep() overwrites an
     // unmarked object's value with a "<<FREED>>" sentinel and leaks the box
     // instead of freeing it, turning a premature free into a visible marker
@@ -38,7 +43,15 @@ pub struct GcHeap {
 impl GcHeap {
     /// Create a new empty heap.
     pub fn new() -> Self {
-        let gc_threshold = 100000;
+        // Was 100,000: the shipped regression suite allocates ~55,848
+        // objects, so GC never fired during a normal `-r` run and any bug or
+        // inefficiency in collection itself stayed invisible (see
+        // Docs/performance.md, Docs/nested-evaluation.md staging item 4).
+        // Lowered below that so a standard regression run exercises a
+        // handful of ordinary collections without resorting to the
+        // artificially extreme thresholds (1, 500) already used for
+        // targeted stress tests in scheme/gc_stress_tests.scm.
+        let gc_threshold = 20000;
         let mut heap = Self {
             nil_obj: None,
             true_obj: None,
@@ -53,6 +66,7 @@ impl GcHeap {
             doc_table: HashMap::default(),
             allocations: 0,
             threshold: gc_threshold,
+            current_epoch: 0,
             poison_sweep: std::env::var("S1_GC_POISON").is_ok(),
         };
 
@@ -67,41 +81,41 @@ impl GcHeap {
         // Allocate nil
         let nil_obj = GcObject {
             value: SchemeValue::Nil,
-            marked: false,
+            marked: 0,
         };
         self.nil_obj = Some(self.alloc(nil_obj));
 
         // Allocate true
         let true_obj = GcObject {
             value: SchemeValue::Bool(true),
-            marked: false,
+            marked: 0,
         };
         self.true_obj = Some(self.alloc(true_obj));
 
         // Allocate false
         let false_obj = GcObject {
             value: SchemeValue::Bool(false),
-            marked: false,
+            marked: 0,
         };
         self.false_obj = Some(self.alloc(false_obj));
 
         let void_obj = GcObject {
             value: SchemeValue::Void,
-            marked: false,
+            marked: 0,
         };
         self.void_obj = Some(self.alloc(void_obj));
 
         // Allocate true
         let eof_obj = GcObject {
             value: SchemeValue::Eof,
-            marked: false,
+            marked: 0,
         };
         self.eof_obj = Some(self.alloc(eof_obj));
 
         // Allocate false
         let undefined_obj = GcObject {
             value: SchemeValue::Undefined,
-            marked: false,
+            marked: 0,
         };
         self.undefined_obj = Some(self.alloc(undefined_obj));
     }
@@ -197,7 +211,7 @@ impl GcHeap {
 
         let symbol_obj = GcObject {
             value: SchemeValue::Symbol(name.to_string()),
-            marked: false,
+            marked: 0,
         };
         let symbol_ref = self.alloc(symbol_obj);
         self.symbol_table.insert(name.to_string(), symbol_ref);
@@ -234,9 +248,14 @@ impl GcHeap {
         self.worklist.clear();
         self.worklist.reserve(self.threshold + 1000);
         self.allocations = 0;
-        for obj in &self.objects {
-            crate::gc::unmark(*obj);
-        }
+        // F7: bumping the epoch makes every object implicitly "unmarked"
+        // for this cycle (its `marked` field, from a prior cycle or 0 if
+        // never marked, can no longer equal `current_epoch`) — no need to
+        // walk `self.objects` resetting a bool on each one first.
+        self.current_epoch += 1;
+        // Mirror it for env::Frame's own visited-this-epoch tracking (F6);
+        // see `crate::gc::GC_EPOCH`.
+        crate::gc::GC_EPOCH.store(self.current_epoch, std::sync::atomic::Ordering::Relaxed);
         self.mark_from(state, current_output_port, port_stack, dynamic_wind, arg_stack);
         self.sweep();
     }
@@ -249,22 +268,22 @@ impl GcHeap {
         dynamic_wind: &[DynamicWind],
         arg_stack: &[GcRef],
     ) {
-        // Temporary vector for all roots (we’ll reuse it)
-        // let mut root_set: Vec<GcRef> = Vec::new();
+        // Copied out so the marking closures below don't need to borrow
+        // `self` (they already borrow `self.worklist` mutably).
+        let epoch = self.current_epoch;
 
         // CEKState roots
-        //state.mark(&mut |gcref| root_set.push(gcref));
-        state.mark(&mut |gcref| mark_reachable(gcref, &mut self.worklist));
+        state.mark(&mut |gcref| mark_reachable(gcref, epoch, &mut self.worklist));
 
         // Runtime roots
-        mark_reachable(current_output_port, &mut self.worklist);
+        mark_reachable(current_output_port, epoch, &mut self.worklist);
         for port in port_stack {
-            mark_reachable(*port, &mut self.worklist);
+            mark_reachable(*port, epoch, &mut self.worklist);
         }
 
         for dw in dynamic_wind {
-            mark_reachable(dw.before, &mut self.worklist);
-            mark_reachable(dw.after, &mut self.worklist);
+            mark_reachable(dw.before, epoch, &mut self.worklist);
+            mark_reachable(dw.after, epoch, &mut self.worklist);
         }
 
         // Evaluated-argument scratch stack: every in-flight `EvalArg`'s
@@ -273,7 +292,7 @@ impl GcHeap {
         // slice — outer calls with pending sibling arguments still have
         // live entries below the innermost call's `args_base`).
         for arg in arg_stack {
-            mark_reachable(*arg, &mut self.worklist);
+            mark_reachable(*arg, epoch, &mut self.worklist);
         }
 
         // Singleton objects
@@ -288,19 +307,20 @@ impl GcHeap {
         .iter()
         .flatten()
         {
-            mark_reachable(obj, &mut self.worklist);
+            mark_reachable(obj, epoch, &mut self.worklist);
         }
 
         // Symbol table roots
         for &sym in self.symbol_table.values() {
-            mark_reachable(sym, &mut self.worklist);
+            mark_reachable(sym, epoch, &mut self.worklist);
         }
     }
 
     fn sweep(&mut self) {
         let poison = self.poison_sweep;
+        let epoch = self.current_epoch;
         self.objects.retain(|obj| {
-            let marked = unsafe { (**obj).marked };
+            let marked = unsafe { (**obj).marked } == epoch;
             if !marked {
                 if poison {
                     // Leak the box, but overwrite its value so any stray
@@ -327,39 +347,48 @@ impl GcHeap {
     }
 }
 
-fn mark_reachable(start: GcRef, worklist: &mut Vec<GcRef>) {
-    worklist.push(start);
+/// Mark-on-push: an object is marked the instant it's queued, not when it's
+/// popped, so any other path that reaches it while it's still sitting in the
+/// worklist sees it's already marked and doesn't queue it again. (Marking
+/// only on pop, as before, meant an object reachable by k paths was pushed —
+/// and popped — k times instead of once, since nothing stopped the earlier
+/// k-1 duplicates from being queued before the first one was processed.)
+#[inline]
+fn push_if_unmarked(gcref: GcRef, epoch: u64, worklist: &mut Vec<GcRef>) {
+    if *crate::gc_marked!(gcref) == epoch {
+        return;
+    }
+    *crate::gc_marked_mut!(gcref) = epoch;
+    worklist.push(gcref);
+}
+
+fn mark_reachable(start: GcRef, epoch: u64, worklist: &mut Vec<GcRef>) {
+    push_if_unmarked(start, epoch, worklist);
 
     while let Some(gcref) = worklist.pop() {
-        if *crate::gc_marked!(gcref) {
-            continue;
-        }
-
-        *crate::gc_marked_mut!(gcref) = true;
-
         match crate::gc_value!(gcref) {
             SchemeValue::Pair(car, cdr) => {
-                worklist.push(*car);
-                worklist.push(*cdr);
+                push_if_unmarked(*car, epoch, worklist);
+                push_if_unmarked(*cdr, epoch, worklist);
             }
             SchemeValue::Vector(vec) => {
                 for item in vec {
-                    worklist.push(*item);
+                    push_if_unmarked(*item, epoch, worklist);
                 }
             }
             SchemeValue::Callable(Callable::Closure { body, env, .. }) => {
-                worklist.push(*body);
-                env.mark(&mut |gcref| worklist.push(gcref));
+                push_if_unmarked(*body, epoch, worklist);
+                env.mark(&mut |gcref| push_if_unmarked(gcref, epoch, worklist));
             }
             SchemeValue::Callable(Callable::Macro { body, env, .. }) => {
-                worklist.push(*body);
-                env.mark(&mut |gcref| worklist.push(gcref));
+                push_if_unmarked(*body, epoch, worklist);
+                env.mark(&mut |gcref| push_if_unmarked(gcref, epoch, worklist));
             }
             SchemeValue::Continuation(kont, dw_stack) => {
-                kont.mark(&mut |gcref| worklist.push(gcref));
+                kont.mark(&mut |gcref| push_if_unmarked(gcref, epoch, worklist));
                 for dw in dw_stack {
-                    worklist.push(dw.before);
-                    worklist.push(dw.after);
+                    push_if_unmarked(dw.before, epoch, worklist);
+                    push_if_unmarked(dw.after, epoch, worklist);
                 }
             }
             _ => {}

@@ -224,7 +224,7 @@ pub fn get_string(heap: &mut GcHeap, val: GcRef) -> Result<String, String> {
 pub fn new_int(heap: &mut GcHeap, val: BigInt) -> GcRef {
     let obj = GcObject {
         value: SchemeValue::Int(val),
-        marked: false,
+        marked: 0,
     };
     heap.alloc(obj)
 }
@@ -233,7 +233,7 @@ pub fn new_int(heap: &mut GcHeap, val: BigInt) -> GcRef {
 pub fn new_float(heap: &mut GcHeap, val: f64) -> GcRef {
     let obj = GcObject {
         value: SchemeValue::Float(val),
-        marked: false,
+        marked: 0,
     };
     heap.alloc(obj)
 }
@@ -247,7 +247,7 @@ pub fn new_bool(heap: &mut GcHeap, val: bool) -> GcRef {
 pub fn new_char(heap: &mut GcHeap, val: char) -> GcRef {
     let obj = GcObject {
         value: SchemeValue::Char(val),
-        marked: false,
+        marked: 0,
     };
     heap.alloc(obj)
 }
@@ -262,7 +262,7 @@ pub fn get_symbol(heap: &mut GcHeap, name: &str) -> GcRef {
 pub fn new_string(heap: &mut GcHeap, s: &str) -> GcRef {
     let obj = GcObject {
         value: SchemeValue::Str(s.to_string()),
-        marked: false,
+        marked: 0,
     };
     heap.alloc(obj)
 }
@@ -271,7 +271,7 @@ pub fn new_string(heap: &mut GcHeap, s: &str) -> GcRef {
 pub fn new_pair(heap: &mut GcHeap, car: GcRef, cdr: GcRef) -> GcRef {
     let obj = GcObject {
         value: SchemeValue::Pair(car, cdr),
-        marked: false,
+        marked: 0,
     };
     heap.alloc(obj)
 }
@@ -280,7 +280,7 @@ pub fn new_pair(heap: &mut GcHeap, car: GcRef, cdr: GcRef) -> GcRef {
 pub fn new_vector(heap: &mut GcHeap, elements: Vec<GcRef>) -> GcRef {
     let obj = GcObject {
         value: SchemeValue::Vector(elements),
-        marked: false,
+        marked: 0,
     };
     heap.alloc(obj)
 }
@@ -289,7 +289,7 @@ pub fn new_vector(heap: &mut GcHeap, elements: Vec<GcRef>) -> GcRef {
 pub fn new_continuation(heap: &mut GcHeap, kont: KontRef, dw_stack: Vec<DynamicWind>) -> GcRef {
     let obj = GcObject {
         value: SchemeValue::Continuation(kont, dw_stack),
-        marked: false,
+        marked: 0,
     };
     heap.alloc(obj)
 }
@@ -303,7 +303,7 @@ pub fn new_builtin(
     let primitive = SchemeValue::Callable(Callable::Builtin { func: f, doc });
     let obj = GcObject {
         value: primitive,
-        marked: false,
+        marked: 0,
     };
     heap.alloc(obj)
 }
@@ -316,7 +316,7 @@ pub fn new_sys_builtin(
     let primitive = SchemeValue::Callable(Callable::SysBuiltin { func: f, doc });
     let obj = GcObject {
         value: primitive,
-        marked: false,
+        marked: 0,
     };
     rt.heap.alloc(obj)
 }
@@ -330,7 +330,7 @@ pub fn new_special_form(
     let primitive = SchemeValue::Callable(Callable::SpecialForm { func: f, doc });
     let obj = GcObject {
         value: primitive,
-        marked: false,
+        marked: 0,
     };
     heap.alloc(obj)
 }
@@ -351,7 +351,7 @@ pub fn new_closure(
     });
     let obj = GcObject {
         value: closure,
-        marked: false,
+        marked: 0,
     };
     heap.alloc(obj)
 }
@@ -372,7 +372,7 @@ pub fn new_macro(
     });
     let obj = GcObject {
         value: new_macro,
-        marked: false,
+        marked: 0,
     };
     heap.alloc(obj)
 }
@@ -381,7 +381,7 @@ pub fn new_macro(
 pub fn new_port(heap: &mut GcHeap, kind: crate::io::PortKind) -> GcRef {
     let obj = GcObject {
         value: SchemeValue::Port(kind),
-        marked: false,
+        marked: 0,
     };
     heap.alloc(obj)
 }
@@ -391,7 +391,7 @@ pub fn new_tail_call_scheduled(heap: &mut GcHeap) -> GcRef {
     let new_tail_call_scheduled = SchemeValue::TailCallScheduled;
     let obj = GcObject {
         value: new_tail_call_scheduled,
-        marked: false,
+        marked: 0,
     };
     heap.alloc(obj)
 }
@@ -420,7 +420,7 @@ pub fn cdr(list: GcRef) -> Result<GcRef, String> {
 pub fn cons(car: GcRef, cdr: GcRef, heap: &mut GcHeap) -> Result<GcRef, String> {
     let obj = GcObject {
         value: SchemeValue::Pair(car, cdr),
-        marked: false,
+        marked: 0,
     };
     Ok(heap.alloc(obj))
 }
@@ -428,7 +428,7 @@ pub fn cons(car: GcRef, cdr: GcRef, heap: &mut GcHeap) -> Result<GcRef, String> 
 pub fn list(car: GcRef, heap: &mut GcHeap) -> Result<GcRef, String> {
     let obj = GcObject {
         value: SchemeValue::Pair(car, heap.nil_s()),
-        marked: false,
+        marked: 0,
     };
     Ok(heap.alloc(obj))
 }
