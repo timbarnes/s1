@@ -10,6 +10,11 @@
 ;; before nearly every allocation) is a cheap standing check for the whole
 ;; "interpreter state held in a Rust local is not a GC root" class described
 ;; there.
+;;
+;; Also covers Docs/gc-tail-loop.md: a purely tail-recursive loop never
+;; pushed a RestoreEnv frame, which used to be the only place automatic GC
+;; was checked, so such a loop never triggered a collection no matter how
+;; much garbage it produced.
 
 (display "          === GC stress: macro/quasiquote under gc-threshold 1 ===")
 (newline)
@@ -83,3 +88,30 @@
 (define **vq-x** 5)
 (test-equal (vector 1 5 3) `#(1 ,**vq-x** 3) "quasiquote walks into vector literals")
 (test-equal (vector 1 2 3 4) `#(1 ,@'(2 3) 4) "quasiquote splices into vector literals")
+
+(display "          === GC stress: tail-recursive loop under gc pressure ===")
+(newline)
+
+;; A tail-recursive loop's self-calls take the TCO path in apply_proc, which
+;; never pushes Kont::RestoreEnv - previously the only place needs_gc() was
+;; checked. Running one with garbage-producing steps at a threshold low
+;; enough to force many collections mid-loop checks two things at once: that
+;; collections actually happen during the loop rather than only after it
+;; returns, and that collecting from the tail-call checkpoint is safe (an
+;; unsafe collection point would corrupt state or crash, not just quietly
+;; return the wrong number).
+(define **tail-gc-threshold** (gc-threshold))
+(gc-threshold 500)
+
+(define (tail-spin n acc)
+  (if (= n 0)
+      acc
+      (begin
+        (cons n n)          ;; garbage: never referenced again
+        (list "garbage" n)  ;; more garbage, a different shape
+        (tail-spin (- n 1) (+ acc 1)))))
+
+(test-equal 20000 (tail-spin 20000 0)
+    "tail-recursive loop produces the correct result across many collections mid-loop")
+
+(gc-threshold **tail-gc-threshold**)

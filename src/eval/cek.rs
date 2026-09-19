@@ -1012,6 +1012,21 @@ pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> 
                     state.env = new_env;
                     state.kont = next; // reuse continuation depth
                     state.control = Control::Expr(*body);
+
+                    // A tail call never pushes RestoreEnv, so a purely
+                    // tail-recursive loop would otherwise never hit the only
+                    // other automatic GC checkpoint (handle_restore_env) and
+                    // could grow unbounded. Same invariant as there: state is
+                    // fully installed above, so collecting now is safe.
+                    if ec.heap.needs_gc() {
+                        ec.heap.collect_garbage(
+                            state,
+                            *ec.current_output_port,
+                            ec.port_stack,
+                            ec.dynamic_wind,
+                        );
+                    }
+
                     Ok(())
                 } else {
                     // Normal (non-tail) call: push a RestoreEnv barrier.
