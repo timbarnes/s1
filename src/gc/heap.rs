@@ -17,8 +17,6 @@ pub struct GcHeap {
     pub void_obj: Option<GcRef>,
     // All allocated GcRef objects (for potential future GC)
     objects: Vec<GcRef>,
-    // For objects allocated since the last GC
-    nursery: Vec<GcRef>,
     // Reusable worklist for marking objects during GC
     worklist: Vec<GcRef>,
     // Symbol table for interning symbols (name -> symbol object)
@@ -29,6 +27,12 @@ pub struct GcHeap {
     // Number of allocations since last GC
     allocations: usize,
     pub threshold: usize,
+    // When set (via the S1_GC_POISON env var), sweep() overwrites an
+    // unmarked object's value with a "<<FREED>>" sentinel and leaks the box
+    // instead of freeing it, turning a premature free into a visible marker
+    // in printed output instead of silent corruption or a use-after-free.
+    // See Docs/nested-evaluation.md's "Tooling worth keeping".
+    poison_sweep: bool,
 }
 
 impl GcHeap {
@@ -44,12 +48,12 @@ impl GcHeap {
             undefined_obj: None,
             void_obj: None,
             objects: Vec::new(),
-            nursery: Vec::with_capacity(gc_threshold),
             worklist: Vec::with_capacity(gc_threshold + 1000),
             symbol_table: HashMap::default(),
             doc_table: HashMap::default(),
             allocations: 0,
             threshold: gc_threshold,
+            poison_sweep: std::env::var("S1_GC_POISON").is_ok(),
         };
 
         // Pre-allocate singleton objects
@@ -110,7 +114,6 @@ impl GcHeap {
         let boxed = Box::new(obj);
         let raw = Box::into_raw(boxed);
         self.objects.push(raw);
-        self.nursery.push(raw);
         raw
     }
 
@@ -225,8 +228,8 @@ impl GcHeap {
         port_stack: &[GcRef],
         dynamic_wind: &[DynamicWind],
     ) {
-        // println!("GC: Starting collection, {} objects, {} in nursery, {} ports in stack",
-        //          self.objects.len(), self.nursery.len(), port_stack.len());
+        // println!("GC: Starting collection, {} objects, {} ports in stack",
+        //          self.objects.len(), port_stack.len());
         self.worklist.clear();
         self.worklist.reserve(self.threshold + 1000);
         self.allocations = 0;
@@ -235,7 +238,6 @@ impl GcHeap {
         }
         self.mark_from(state, current_output_port, port_stack, dynamic_wind);
         self.sweep();
-        self.nursery.clear();
     }
 
     fn mark_from(
@@ -282,18 +284,23 @@ impl GcHeap {
         for &sym in self.symbol_table.values() {
             mark_reachable(sym, &mut self.worklist);
         }
-
-        // Nursery roots — copy pointers into the same vector to end the immutable borrow
-        for obj in &self.nursery {
-            mark_reachable(*obj, &mut self.worklist);
-        }
     }
 
     fn sweep(&mut self) {
+        let poison = self.poison_sweep;
         self.objects.retain(|obj| {
             let marked = unsafe { (**obj).marked };
             if !marked {
-                let _ = unsafe { Box::from_raw(*obj) };
+                if poison {
+                    // Leak the box, but overwrite its value so any stray
+                    // reference to it reads a visible sentinel instead of
+                    // silently-corrupted or freed memory.
+                    unsafe {
+                        (**obj).value = SchemeValue::Symbol("<<FREED>>".to_string());
+                    }
+                } else {
+                    let _ = unsafe { Box::from_raw(*obj) };
+                }
             }
             marked
         });
