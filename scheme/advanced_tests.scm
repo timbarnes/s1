@@ -431,6 +431,20 @@
 (test-equal 'first multi-result "multiple escapes: initial result")
 (test-equal '(after before) multi-escape-log "multiple escapes: initial log")
 
+;; The test name promises "multiple escapes" but originally never actually
+;; invoked multi-k a second time. Re-invoking it re-enters the dynamic-wind's
+;; extent from outside, which re-runs both before and after (not just
+;; after), the same way the "Re-entrant dynamic-wind" test above expects.
+(multi-k 'second)
+(test-equal 'second multi-result "multiple escapes: re-invocation reaches the binding again")
+(test-equal '(after before after before) multi-escape-log
+    "multiple escapes: re-invocation re-enters the dynamic-wind's extent, re-running before and after")
+
+(multi-k 'third)
+(test-equal 'third multi-result "multiple escapes: second re-invocation still works")
+(test-equal '(after before after before after before) multi-escape-log
+    "multiple escapes: second re-invocation again re-runs before and after")
+
 ;; Test 4: Dynamic-wind with minimal thunk
 (define empty-log '())
 (define empty-thunk-result

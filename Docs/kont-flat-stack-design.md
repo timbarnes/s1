@@ -123,18 +123,57 @@ Concretely:
   collect* — is unchanged; it just applies to `Vec::pop()`'s result
   instead of `take_kont`'s.
 
-### Cost model
+### Cost model — corrected
 
 Ordinary calls (the overwhelming majority of what runs) go from "one
 `Rc::clone` + one heap allocation per pushed frame" to "one amortized
 `Vec::push`, no allocation most of the time" — this is the entire point,
-and it's what removes the 33%-of-malloc-traffic item. `call/cc` capture and
-invoke each become O(depth) copies, versus O(depth) capture / O(1) invoke
-today — the same total work per capture-then-invoke pair, just reshaped
-from the chain-walk-and-filter into an explicit copy. Since ordinary calls
-vastly outnumber `call/cc` uses in real programs, this is the correct trade
-and matches how fast Scheme implementations handle escape-only
-continuations over a native-like stack.
+and it's what removes the 33%-of-malloc-traffic item.
+
+The original version of this section claimed `call/cc` capture costs
+O(depth) *today*, making the copy-based design's O(depth) capture/invoke a
+wash. That's wrong, and worth correcting before this is implemented rather
+than after: `capture_call_site_kont`'s `_ => Rc::clone(k)` arm means the
+walk **stops at the first non-skippable frame** and shares everything below
+it via one refcount bump. For an ordinary (non-`dynamic-wind`-nested) call
+chain, that's the *nearest* enclosing real frame — typically 1-3 hops past
+`call/cc`'s own application machinery — regardless of how deep the call
+chain below that point is. Confirmed empirically while writing the test
+gap 2 recommends below: a continuation captured 500 non-tail frames deep
+still shares (doesn't copy) all 500 on capture today, and — importantly —
+*replays all 500 of them on every invocation*, because they're genuinely
+part of the pending computation the continuation closes over, not just
+inert state to restore. (`dynamic-wind` frames in `Thunk`/`After` phase are
+the one case that's already O(nesting-depth) today, since those *are*
+rebuilt per level.)
+
+So the honest comparison is: **today, capture is O(1)-ish for the common
+case; the copy-based design makes it O(depth) unconditionally.** That is a
+real regression for deep, non-`dynamic-wind`-nested captures specifically,
+not a wash. Two ways to handle it, to weigh when this is actually
+implemented:
+
+1. **Accept it.** Deep captures are rare relative to deep *calls*, and
+   O(depth) copying on capture is exactly what stack-copying Scheme
+   implementations (e.g. Chez's historical "stack chunks," Scheme48) have
+   shipped as a deliberate, well-precedented trade for decades. Simpler to
+   implement; the one described above in this document.
+2. **Chunk the spine.** Segment `kont_stack` into fixed-size arrays (e.g.
+   32-64 frames) linked together, `Rc`-shared at the chunk granularity
+   instead of the frame granularity. A capture that lands inside an
+   already-full, no-longer-growing chunk can share it (O(1) again, per
+   chunk); only the active, still-growing chunk needs an O(chunk-size)
+   partial copy. This recovers most of the O(1)-ish sharing behavior at
+   the cost of real added implementation complexity (chunk boundaries,
+   linking, partial-chunk capture) — closer to what production Scheme
+   systems actually do, and worth it only if profiling after landing
+   option 1 shows deep captures are common enough to matter in practice.
+
+Recommendation: implement option 1 first — it's the design described
+above, unchanged — and only reach for option 2 if a real workload shows
+it's needed. `scheme/gc_stress_tests.scm`'s new deep-capture test (500
+non-tail frames, captured once, invoked three times) exists specifically
+to keep whichever option is chosen honest.
 
 ### What does *not* change
 
@@ -275,3 +314,18 @@ sequencing step above with the full regression suite, `gc-threshold`
 1/5/20/200/2000 with `S1_GC_POISON=1`, and a direct before/after benchmark
 comparison — the same protocol used for every change so far in this
 series.
+
+**Status: gaps 1-3 closed** (see `scheme/gc_stress_tests.scm` and
+`scheme/advanced_tests.scm`). Gap 1: `advanced_tests.scm` is now reloaded
+under `gc-threshold 1` alongside `macro_tests.scm`. Gap 2: a new
+deep-capture test (500 non-tail frames, one capture, three invocations)
+runs in the same low-threshold section, and is what surfaced the cost-model
+correction above. Gap 3 (found opportunistically, not a prerequisite):
+"multiple escapes from same dynamic-wind" previously captured `multi-k` but
+never invoked it a second time; it now does, twice, confirming re-invoking
+a continuation captured inside a `dynamic-wind` thunk re-enters that
+dynamic-wind's extent (re-running both `before` and `after`, not just
+`after`) — consistent with the "Re-entrant dynamic-wind" test elsewhere in
+the same file. Full suite verified at 795/795 (up from 698) at the default
+threshold and at `gc-threshold` 1/5/20/200/2000 with `S1_GC_POISON=1`.
+F10(3) implementation itself has not started.

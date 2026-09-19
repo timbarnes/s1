@@ -15,6 +15,16 @@
 ;; pushed a RestoreEnv frame, which used to be the only place automatic GC
 ;; was checked, so such a loop never triggered a collection no matter how
 ;; much garbage it produced.
+;;
+;; Also covers a gap identified while designing Docs/kont-flat-stack-design.md
+;; (F10(3), replacing the Rc<Kont> chain with a flat stack, not yet
+;; implemented): advanced_tests.scm has substantial call/cc and dynamic-wind
+;; coverage, but none of it used to run under GC pressure, unlike the macro
+;; suite below. That mattered specifically because F10(3)'s capture/invoke
+;; mechanism is exactly the class of GC-rooting-sensitive code that has
+;; caused real bugs here before (see nested-evaluation.md) - so it gets the
+;; same treatment now, plus a deep (500-frame) non-tail capture case that
+;; nothing previously exercised.
 
 (display "          === GC stress: macro/quasiquote under gc-threshold 1 ===")
 (newline)
@@ -26,6 +36,14 @@
 ;; suite -- every macro call goes through the same expansion path -- under
 ;; a threshold low enough to guarantee a collection mid-expansion.
 (load "scheme/macro_tests.scm")
+
+;; F10(3) prep: re-run the call/cc and dynamic-wind suite the same way.
+;; Its "Re-entrant dynamic-wind" test in particular captures a continuation
+;; inside a dynamic-wind thunk and invokes it long after that whole
+;; top-level form (and others) already ran -- precisely the shape a flat,
+;; reused Kont stack has to get right when it replaces today's persistent
+;; Rc chain. See Docs/kont-flat-stack-design.md.
+(load "scheme/advanced_tests.scm")
 
 ;; Defect 2 (quasiquote_sf's unrooted saved_kont, and defect 3, the
 ;; macro-expander's own Rust-local intermediates): deeply recursive calls
@@ -57,6 +75,55 @@
             "eval-string sequences forms without losing GC roots")
         (es-stress (- i 1)))))
 (es-stress 20)
+
+;; F10(3) prep: every call/cc capture above happens 1-3 frames deep, or a
+;; couple of dynamic-wind levels deep. None captures from far down a long
+;; non-tail call chain -- the shape most likely to expose a snapshot-copy
+;; bug (wrong order, truncation, off-by-one) in a flat-stack capture/invoke
+;; implementation, as opposed to today's O(1) Rc::clone share. See
+;; Docs/kont-flat-stack-design.md.
+;;
+;; deep-capture recurses non-tail, so at the point call/cc fires (n = 0),
+;; none of the 500 pending "increment then return" frames above it have run
+;; yet -- they are the captured continuation, not already-finished work.
+;; Invoking deep-k later must therefore replay all 500 of them again, in
+;; full and in order, landing back on the original `first-result` binding
+;; (this evaluator's continuations are escape-only: invoking one resumes at
+;; its capture site, not at the new call site -- see the "re-entrant" test
+;; above and Docs/kont-flat-stack-design.md).
+(define deep-depth 500)
+(define deep-exit-count 0)
+(define deep-k #f)
+
+(define (deep-capture n)
+  (if (= n 0)
+      (call/cc (lambda (k) (set! deep-k k) 'base-value))
+      (let ((r (deep-capture (- n 1))))
+        (set! deep-exit-count (+ deep-exit-count 1))
+        r)))
+
+(define deep-first-result (deep-capture deep-depth))
+(test-equal 'base-value deep-first-result "deep capture: initial unwind returns base value")
+(test-equal deep-depth deep-exit-count
+    "deep capture: initial unwind runs every one of the 500 pending frames exactly once")
+
+;; Unrelated work between capture and re-invocation, so nothing from the
+;; original chain is "current" by coincidence.
+(define (deep-noise n) (if (= n 0) 'done (deep-noise (- n 1))))
+(deep-noise 1000)
+
+(deep-k 'escaped-value)
+(test-equal 'escaped-value deep-first-result
+    "deep capture: re-invocation replays the captured chain back to the original binding")
+(test-equal (* 2 deep-depth) deep-exit-count
+    "deep capture: re-invocation replays all 500 pending frames exactly once more")
+
+;; And once more, to check this isn't a two-shots-then-corrupts fluke.
+(deep-k 'escaped-again)
+(test-equal 'escaped-again deep-first-result
+    "deep capture: third invocation still reaches the original binding")
+(test-equal (* 3 deep-depth) deep-exit-count
+    "deep capture: third invocation replays all 500 pending frames exactly once more")
 
 (gc-threshold **saved-gc-threshold**)
 
