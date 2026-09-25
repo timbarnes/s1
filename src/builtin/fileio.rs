@@ -15,7 +15,7 @@ fn output_port_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
         return Err("output-port?: expected 1 argument".to_string());
     }
     let is_output_port = match &heap.get_value(args[0]) {
-        SchemeValue::Port(kind) => match kind {
+        SchemeValue::Port(kind) => match &**kind {
             crate::io::PortKind::Stdout
             | crate::io::PortKind::Stderr
             | crate::io::PortKind::StringPortOutput { .. } => true,
@@ -42,7 +42,7 @@ fn input_port_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
         return Err("input-port?: expected 1 argument".to_string());
     }
     let is_input_port = match &heap.get_value(args[0]) {
-        SchemeValue::Port(kind) => match kind {
+        SchemeValue::Port(kind) => match &**kind {
             crate::io::PortKind::Stdin | crate::io::PortKind::StringPortInput { .. } => true,
             crate::io::PortKind::File { write, .. } => !*write,
             _ => false,

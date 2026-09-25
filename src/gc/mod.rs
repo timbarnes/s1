@@ -131,6 +131,10 @@ pub enum Callable {
 }
 
 /// Scheme values that use GcRef references.
+///
+/// Every heap object is sized by the largest variant, so the rare, wide
+/// payloads (`Callable` is 72 bytes, `PortKind` 48) are boxed: a cons cell
+/// would otherwise pay for them too. See the size assertion below.
 #[derive(Debug, PartialEq)]
 pub enum SchemeValue {
     Int(BigInt),
@@ -141,20 +145,45 @@ pub enum SchemeValue {
     Vector(Vec<GcRef>),
     Bool(bool),
     Char(char),
-    Callable(Callable),
+    Callable(Box<Callable>),
     Nil,
     TailCallScheduled,
-    Port(PortKind),
-    /// (captured chain, dynamic-wind stack, `arg_stack` snapshot). The chain
-    /// can still hold `Kont::EvalArg` frames from further up the call chain
-    /// (only the innermost ones are stripped at capture), and their
-    /// `args_base` indices — plus any arguments they had already evaluated —
-    /// refer to `RunTime::arg_stack` as it was then, not as it is when `k` is
-    /// invoked.
-    Continuation(KontRef, Vec<DynamicWind>, Vec<GcRef>),
+    Port(Box<PortKind>),
+    Continuation(Box<ContinuationData>),
     Eof,
     Void,
     Undefined,
+}
+
+/// A captured continuation: everything `escape` has to reinstate.
+#[derive(Debug, PartialEq)]
+pub struct ContinuationData {
+    pub kont: KontRef,
+    pub dw_stack: Vec<DynamicWind>,
+    /// Snapshot of `RunTime::arg_stack` at capture. The captured `kont` can
+    /// still hold `Kont::EvalArg` frames from further up the call chain
+    /// (only the innermost ones are stripped at capture), and their
+    /// `args_base` indices — plus any arguments they had already evaluated —
+    /// refer to this stack as it was then, not as it is when `k` is invoked.
+    pub arg_stack: Vec<GcRef>,
+}
+
+// Keeps `GcObject` in a 48-byte allocation (one object per cache line). A new
+// variant wider than 24 bytes of payload (plus `Int`'s spare sign byte) should
+// be boxed rather than grow every object on the heap.
+const _: () = assert!(std::mem::size_of::<SchemeValue>() <= 32);
+
+impl SchemeValue {
+    /// The callable payload, if this is a procedure. Lets callers match
+    /// through the `Box` with nested patterns, e.g.
+    /// `Some(Callable::SpecialForm { func, .. })`.
+    #[inline]
+    pub fn as_callable(&self) -> Option<&Callable> {
+        match self {
+            SchemeValue::Callable(c) => Some(c),
+            _ => None,
+        }
+    }
 }
 
 pub trait Mark {

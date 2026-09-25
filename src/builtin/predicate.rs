@@ -50,7 +50,7 @@ pub fn type_of(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
         SchemeValue::Vector(_) => "vector",
         SchemeValue::Bool(_) => "boolean",
         SchemeValue::Char(_) => "char",
-        SchemeValue::Callable(c) => match c {
+        SchemeValue::Callable(c) => match &**c {
             Callable::Builtin { .. } => "builtin",
             Callable::SpecialForm { .. } => "special-form",
             Callable::Closure { .. } => "closure",

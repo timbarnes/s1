@@ -1,5 +1,5 @@
 use crate::env::{EnvOps, EnvRef};
-use crate::eval::kont::DynamicWindPhase;
+use crate::eval::kont::{DynamicWindPhase, EvalSeqForms};
 use crate::eval::{
     CEKState, Control, DynamicWind, Kont, KontRef, RunTime, TraceType, insert_dynamic_wind,
     insert_eval_eval,
@@ -103,8 +103,10 @@ fn eval_string_sp(
     forms.reverse(); // so .pop() below yields the forms in source order
     let first = forms.pop().unwrap();
     state.kont = Rc::new(Kont::EvalSeq {
-        remaining: forms,
-        results: Vec::new(),
+        forms: Box::new(EvalSeqForms {
+            remaining: forms,
+            results: Vec::new(),
+        }),
         next,
     });
     state.control = Control::Expr(first);
@@ -143,7 +145,7 @@ fn apply_sp(
     let arglist = apply_arg_list(&args[1..], ec.heap);
     let func = gc_value!(args[0]);
     match func {
-        SchemeValue::Callable(func) => match func {
+        SchemeValue::Callable(func) => match &**func {
             Callable::Builtin { func, .. } => {
                 let args = list_to_vec(ec.heap, arglist)?;
                 let result = func(ec.heap, &args);
@@ -243,13 +245,13 @@ fn help_sp(
             .env
             .lookup(args[0])
             .ok_or_else(|| format!("help: unbound variable: {}", sym_name))?;
-        match &rt.heap.get_value(binding) {
-            SchemeValue::Callable(
+        match rt.heap.get_value(binding).as_callable() {
+            Some(
                 Callable::Builtin { doc, .. }
                 | Callable::SysBuiltin { doc, .. }
                 | Callable::SpecialForm { doc, .. },
             ) => doc.clone(),
-            SchemeValue::Callable(
+            Some(
                 Callable::Closure { doc: Some(doc), .. } | Callable::Macro { doc: Some(doc), .. },
             ) => doc.clone(),
             _ => format!("{}: no documentation available", sym_name),
@@ -289,7 +291,7 @@ fn call_cc_sp(
     }
     let func = gc_value!(args[0]);
     match &func {
-        SchemeValue::Callable(func) => match *func {
+        SchemeValue::Callable(func) => match **func {
             Callable::Closure { .. } | Callable::Builtin { .. } | Callable::SysBuiltin { .. } => {}
             _ => return Err("call/cc: argument must be a function".to_string()),
         },
@@ -343,18 +345,18 @@ fn escape_sp(
         return Err("escape: requires two arguments".to_string());
     }
     match gc_value!(args[0]) {
-        SchemeValue::Continuation(new_kont, new_dw_stack, new_arg_stack) => {
+        SchemeValue::Continuation(k) => {
             let result = args[1];
             // eprintln!("escape_sp: new_kont = {:?}, new_dw_stack.len() = {}", new_kont, new_dw_stack.len());
-            let thunks = schedule_dynamic_wind_transitions(&ec.dynamic_wind, new_dw_stack);
+            let thunks = schedule_dynamic_wind_transitions(&ec.dynamic_wind, &k.dw_stack);
             // eprintln!("escape_sp: thunks.len() = {}", thunks.len());
             crate::eval::kont::insert_escape(
                 state,
                 result,
                 thunks,
-                Rc::clone(new_kont),
-                new_dw_stack.clone(),
-                new_arg_stack.clone(),
+                Rc::clone(&k.kont),
+                k.dw_stack.clone(),
+                k.arg_stack.clone(),
             );
             Ok(())
         }
@@ -572,7 +574,7 @@ fn close_input_port_sp(
         SchemeValue::Port(kind) => {
             if let crate::io::PortKind::File {
                 id, write: false, ..
-            } = kind
+            } = &**kind
             {
                 ec.file_table.close_file(*id);
                 state.control = Control::Value(ec.heap.void());
@@ -603,7 +605,7 @@ fn close_output_port_sp(
         SchemeValue::Port(kind) => {
             if let crate::io::PortKind::File {
                 id, write: true, ..
-            } = kind
+            } = &**kind
             {
                 ec.file_table.close_file(*id);
                 state.control = Control::Value(ec.heap.void());
@@ -633,7 +635,7 @@ fn read_sp(
         let port_ref = *ec.port_stack.last().unwrap();
         // Parse directly using unsafe access like gc_value! macro pattern
         if let SchemeValue::Port(port_kind) = unsafe { &mut (*port_ref).value } {
-            match port_kind {
+            match &mut **port_kind {
                 PortKind::Stdin | PortKind::StringPortInput { .. } /* | PortKind::File { .. } */ => {
                     parse(ec.heap, port_kind)
                 }
@@ -801,7 +803,7 @@ fn newline_sp(
     };
 
     if let SchemeValue::Port(port_kind) = rt.heap.get_value(port_gcref) {
-        match port_kind {
+        match &**port_kind {
             PortKind::Stdout | PortKind::Stderr | PortKind::StringPortOutput { .. } => {}
             PortKind::File { write, .. } => {
                 if !*write {
@@ -838,7 +840,7 @@ fn read_char_sp(
     } else {
         let port = args[0];
         if let SchemeValue::Port(port_kind) = rt.heap.get_value(port) {
-            match port_kind {
+            match &**port_kind {
                 PortKind::Stdin | PortKind::StringPortInput { .. } => {}
                 PortKind::File { write, .. } => {
                     if *write {
@@ -1051,14 +1053,7 @@ fn capture_call_site_kont(k: &KontRef) -> KontRef {
     // eprintln!("capture_call_site_kont: k = {:?}", k);
     match &**k {
         Kont::EvalArg { next, .. } | Kont::ApplyProc { next, .. } => capture_call_site_kont(next),
-        Kont::DynamicWind {
-            before,
-            thunk,
-            after,
-            thunk_result,
-            phase,
-            next,
-        } => {
+        Kont::DynamicWind { procs, phase, next } => {
             // eprintln!("capture_call_site_kont: DynamicWind before = {}, thunk = {}, after = {}, phase = {:?}", print_value(before), print_value(thunk), print_value(after), phase);
             match phase {
                 DynamicWindPhase::Return => {
@@ -1070,10 +1065,7 @@ fn capture_call_site_kont(k: &KontRef) -> KontRef {
                     // If dynamic-wind is in After phase, we need to let it run its after thunk
                     // and then return the result. Keep it in After phase so it will execute normally.
                     let new_kont = Rc::new(Kont::DynamicWind {
-                        before: *before,
-                        thunk: *thunk,
-                        after: *after,
-                        thunk_result: *thunk_result,
+                        procs: procs.clone(),
                         phase: DynamicWindPhase::After, // Keep in After phase
                         next: capture_call_site_kont(next),
                     });
@@ -1084,10 +1076,7 @@ fn capture_call_site_kont(k: &KontRef) -> KontRef {
                     // If we are capturing a continuation inside a dynamic-wind thunk,
                     // the phase should be After, as the thunk has already run.
                     let new_kont = Rc::new(Kont::DynamicWind {
-                        before: *before,
-                        thunk: *thunk,
-                        after: *after,
-                        thunk_result: *thunk_result,
+                        procs: procs.clone(),
                         phase: DynamicWindPhase::After, // <--- Change phase here
                         next: capture_call_site_kont(next), // Recursively process the next continuation
                     });

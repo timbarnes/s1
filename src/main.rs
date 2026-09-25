@@ -23,6 +23,12 @@ use std::rc::Rc;
 use argh::FromArgs;
 use std::io as stdio;
 
+// Measured ~15% on the GC-heavy regression suite, where sweep frees objects
+// en masse; roughly neutral on the call-heavy micro benchmarks. See
+// Docs/performance.md, F11.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[derive(FromArgs)]
 /// A simple Scheme interpreter
 struct Args {
@@ -112,7 +118,7 @@ fn repl(rt: &mut RunTime, state: &mut CEKState, quit_after_load: bool, global: E
         interactive = {
             let port_kind = rt.heap.get_value(current_port_ref);
             if let SchemeValue::Port(port_kind) = port_kind {
-                matches!(port_kind, PortKind::Stdin)
+                matches!(**port_kind, PortKind::Stdin)
             } else {
                 false
             }

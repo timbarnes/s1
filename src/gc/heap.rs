@@ -376,21 +376,21 @@ fn mark_reachable(start: GcRef, epoch: u64, worklist: &mut Vec<GcRef>) {
                     push_if_unmarked(*item, epoch, worklist);
                 }
             }
-            SchemeValue::Callable(Callable::Closure { body, env, .. }) => {
-                push_if_unmarked(*body, epoch, worklist);
-                env.mark(&mut |gcref| push_if_unmarked(gcref, epoch, worklist));
-            }
-            SchemeValue::Callable(Callable::Macro { body, env, .. }) => {
-                push_if_unmarked(*body, epoch, worklist);
-                env.mark(&mut |gcref| push_if_unmarked(gcref, epoch, worklist));
-            }
-            SchemeValue::Continuation(kont, dw_stack, arg_stack) => {
-                kont.mark(&mut |gcref| push_if_unmarked(gcref, epoch, worklist));
-                for dw in dw_stack {
+            SchemeValue::Callable(c) => match &**c {
+                Callable::Closure { body, env, .. } | Callable::Macro { body, env, .. } => {
+                    push_if_unmarked(*body, epoch, worklist);
+                    env.mark(&mut |gcref| push_if_unmarked(gcref, epoch, worklist));
+                }
+                _ => {}
+            },
+            SchemeValue::Continuation(k) => {
+                k.kont
+                    .mark(&mut |gcref| push_if_unmarked(gcref, epoch, worklist));
+                for dw in &k.dw_stack {
                     push_if_unmarked(dw.before, epoch, worklist);
                     push_if_unmarked(dw.after, epoch, worklist);
                 }
-                for arg in arg_stack {
+                for arg in &k.arg_stack {
                     push_if_unmarked(*arg, epoch, worklist);
                 }
             }

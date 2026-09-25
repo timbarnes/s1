@@ -169,7 +169,7 @@ pub fn dbg_one_kont(loc: &str, frame: &Kont) -> String {
         Kont::Cond { .. } => result.push_str("Cond"),
         Kont::CondClause { .. } => result.push_str("CondClause"),
         Kont::EvalArg {
-            proc,
+            have_proc,
             remaining_exprs,
             args_base,
             original_call,
@@ -184,7 +184,7 @@ pub fn dbg_one_kont(loc: &str, frame: &Kont) -> String {
             result.push_str(
                 format!(
                     "EvalArg{{proc={}, remaining={}, args_base={}, orig={:?}}}",
-                    if proc.is_some() { "Some" } else { "None" },
+                    if *have_proc { "Some" } else { "None" },
                     remaining_count,
                     args_base,
                     original_call,
@@ -219,10 +219,10 @@ pub fn dbg_one_kont(loc: &str, frame: &Kont) -> String {
         ),
         Kont::Bind { symbol, next, .. } => result
             .push_str(format!("Bind{{symbol={}, next={:?}}}", print_value(symbol), next).as_str()),
-        Kont::DynamicWind { after, next, .. } => result.push_str(
+        Kont::DynamicWind { procs, next, .. } => result.push_str(
             format!(
                 "DynamicWind{{after={},next={:?}}}",
-                print_value(&after),
+                print_value(&procs.after),
                 next
             )
             .as_str(),
@@ -252,13 +252,11 @@ pub fn dbg_one_kont(loc: &str, frame: &Kont) -> String {
             result.push_str(format!("MacroExpand{{mode={:?}}}", mode).as_str())
         }
         Kont::ExpandArg { .. } => result.push_str("ExpandArg"),
-        Kont::EvalSeq {
-            remaining, results, ..
-        } => result.push_str(
+        Kont::EvalSeq { forms, .. } => result.push_str(
             format!(
                 "EvalSeq{{remaining={}, results={}}}",
-                remaining.len(),
-                results.len()
+                forms.remaining.len(),
+                forms.results.len()
             )
             .as_str(),
         ),

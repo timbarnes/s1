@@ -477,7 +477,7 @@ pub fn port_to_scheme_port(rt: &mut RunTime, port_kind: PortKind) -> GcRef {
 pub fn port_kind_from_scheme_port(rt: &mut RunTime, scheme_port: GcRef) -> PortKind {
     let s_p = rt.heap.get_value(scheme_port);
     match s_p {
-        crate::gc::SchemeValue::Port(kind) => kind.clone(),
+        crate::gc::SchemeValue::Port(kind) => (**kind).clone(),
         _ => panic!("Expected port object"),
     }
 }

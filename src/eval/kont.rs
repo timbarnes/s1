@@ -48,21 +48,13 @@ pub enum Kont {
         next: KontRef,
     },
     DynamicWind {
-        before: GcRef,
-        thunk: GcRef,
-        after: GcRef,
-        thunk_result: Option<GcRef>,
+        procs: Box<DynamicWindProcs>,
         phase: DynamicWindPhase,
         next: KontRef,
     },
     Escape {
-        result: GcRef,
-        thunks: Vec<GcRef>,
+        payload: Box<EscapePayload>,
         new_kont: KontRef,
-        new_dw_stack: Vec<DynamicWind>,
-        /// The continuation's `arg_stack` snapshot (see
-        /// `SchemeValue::Continuation`).
-        new_arg_stack: Vec<GcRef>,
     },
     Eval {
         expr: GcRef,
@@ -90,8 +82,7 @@ pub enum Kont {
     /// each result; `remaining` holds the not-yet-evaluated forms (tail
     /// first), `results` the values collected so far.
     EvalSeq {
-        remaining: Vec<GcRef>,
-        results: Vec<GcRef>,
+        forms: Box<EvalSeqForms>,
         next: KontRef,
     },
     /// Times the evaluation of the wrapped body (`with-timer`).
@@ -100,7 +91,11 @@ pub enum Kont {
         next: KontRef,
     },
     EvalArg {
-        proc: Option<GcRef>,
+        /// Whether the operator has been evaluated yet. Once it has, it sits
+        /// at `arg_stack[args_base]` (rooted there like the arguments),
+        /// rather than in an `Option<GcRef>` field here: raw pointers have
+        /// no niche, so that Option cost 16 bytes on the hottest frame.
+        have_proc: bool,
         /// The not-yet-evaluated argument expressions, as the tail of the
         /// original call's cons-list (`Nil` once all are evaluated). Walking
         /// this directly instead of copying it into a `Vec` up front avoids
@@ -108,12 +103,12 @@ pub enum Kont {
         /// since it's ordinary list structure.
         remaining_exprs: GcRef,
         /// Index into `RunTime::arg_stack` where this call's evaluated
-        /// arguments begin; they run from `args_base` to the stack's current
-        /// top. The stack is shared and reused across all in-flight calls
+        /// operator and then arguments begin; they run from `args_base` to
+        /// the stack's current top. The stack is shared and reused across all in-flight calls
         /// (nested calls simply extend it further and truncate back on
         /// return), which turns per-call argument accumulation into pushes
         /// onto one long-lived buffer instead of a fresh `Vec` each time.
-        args_base: usize,
+        args_base: u32,
         original_call: GcRef,
         tail: bool,
         env: EnvRef,
@@ -181,7 +176,7 @@ impl std::fmt::Debug for Kont {
                 write!(f, "RestoreEnv: next: {:?}", next)
             }
             Kont::EvalArg {
-                proc,
+                have_proc,
                 remaining_exprs,
                 args_base,
                 original_call,
@@ -190,8 +185,8 @@ impl std::fmt::Debug for Kont {
             } => {
                 write!(
                     f,
-                    "EvalArg {{ proc: {:?}, remaining_exprs: {}, args_base: {}, original_call: {:?}, next: {:?} }}",
-                    proc,
+                    "EvalArg {{ have_proc: {}, remaining_exprs: {}, args_base: {}, original_call: {:?}, next: {:?} }}",
+                    have_proc,
                     print_value(remaining_exprs),
                     args_base,
                     original_call,
@@ -236,14 +231,13 @@ impl std::fmt::Debug for Kont {
                     next
                 )
             }
-            Kont::DynamicWind {
-                before,
-                thunk,
-                after,
-                thunk_result,
-                phase,
-                next,
-            } => {
+            Kont::DynamicWind { procs, phase, next } => {
+                let DynamicWindProcs {
+                    before,
+                    thunk,
+                    after,
+                    thunk_result,
+                } = &**procs;
                 write!(
                     f,
                     "DynamicWind {{ before: {}, thunk: {}, after: {}, thunk_result: {:?}, phase: {:?}, next: {:?} }}",
@@ -320,13 +314,11 @@ impl std::fmt::Debug for Kont {
                     k, rest, next
                 )
             }
-            Kont::Escape {
-                thunks, new_kont, ..
-            } => {
+            Kont::Escape { payload, new_kont } => {
                 write!(
                     f,
                     "Escape {{ thunks: {}, new_kont: {:?} }}",
-                    thunks.len(),
+                    payload.thunks.len(),
                     new_kont
                 )
             }
@@ -340,16 +332,12 @@ impl std::fmt::Debug for Kont {
             Kont::ExpandArg { env: _, next } => {
                 write!(f, "ExpandArg {{ next: {:?} }}", next)
             }
-            Kont::EvalSeq {
-                remaining,
-                results,
-                next,
-            } => {
+            Kont::EvalSeq { forms, next } => {
                 write!(
                     f,
                     "EvalSeq {{ remaining: {}, results: {}, next: {:?} }}",
-                    remaining.len(),
-                    results.len(),
+                    forms.remaining.len(),
+                    forms.results.len(),
                     next
                 )
             }
@@ -396,6 +384,37 @@ pub enum DynamicWindPhase {
     After,
     Return,
 }
+
+// Cold, wide payloads are boxed so every `Rc<Kont>` allocation — the
+// evaluator's most frequent — stays within 56 bytes (see the assertion
+// below). Each variant keeps its `next` link inline, so generic walkers
+// like `Kont::next()` don't have to look inside the box.
+
+#[derive(Clone, PartialEq)]
+pub struct DynamicWindProcs {
+    pub before: GcRef,
+    pub thunk: GcRef,
+    pub after: GcRef,
+    pub thunk_result: Option<GcRef>,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct EscapePayload {
+    pub result: GcRef,
+    pub thunks: Vec<GcRef>,
+    pub new_dw_stack: Vec<DynamicWind>,
+    /// The continuation's `arg_stack` snapshot (see `ContinuationData`).
+    pub new_arg_stack: Vec<GcRef>,
+}
+
+/// `eval-string`'s pending forms (tail first) and results collected so far.
+#[derive(Clone, PartialEq)]
+pub struct EvalSeqForms {
+    pub remaining: Vec<GcRef>,
+    pub results: Vec<GcRef>,
+}
+
+const _: () = assert!(std::mem::size_of::<Kont>() <= 40);
 
 pub enum Control {
     Expr(GcRef),        // Unevaluated expression
@@ -498,14 +517,13 @@ impl crate::gc::Mark for KontRef {
                     clause.mark(visit);
                     worklist.push(Rc::clone(next));
                 }
-                Kont::DynamicWind {
-                    before,
-                    thunk,
-                    after,
-                    thunk_result,
-                    next,
-                    ..
-                } => {
+                Kont::DynamicWind { procs, next, .. } => {
+                    let DynamicWindProcs {
+                        before,
+                        thunk,
+                        after,
+                        thunk_result,
+                    } = &**procs;
                     visit(*before);
                     visit(*thunk);
                     visit(*after);
@@ -514,13 +532,13 @@ impl crate::gc::Mark for KontRef {
                     }
                     worklist.push(Rc::clone(next));
                 }
-                Kont::Escape {
-                    result,
-                    thunks,
-                    new_kont,
-                    new_dw_stack,
-                    new_arg_stack,
-                } => {
+                Kont::Escape { payload, new_kont } => {
+                    let EscapePayload {
+                        result,
+                        thunks,
+                        new_dw_stack,
+                        new_arg_stack,
+                    } = &**payload;
                     visit(*result);
                     for arg in new_arg_stack {
                         visit(*arg);
@@ -548,21 +566,17 @@ impl crate::gc::Mark for KontRef {
                     worklist.push(Rc::clone(next));
                 }
                 Kont::EvalArg {
-                    proc,
                     remaining_exprs,
                     original_call,
                     env,
                     next,
                     ..
                 } => {
-                    if let Some(proc) = proc {
-                        visit(*proc);
-                    }
                     // Transitively marks the whole not-yet-evaluated tail:
                     // `visit` (== `mark_reachable`) already knows how to walk
                     // Pair structure.
                     visit(*remaining_exprs);
-                    // The already-evaluated arguments for this and every
+                    // The already-evaluated operator and arguments for this and every
                     // other in-flight call live in `RunTime::arg_stack`,
                     // rooted directly in `GcHeap::mark_from` — not here.
                     visit(*original_call);
@@ -598,15 +612,11 @@ impl crate::gc::Mark for KontRef {
                     env.mark(visit);
                     worklist.push(Rc::clone(next));
                 }
-                Kont::EvalSeq {
-                    remaining,
-                    results,
-                    next,
-                } => {
-                    for item in remaining {
+                Kont::EvalSeq { forms, next } => {
+                    for item in &forms.remaining {
                         visit(*item);
                     }
-                    for item in results {
+                    for item in &forms.results {
                         visit(*item);
                     }
                     worklist.push(Rc::clone(next));
@@ -743,10 +753,12 @@ pub fn insert_cond(state: &mut CEKState, remaining: Vec<CondClause>) {
 pub fn insert_dynamic_wind(state: &mut CEKState, before: GcRef, thunk: GcRef, after: GcRef) {
     let prev = Rc::clone(&state.kont);
     state.kont = Rc::new(Kont::DynamicWind {
-        before,
-        thunk,
-        after,
-        thunk_result: None,
+        procs: Box::new(DynamicWindProcs {
+            before,
+            thunk,
+            after,
+            thunk_result: None,
+        }),
         phase: DynamicWindPhase::Thunk,
         next: prev,
     });
@@ -782,10 +794,12 @@ pub fn insert_escape(
     new_arg_stack: Vec<GcRef>,
 ) {
     state.kont = Rc::new(Kont::Escape {
-        result,
-        thunks,
+        payload: Box::new(EscapePayload {
+            result,
+            thunks,
+            new_dw_stack,
+            new_arg_stack,
+        }),
         new_kont,
-        new_dw_stack,
-        new_arg_stack,
     });
 }

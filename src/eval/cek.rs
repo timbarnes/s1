@@ -4,7 +4,7 @@ use super::kont::{
 /// Continuation-Passing Style (CPS) evaluator.
 ///
 use crate::env::{EnvOps, EnvRef};
-use crate::eval::kont::DynamicWindPhase;
+use crate::eval::kont::{DynamicWindPhase, DynamicWindProcs, EscapePayload, EvalSeqForms};
 use crate::eval::{DynamicWind, RunTime, bind_params};
 use crate::gc::SchemeValue::*;
 use crate::gc::{Callable, GcRef, cons, is_false, list_to_vec, new_float};
@@ -94,17 +94,8 @@ pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
     //dump_cek("   eval_cek", &state);
     match &gc_value!(expr) {
         // Self-evaluating values are returned unchanged
-        Int(_)
-        | Float(_)
-        | Str(_)
-        | Bool(_)
-        | Vector(_)
-        | Char(_)
-        | Nil
-        | Callable(_)
-        | Continuation(_, _, _)
-        | Void
-        | Undefined => {
+        Int(_) | Float(_) | Str(_) | Bool(_) | Vector(_) | Char(_) | Nil | Callable(_)
+        | Continuation(_) | Void | Undefined => {
             state.control = Control::Value(expr);
         }
         // Symbols are looked up in the environment
@@ -130,7 +121,10 @@ pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
 
             // Quick path: is this a special form?
             if let Some(op) = op_val {
-                if matches!(gc_value!(op), Callable(Callable::SpecialForm { .. })) {
+                if matches!(
+                    gc_value!(op).as_callable(),
+                    Some(Callable::SpecialForm { .. })
+                ) {
                     // Call the special-form handler in-place.
                     state.control = Control::Expr(*car); // or set Value/Expr as your handler expects
                     let result = apply_special_direct(expr, rt, state);
@@ -156,7 +150,7 @@ pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
             // Evaluated arguments accumulate on the shared `arg_stack`
             // rather than in a private `Vec` per call; `args_base` marks
             // where this call's slice of it begins.
-            let args_base = rt.arg_stack.len();
+            let args_base = rt.arg_stack.len() as u32;
 
             match op_val {
                 Some(op) => {
@@ -174,7 +168,7 @@ pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
             }
             state.tail = false; // reset after using it
             state.kont = Rc::new(Kont::EvalArg {
-                proc: None,
+                have_proc: false,
                 remaining_exprs: *cdr,
                 args_base,
                 tail: is_tail,
@@ -266,26 +260,11 @@ fn dispatch_kont(state: &mut CEKState, ec: &mut RunTime, val: GcRef) -> Result<(
         } => handle_bind(state, ec, symbol, env, is_define, next),
         Kont::Cond { remaining, next } => handle_cond(state, ec, remaining, next),
         Kont::CondClause { clause, next } => handle_cond_clause(state, ec, clause, next),
-        Kont::DynamicWind {
-            before,
-            thunk,
-            after,
-            thunk_result,
-            phase,
-            next,
-            ..
-        } => handle_dynamic_wind(
-            state,
-            ec.dynamic_wind,
-            before,
-            thunk,
-            after,
-            thunk_result,
-            phase,
-            next,
-        ),
+        Kont::DynamicWind { procs, phase, next } => {
+            handle_dynamic_wind(state, ec.dynamic_wind, procs, phase, next)
+        }
         Kont::EvalArg {
-            proc,
+            have_proc,
             remaining_exprs,
             args_base,
             original_call,
@@ -296,7 +275,7 @@ fn dispatch_kont(state: &mut CEKState, ec: &mut RunTime, val: GcRef) -> Result<(
             state,
             ec,
             val,
-            proc,
+            have_proc,
             remaining_exprs,
             args_base,
             original_call,
@@ -316,21 +295,7 @@ fn dispatch_kont(state: &mut CEKState, ec: &mut RunTime, val: GcRef) -> Result<(
             next,
         } => handle_if(state, then_branch, else_branch, next),
         Kont::RestoreEnv { old_env, next } => handle_restore_env(state, ec, old_env, next),
-        Kont::Escape {
-            result,
-            thunks,
-            new_kont,
-            new_dw_stack,
-            new_arg_stack,
-        } => handle_escape(
-            state,
-            ec,
-            result,
-            thunks,
-            new_kont,
-            new_dw_stack,
-            new_arg_stack,
-        ),
+        Kont::Escape { payload, new_kont } => handle_escape(state, ec, payload, new_kont),
         Kont::Seq { rest, next } => handle_seq(state, rest, next),
         Kont::MacroExpand {
             call_env,
@@ -338,11 +303,7 @@ fn dispatch_kont(state: &mut CEKState, ec: &mut RunTime, val: GcRef) -> Result<(
             next,
         } => handle_macro_expand(state, call_env, mode, next),
         Kont::ExpandArg { env, next } => handle_expand_arg(state, ec, env, next),
-        Kont::EvalSeq {
-            remaining,
-            results,
-            next,
-        } => handle_eval_seq(state, ec, remaining, results, next),
+        Kont::EvalSeq { forms, next } => handle_eval_seq(state, ec, forms, next),
         Kont::Timer { start, next } => handle_timer(state, ec, start, next),
         Kont::Halt => Ok(()),
         Kont::CallWithValues { .. } => {
@@ -524,22 +485,20 @@ fn handle_cond_clause(
 fn handle_dynamic_wind(
     state: &mut CEKState,
     dw: &mut Vec<DynamicWind>,
-    before: GcRef,
-    thunk: GcRef,
-    after: GcRef,
-    thunk_result: Option<GcRef>,
+    mut procs: Box<DynamicWindProcs>,
     phase: DynamicWindPhase,
     next: KontRef,
 ) -> Result<(), String> {
+    // `procs` is moved from frame to frame across phases, so the box is
+    // allocated once per dynamic-wind, not once per phase.
+    let after = procs.after;
     match phase {
         DynamicWindPhase::Thunk => {
             // Incoming value from before can be dropped
-            state.control = Control::Expr(thunk);
+            state.control = Control::Expr(procs.thunk);
+            procs.thunk_result = None;
             state.kont = Rc::new(Kont::DynamicWind {
-                before,
-                thunk,
-                after,
-                thunk_result: None,
+                procs,
                 phase: DynamicWindPhase::After,
                 next,
             });
@@ -549,11 +508,9 @@ fn handle_dynamic_wind(
             // Save incoming value from thunk
             if let Control::Value(result) = state.control {
                 state.control = Control::Expr(after);
+                procs.thunk_result = Some(result);
                 state.kont = Rc::new(Kont::DynamicWind {
-                    before,
-                    thunk,
-                    after,
-                    thunk_result: Some(result),
+                    procs,
                     phase: DynamicWindPhase::Return,
                     next,
                 });
@@ -568,7 +525,7 @@ fn handle_dynamic_wind(
                 None => return Err("No dynamic wind to pop".to_string()),
             }
         }
-        DynamicWindPhase::Return => match thunk_result {
+        DynamicWindPhase::Return => match procs.thunk_result {
             Some(value) => {
                 state.control = Control::Value(value);
                 state.kont = next;
@@ -582,11 +539,8 @@ fn handle_dynamic_wind(
 fn handle_escape(
     state: &mut CEKState,
     ec: &mut RunTime,
-    result: GcRef,
-    mut thunks: Vec<GcRef>,
+    mut payload: Box<EscapePayload>,
     new_kont: KontRef,
-    new_dw_stack: Vec<DynamicWind>,
-    new_arg_stack: Vec<GcRef>,
 ) -> Result<(), String> {
     // eprintln!(
     //     "handle_escape: result = {}, thunks.len() = {}, new_kont = {:?}, new_dw_stack.len() = {}",
@@ -595,15 +549,9 @@ fn handle_escape(
     //     new_kont,
     //     new_dw_stack.len()
     // );
-    if let Some(thunk) = thunks.pop() {
+    if let Some(thunk) = payload.thunks.pop() {
         // eprintln!("handle_escape: running thunk = {}", print_value(&thunk));
-        state.kont = Rc::new(Kont::Escape {
-            result,
-            thunks,
-            new_kont,
-            new_dw_stack,
-            new_arg_stack,
-        });
+        state.kont = Rc::new(Kont::Escape { payload, new_kont });
         state.control = Control::Expr(thunk);
     } else {
         // eprintln!(
@@ -611,9 +559,9 @@ fn handle_escape(
         //     print_value(&result)
         // );
         state.kont = new_kont;
-        state.control = Control::Value(result);
-        *ec.dynamic_wind = new_dw_stack;
-        *ec.arg_stack = new_arg_stack;
+        state.control = Control::Value(payload.result);
+        *ec.dynamic_wind = payload.new_dw_stack;
+        *ec.arg_stack = payload.new_arg_stack;
     }
     Ok(())
 }
@@ -672,9 +620,9 @@ fn handle_eval_arg(
     state: &mut CEKState,
     ec: &mut RunTime,
     val: GcRef,
-    proc: Option<GcRef>,
+    have_proc: bool,
     remaining_exprs: GcRef,
-    args_base: usize,
+    args_base: u32,
     original_call: GcRef,
     tail: bool,
     env: EnvRef,
@@ -685,86 +633,57 @@ fn handle_eval_arg(
     // exactly this reason: restore it before evaluating the remaining arguments.
     state.env = env;
 
-    if proc.is_none() {
+    if !have_proc {
         // Evaluating operator (car of the call)
-        match gc_value!(val) {
-            Callable(Callable::SpecialForm { .. }) | Callable(Callable::Macro { .. }) => {
-                state.kont = Rc::new(Kont::ApplySpecial {
-                    proc: val,
-                    original_call,
-                    next,
-                });
-                apply_unevaluated(state, ec)?;
-                return Ok(());
-            }
-            _ => {
-                let proc = Some(val);
-                match gc_value!(remaining_exprs) {
-                    Nil => {
-                        // zero-arg call
-                        let evaluated_args = Rc::new(ec.arg_stack.split_off(args_base));
-                        state.kont = Rc::new(Kont::ApplyProc {
-                            proc: proc.unwrap(),
-                            evaluated_args,
-                            next,
-                        });
-                        state.tail = tail;
-                        apply_proc(state, ec)?;
-                    }
-                    Pair(head, rest) => {
-                        state.control = Control::Expr(*head);
-                        let rest = *rest;
-                        state.tail = false;
-                        state.kont = Rc::new(Kont::EvalArg {
-                            proc,
-                            remaining_exprs: rest,
-                            args_base,
-                            original_call,
-                            tail,
-                            env: state.env.clone(),
-                            next,
-                        });
-                    }
-                    _ => return Err("apply: improper argument list".to_string()),
-                }
-                return Ok(());
-            }
+        if let Some(Callable::SpecialForm { .. } | Callable::Macro { .. }) =
+            gc_value!(val).as_callable()
+        {
+            state.kont = Rc::new(Kont::ApplySpecial {
+                proc: val,
+                original_call,
+                next,
+            });
+            apply_unevaluated(state, ec)?;
+            return Ok(());
         }
-    } else {
-        // We already have a proc; val is an evaluated argument. It joins
-        // the shared stack rather than a private Vec — safe because nothing
-        // outlives this call's LIFO extent: a captured continuation never
-        // retains an EvalArg frame (see RunTimeStruct::arg_stack).
-        ec.arg_stack.push(val);
-        match gc_value!(remaining_exprs) {
-            Nil => {
-                let evaluated_args = Rc::new(ec.arg_stack.split_off(args_base));
-                state.kont = Rc::new(Kont::ApplyProc {
-                    proc: proc.unwrap(),
-                    evaluated_args,
-                    next,
-                });
-                state.tail = tail;
-                apply_proc(state, ec)?;
-            }
-            Pair(head, rest) => {
-                state.control = Control::Expr(*head);
-                let rest = *rest;
-                state.tail = false;
-                state.kont = Rc::new(Kont::EvalArg {
-                    proc,
-                    remaining_exprs: rest,
-                    args_base,
-                    original_call,
-                    tail,
-                    env: state.env.clone(),
-                    next,
-                });
-            }
-            _ => return Err("apply: improper argument list".to_string()),
-        }
-        return Ok(());
     }
+    // `val` is the operator (which goes first, at `args_base`) or an evaluated
+    // argument. Either way it joins the shared stack rather than a private
+    // Vec — safe because nothing outlives this call's LIFO extent: a captured
+    // continuation never retains an EvalArg frame (see RunTimeStruct::arg_stack).
+    ec.arg_stack.push(val);
+    match gc_value!(remaining_exprs) {
+        Nil => {
+            let evaluated_args = Rc::new(ec.arg_stack.split_off(args_base as usize + 1));
+            let proc = ec
+                .arg_stack
+                .pop()
+                .expect("EvalArg: operator missing from arg_stack");
+            state.kont = Rc::new(Kont::ApplyProc {
+                proc,
+                evaluated_args,
+                next,
+            });
+            state.tail = tail;
+            apply_proc(state, ec)?;
+        }
+        Pair(head, rest) => {
+            state.control = Control::Expr(*head);
+            let rest = *rest;
+            state.tail = false;
+            state.kont = Rc::new(Kont::EvalArg {
+                have_proc: true,
+                remaining_exprs: rest,
+                args_base,
+                original_call,
+                tail,
+                env: state.env.clone(),
+                next,
+            });
+        }
+        _ => return Err("apply: improper argument list".to_string()),
+    }
+    Ok(())
 }
 
 fn handle_if(
@@ -893,7 +812,10 @@ fn handle_expand_arg(
     };
     if let Symbol(_) = gc_value!(head) {
         if let Some(callable) = state.env.lookup(head) {
-            if let Callable(Callable::Macro { params, body, env, .. }) = gc_value!(callable) {
+            if let Some(Callable::Macro {
+                params, body, env, ..
+            }) = gc_value!(callable).as_callable()
+            {
                 let raw_args = list_to_vec(ec.heap, tail)?;
                 let macro_env = bind_params(params, &raw_args, env, ec.heap)?;
                 let call_env = state.env.clone();
@@ -920,24 +842,19 @@ fn handle_expand_arg(
 fn handle_eval_seq(
     state: &mut CEKState,
     ec: &mut RunTime,
-    mut remaining: Vec<GcRef>,
-    mut results: Vec<GcRef>,
+    mut forms: Box<EvalSeqForms>,
     next: KontRef,
 ) -> Result<(), String> {
     match state.control {
-        Control::Value(val) => results.push(val),
+        Control::Value(val) => forms.results.push(val),
         _ => return Err("Kont::EvalSeq reached but control is not a Value".to_string()),
     }
-    if let Some(next_form) = remaining.pop() {
+    if let Some(next_form) = forms.remaining.pop() {
         state.control = Control::Expr(next_form);
         state.tail = true;
-        state.kont = Rc::new(Kont::EvalSeq {
-            remaining,
-            results,
-            next,
-        });
+        state.kont = Rc::new(Kont::EvalSeq { forms, next });
     } else {
-        let list = crate::gc::list_from_slice(&results, ec.heap);
+        let list = crate::gc::list_from_slice(&forms.results, ec.heap);
         state.control = Control::Value(list);
         state.kont = next;
     }
@@ -968,7 +885,7 @@ fn apply_special_direct(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> 
     let op_sym = crate::gc::car(expr)?;
     let op_val = state.env.lookup(op_sym).ok_or("unbound special form")?;
     //println!("op_val: {}", print_scheme_value(&op_val));
-    if let Callable(Callable::SpecialForm { func, .. }) = gc_value!(op_val) {
+    if let Some(Callable::SpecialForm { func, .. }) = gc_value!(op_val).as_callable() {
         func(expr, ec, state) // handler mutates state; returns Ok(()) immediately
     } else {
         Err("early-dispatch promised a SpecialForm".to_string())
@@ -986,8 +903,8 @@ fn apply_unevaluated(state: &mut CEKState, ec: &mut RunTime) -> Result<(), Strin
         } => (proc, original_call, Rc::clone(next)),
         _ => return Err("apply_proc expected ApplySpecial continuation".to_string()),
     };
-    match gc_value!(*proc) {
-        Callable(Callable::SpecialForm { func, .. }) => {
+    match gc_value!(*proc).as_callable() {
+        Some(Callable::SpecialForm { func, .. }) => {
             let result = func(*original_call, ec, state);
             match result {
                 Err(err) => post_error(state, ec, &err),
@@ -995,7 +912,9 @@ fn apply_unevaluated(state: &mut CEKState, ec: &mut RunTime) -> Result<(), Strin
             }
             Ok(())
         }
-        Callable(Callable::Macro { params, body, env, .. }) => {
+        Some(Callable::Macro {
+            params, body, env, ..
+        }) => {
             let cdr = match gc_value!(*original_call) {
                 Pair(_, cdr) => *cdr,
                 _ => return Err("macro: not a proper call".to_string()),
@@ -1031,7 +950,7 @@ pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> 
     };
     //crate::utilities::dbg_kont("kont in apply_proc", &state.kont);
     match gc_value!(*proc) {
-        Callable(callable) => match callable {
+        Callable(callable) => match &**callable {
             Callable::Builtin { func, .. } => {
                 match func(ec.heap, &evaluated_args) {
                     Err(err) => post_error(state, ec, &err),

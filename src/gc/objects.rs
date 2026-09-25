@@ -63,7 +63,7 @@ pub fn equal(heap: &GcHeap, a: GcRef, b: GcRef) -> bool {
             }
             true
         }
-        (SchemeValue::Callable(a), SchemeValue::Callable(b)) => match (a, b) {
+        (SchemeValue::Callable(a), SchemeValue::Callable(b)) => match (&**a, &**b) {
             (Callable::Builtin { func: f1, .. }, Callable::Builtin { func: f2, .. }) => {
                 std::ptr::fn_addr_eq(*f1, *f2)
             }
@@ -293,7 +293,11 @@ pub fn new_continuation(
     arg_stack: Vec<GcRef>,
 ) -> GcRef {
     let obj = GcObject {
-        value: SchemeValue::Continuation(kont, dw_stack, arg_stack),
+        value: SchemeValue::Continuation(Box::new(super::ContinuationData {
+            kont,
+            dw_stack,
+            arg_stack,
+        })),
         marked: 0,
     };
     heap.alloc(obj)
@@ -305,7 +309,7 @@ pub fn new_builtin(
     f: fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>,
     doc: String,
 ) -> GcRef {
-    let primitive = SchemeValue::Callable(Callable::Builtin { func: f, doc });
+    let primitive = SchemeValue::Callable(Box::new(Callable::Builtin { func: f, doc }));
     let obj = GcObject {
         value: primitive,
         marked: 0,
@@ -318,7 +322,7 @@ pub fn new_sys_builtin(
     f: fn(&mut RunTime, &[GcRef], &mut CEKState, KontRef) -> Result<(), String>,
     doc: String,
 ) -> GcRef {
-    let primitive = SchemeValue::Callable(Callable::SysBuiltin { func: f, doc });
+    let primitive = SchemeValue::Callable(Box::new(Callable::SysBuiltin { func: f, doc }));
     let obj = GcObject {
         value: primitive,
         marked: 0,
@@ -332,7 +336,7 @@ pub fn new_special_form(
     f: fn(GcRef, &mut RunTime, &mut CEKState) -> Result<(), String>,
     doc: String,
 ) -> GcRef {
-    let primitive = SchemeValue::Callable(Callable::SpecialForm { func: f, doc });
+    let primitive = SchemeValue::Callable(Box::new(Callable::SpecialForm { func: f, doc }));
     let obj = GcObject {
         value: primitive,
         marked: 0,
@@ -348,12 +352,12 @@ pub fn new_closure(
     env: Rc<RefCell<crate::env::Frame>>,
     doc: Option<String>,
 ) -> GcRef {
-    let closure = SchemeValue::Callable(Callable::Closure {
+    let closure = SchemeValue::Callable(Box::new(Callable::Closure {
         params,
         body,
         env,
         doc,
-    });
+    }));
     let obj = GcObject {
         value: closure,
         marked: 0,
@@ -369,12 +373,12 @@ pub fn new_macro(
     env: Rc<RefCell<crate::env::Frame>>,
     doc: Option<String>,
 ) -> GcRef {
-    let new_macro = SchemeValue::Callable(Callable::Macro {
+    let new_macro = SchemeValue::Callable(Box::new(Callable::Macro {
         params,
         body,
         env,
         doc,
-    });
+    }));
     let obj = GcObject {
         value: new_macro,
         marked: 0,
@@ -385,7 +389,7 @@ pub fn new_macro(
 /// Create a new port value.
 pub fn new_port(heap: &mut GcHeap, kind: crate::io::PortKind) -> GcRef {
     let obj = GcObject {
-        value: SchemeValue::Port(kind),
+        value: SchemeValue::Port(Box::new(kind)),
         marked: 0,
     };
     heap.alloc(obj)

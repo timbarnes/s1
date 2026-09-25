@@ -261,6 +261,8 @@ unaffected) and measured at ~1 %.
 Correction to an earlier claim in this doc: `BigInt` is **not** what sizes
 `SchemeValue`. `PortKind` and `Callable` are both 48 bytes, so `SchemeValue`
 stays 56 and `GcObject` stays 64 even after this change.
+(Superseded by F11 below: `Callable` later grew to 72 bytes, and all three
+wide variants are now boxed — `SchemeValue` is 32, `GcObject` 40.)
 
 ### F4 — `debugger()` called on every CEK step — DONE
 
@@ -416,6 +418,57 @@ Fixes, cheapest first:
    along the way. Worth revisiting only if it becomes load-bearing for a
    future bytecode-VM redesign rather than pursued as a standalone
    optimization — see the design doc's final section.
+
+### F11 — data layout and allocator — DONE, 2026-09-25, measured **11-21 %**
+
+Measured on linux/x86_64 (Ryzen 5 PRO 4650U). Sizes found at the start:
+`SchemeValue` 72 B / `GcObject` 80 B (a 96 B malloc chunk for a 16 B cons
+cell) because `Callable` had grown to 72 B when `Closure`/`Macro` gained
+`doc: Option<String>`; `Kont` 72 B (`Rc<Kont>` 88 B → 96 B chunk), with the
+hot `EvalArg` among the widest variants because `Option<GcRef>` is 16 B (raw
+pointers have no niche).
+
+1. **mimalloc** as `#[global_allocator]` (`src/main.rs`).
+2. **Boxed the wide, rare `SchemeValue` payloads**: `Callable(Box<Callable>)`,
+   `Port(Box<PortKind>)`, `Continuation(Box<ContinuationData>)`.
+   `SchemeValue` 72 → **32 B**, `GcObject` 80 → **40 B**. Nested patterns go
+   through `SchemeValue::as_callable()`.
+3. **`Kont` 72 → ≤40 B**: `EvalArg`'s operator now lives at
+   `arg_stack[args_base]` (field `have_proc: bool` instead of
+   `proc: Option<GcRef>`), `args_base` is `u32`, and the cold wide variants
+   (`DynamicWind`, `Escape`, `EvalSeq`) box their payload while keeping `next`
+   inline. Handlers move the box between phases rather than reallocating.
+
+Both sizes are pinned by `const` assertions (`src/gc/mod.rs`,
+`src/eval/kont.rs`), so a new wide field is a compile error, not a silent
+regression like the 56 → 72 creep.
+
+**Bug fixed along the way (pre-existing since f5b9894).** `arg_stack`'s
+comment claimed a captured continuation never retains an `EvalArg` frame, but
+`capture_call_site_kont` strips only the innermost ones; outer `EvalArg`
+frames stay in the chain with `args_base` indices into a stack that has long
+since been popped when `k` is invoked. On HEAD, `(define r (+ 100 (g)))`
+then `(k 10)` set `r` to 10 (not 110), and `(list 1 2 3 (+ 100 (g)))` then
+`(k 10)` panicked. Step 3 made the existing "deep capture" test hit it. Fix:
+`call/cc` snapshots `arg_stack` into `ContinuationData` and `escape`
+restores it (the snapshot is GC-marked). Regression test added to
+`scheme/gc_stress_tests.scm`.
+
+Interleaved A/B against the pre-F11 binary (11 alternating runs each,
+median — this laptop CPU's boost makes back-to-back `bench.sh` runs of the
+sub-second workloads drift by up to 50 %, so compare interleaved):
+
+| Workload | before | after | |
+|---|---|---|---|
+| `regression 1x` | 0.58 s | 0.48 s | −17 % |
+| `regression 5x` in-proc | 2.94 s | 2.31 s | −21 % |
+| `fib 25` | 0.24 s | 0.21 s | −12 % |
+| `list/map` | 0.47 s | 0.42 s | −11 % |
+| `tail loop 300k` | 0.24 s | 0.21 s | −12 % |
+
+Sequential `bench.sh` runs attribute roughly: mimalloc most of the
+regression-suite gain (GC-heavy: sweep frees en masse) and ~nothing on the
+micro workloads; steps 2+3 the ~10 % on fib/list/tail.
 
 ## Suggested order
 

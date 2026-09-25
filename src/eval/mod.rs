@@ -720,7 +720,7 @@ mod tests {
         let obj = car(result[0]).unwrap();
         // Verify it's a closure
         match gc_value!(obj) {
-            SchemeValue::Callable(c) => match c {
+            SchemeValue::Callable(c) => match &**c {
                 crate::gc::Callable::Closure { params, body, .. } => {
                     // Check parameters: 2 params means vector length = 3
                     assert_eq!(params.len(), 3);
