@@ -286,9 +286,14 @@ pub fn new_vector(heap: &mut GcHeap, elements: Vec<GcRef>) -> GcRef {
 }
 
 /// Create a new continuation.
-pub fn new_continuation(heap: &mut GcHeap, kont: KontRef, dw_stack: Vec<DynamicWind>) -> GcRef {
+pub fn new_continuation(
+    heap: &mut GcHeap,
+    kont: KontRef,
+    dw_stack: Vec<DynamicWind>,
+    arg_stack: Vec<GcRef>,
+) -> GcRef {
     let obj = GcObject {
-        value: SchemeValue::Continuation(kont, dw_stack),
+        value: SchemeValue::Continuation(kont, dw_stack, arg_stack),
         marked: 0,
     };
     heap.alloc(obj)

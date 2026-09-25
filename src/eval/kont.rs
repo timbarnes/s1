@@ -60,6 +60,9 @@ pub enum Kont {
         thunks: Vec<GcRef>,
         new_kont: KontRef,
         new_dw_stack: Vec<DynamicWind>,
+        /// The continuation's `arg_stack` snapshot (see
+        /// `SchemeValue::Continuation`).
+        new_arg_stack: Vec<GcRef>,
     },
     Eval {
         expr: GcRef,
@@ -516,8 +519,12 @@ impl crate::gc::Mark for KontRef {
                     thunks,
                     new_kont,
                     new_dw_stack,
+                    new_arg_stack,
                 } => {
                     visit(*result);
+                    for arg in new_arg_stack {
+                        visit(*arg);
+                    }
                     for thunk in thunks {
                         visit(*thunk);
                     }
@@ -772,11 +779,13 @@ pub fn insert_escape(
     thunks: Vec<GcRef>,
     new_kont: KontRef,
     new_dw_stack: Vec<DynamicWind>,
+    new_arg_stack: Vec<GcRef>,
 ) {
     state.kont = Rc::new(Kont::Escape {
         result,
         thunks,
         new_kont,
         new_dw_stack,
+        new_arg_stack,
     });
 }

@@ -26,11 +26,12 @@ pub struct RunTimeStruct {
     /// application's `Kont::EvalArg` claims a suffix of this stack (from its
     /// own `args_base` to the current top) instead of owning a private
     /// `Vec`; nested calls simply extend it further and the innermost one
-    /// truncates back on return, exactly like a native call stack. Safe to
-    /// share because a captured continuation never retains an `EvalArg`
-    /// frame (`capture_call_site_kont` strips those on capture — this
-    /// evaluator's continuations are escape-only), so nothing outlives the
-    /// LIFO discipline this relies on. Rooted whole in `GcHeap::mark_from`.
+    /// truncates back on return, exactly like a native call stack. The one
+    /// thing that breaks that LIFO discipline is a continuation: its chain
+    /// can retain `EvalArg` frames from further out (`capture_call_site_kont`
+    /// strips only the innermost), so `call/cc` snapshots this stack into
+    /// the continuation and `escape` restores it. Rooted whole in
+    /// `GcHeap::mark_from`.
     pub arg_stack: Vec<GcRef>,
 }
 

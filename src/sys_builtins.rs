@@ -298,7 +298,12 @@ fn call_cc_sp(
     // Capture the current continuation
     let captured_kont = capture_call_site_kont(&state.kont);
     // eprintln!("call_cc_sp: captured kont = {:?}", captured_kont);
-    let kont = new_continuation(ec.heap, captured_kont, ec.dynamic_wind.clone());
+    let kont = new_continuation(
+        ec.heap,
+        captured_kont,
+        ec.dynamic_wind.clone(),
+        ec.arg_stack.clone(),
+    );
     // Build the escape call
     let sym_val = get_symbol(ec.heap, "val");
     let sym_lambda = get_symbol(ec.heap, "lambda");
@@ -338,7 +343,7 @@ fn escape_sp(
         return Err("escape: requires two arguments".to_string());
     }
     match gc_value!(args[0]) {
-        SchemeValue::Continuation(new_kont, new_dw_stack) => {
+        SchemeValue::Continuation(new_kont, new_dw_stack, new_arg_stack) => {
             let result = args[1];
             // eprintln!("escape_sp: new_kont = {:?}, new_dw_stack.len() = {}", new_kont, new_dw_stack.len());
             let thunks = schedule_dynamic_wind_transitions(&ec.dynamic_wind, new_dw_stack);
@@ -349,6 +354,7 @@ fn escape_sp(
                 thunks,
                 Rc::clone(new_kont),
                 new_dw_stack.clone(),
+                new_arg_stack.clone(),
             );
             Ok(())
         }

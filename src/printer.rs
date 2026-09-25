@@ -91,7 +91,7 @@ pub fn print_value(obj: &GcRef) -> String {
             Callable::SysBuiltin { func: _, doc } => format!("SysBuiltin {}", doc), // Changed
         },
         Port(port) => format!("Port<{:?}>", port), // Changed
-        Continuation(kont, _dw) => format!("Continuation<{:?}>", kont), // Changed
+        Continuation(kont, _dw, _args) => format!("Continuation<{:?}>", kont), // Changed
         _ => format!("print_value: unprintable."),
     }
 }

@@ -102,7 +102,7 @@ pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
         | Char(_)
         | Nil
         | Callable(_)
-        | Continuation(_, _)
+        | Continuation(_, _, _)
         | Void
         | Undefined => {
             state.control = Control::Value(expr);
@@ -321,7 +321,16 @@ fn dispatch_kont(state: &mut CEKState, ec: &mut RunTime, val: GcRef) -> Result<(
             thunks,
             new_kont,
             new_dw_stack,
-        } => handle_escape(state, ec, result, thunks, new_kont, new_dw_stack),
+            new_arg_stack,
+        } => handle_escape(
+            state,
+            ec,
+            result,
+            thunks,
+            new_kont,
+            new_dw_stack,
+            new_arg_stack,
+        ),
         Kont::Seq { rest, next } => handle_seq(state, rest, next),
         Kont::MacroExpand {
             call_env,
@@ -577,6 +586,7 @@ fn handle_escape(
     mut thunks: Vec<GcRef>,
     new_kont: KontRef,
     new_dw_stack: Vec<DynamicWind>,
+    new_arg_stack: Vec<GcRef>,
 ) -> Result<(), String> {
     // eprintln!(
     //     "handle_escape: result = {}, thunks.len() = {}, new_kont = {:?}, new_dw_stack.len() = {}",
@@ -592,6 +602,7 @@ fn handle_escape(
             thunks,
             new_kont,
             new_dw_stack,
+            new_arg_stack,
         });
         state.control = Control::Expr(thunk);
     } else {
@@ -602,6 +613,7 @@ fn handle_escape(
         state.kont = new_kont;
         state.control = Control::Value(result);
         *ec.dynamic_wind = new_dw_stack;
+        *ec.arg_stack = new_arg_stack;
     }
     Ok(())
 }

@@ -125,6 +125,20 @@
 (test-equal (* 3 deep-depth) deep-exit-count
     "deep capture: third invocation replays all 500 pending frames exactly once more")
 
+;; A captured chain can hold argument-evaluation frames from further out
+;; whose already-evaluated arguments (1 2 3 100 below) live on the shared
+;; arg stack, which has long since been popped by the time k is invoked.
+;; Re-entry used to lose them (a bare (+ 100 (g)) gave 10) or, as here with
+;; more of them pending, panic on an out-of-range stack index.
+(define **argk** #f)
+(define (argk-g) (call/cc (lambda (c) (set! **argk** c) 1)))
+(define **argk-r** (list 1 2 3 (+ 100 (argk-g))))
+(test-equal '(1 2 3 101) **argk-r** "call/cc re-entry: initial pass with pending arguments")
+(deep-noise 100)
+(**argk** 10)
+(test-equal '(1 2 3 110) **argk-r**
+    "call/cc re-entry: arguments evaluated before capture survive re-invocation")
+
 (gc-threshold **saved-gc-threshold**)
 
 (display "          === Defect regression: env/tail/continuation bugs ===")

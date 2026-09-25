@@ -145,7 +145,13 @@ pub enum SchemeValue {
     Nil,
     TailCallScheduled,
     Port(PortKind),
-    Continuation(KontRef, Vec<DynamicWind>),
+    /// (captured chain, dynamic-wind stack, `arg_stack` snapshot). The chain
+    /// can still hold `Kont::EvalArg` frames from further up the call chain
+    /// (only the innermost ones are stripped at capture), and their
+    /// `args_base` indices — plus any arguments they had already evaluated —
+    /// refer to `RunTime::arg_stack` as it was then, not as it is when `k` is
+    /// invoked.
+    Continuation(KontRef, Vec<DynamicWind>, Vec<GcRef>),
     Eof,
     Void,
     Undefined,
