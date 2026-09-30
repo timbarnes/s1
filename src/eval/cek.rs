@@ -261,7 +261,7 @@ fn dispatch_kont(state: &mut CEKState, ec: &mut RunTime, val: GcRef) -> Result<(
         Kont::Cond { remaining, next } => handle_cond(state, ec, remaining, next),
         Kont::CondClause { clause, next } => handle_cond_clause(state, ec, clause, next),
         Kont::DynamicWind { procs, phase, next } => {
-            handle_dynamic_wind(state, ec.dynamic_wind, procs, phase, next)
+            handle_dynamic_wind(state, ec.dynamic_wind, ec.dw_next, procs, phase, next)
         }
         Kont::EvalArg {
             have_proc,
@@ -485,6 +485,7 @@ fn handle_cond_clause(
 fn handle_dynamic_wind(
     state: &mut CEKState,
     dw: &mut Vec<DynamicWind>,
+    dw_next: &mut u32,
     mut procs: Box<DynamicWindProcs>,
     phase: DynamicWindPhase,
     next: KontRef,
@@ -494,7 +495,9 @@ fn handle_dynamic_wind(
     let after = procs.after;
     match phase {
         DynamicWindPhase::Thunk => {
-            // Incoming value from before can be dropped
+            // `before` has returned (its value is dropped): enter the extent.
+            dw.push(DynamicWind::new(*dw_next, procs.before, after));
+            *dw_next += 1;
             state.control = Control::Expr(procs.thunk);
             procs.thunk_result = None;
             state.kont = Rc::new(Kont::DynamicWind {
@@ -649,8 +652,8 @@ fn handle_eval_arg(
     }
     // `val` is the operator (which goes first, at `args_base`) or an evaluated
     // argument. Either way it joins the shared stack rather than a private
-    // Vec — safe because nothing outlives this call's LIFO extent: a captured
-    // continuation never retains an EvalArg frame (see RunTimeStruct::arg_stack).
+    // Vec; continuations snapshot and restore that stack (see
+    // RunTimeStruct::arg_stack).
     ec.arg_stack.push(val);
     match gc_value!(remaining_exprs) {
         Nil => {

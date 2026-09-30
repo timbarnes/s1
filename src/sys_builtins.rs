@@ -1,5 +1,5 @@
 use crate::env::{EnvOps, EnvRef};
-use crate::eval::kont::{DynamicWindPhase, EvalSeqForms};
+use crate::eval::kont::EvalSeqForms;
 use crate::eval::{
     CEKState, Control, DynamicWind, Kont, KontRef, RunTime, TraceType, insert_dynamic_wind,
     insert_eval_eval,
@@ -297,12 +297,13 @@ fn call_cc_sp(
         },
         _ => return Err("call/cc: argument must be a function".to_string()),
     }
-    // Capture the current continuation
-    let captured_kont = capture_call_site_kont(&state.kont);
-    // eprintln!("call_cc_sp: captured kont = {:?}", captured_kont);
+    // Capture the continuation of the call/cc call itself (`next`, i.e. with
+    // call/cc's own ApplyProc already popped), frames and all: they are never
+    // mutated in place, so sharing the chain is safe for re-entry. The
+    // pending EvalArg frames' arguments live on `arg_stack`, snapshotted here.
     let kont = new_continuation(
         ec.heap,
-        captured_kont,
+        Rc::clone(&next),
         ec.dynamic_wind.clone(),
         ec.arg_stack.clone(),
     );
@@ -376,9 +377,9 @@ fn dynamic_wind_sp(
     let before = list(args[0], ec.heap)?;
     let thunk = list(args[1], ec.heap)?;
     let after = list(args[2], ec.heap)?;
-    ec.dynamic_wind
-        .push(DynamicWind::new(*ec.dw_next, before, after));
-    *ec.dw_next += 1;
+    // The wind entry is pushed once `before` returns (handle_dynamic_wind),
+    // not here: `before` runs outside the extent, so a continuation captured
+    // inside it must not re-run `before` on re-entry.
     state.kont = next; // Delete the ApplyProc before installing the new continuation
     insert_dynamic_wind(state, before, thunk, after);
     state.control = Control::Expr(before);
@@ -1049,46 +1050,6 @@ fn flush_output_sp(
 
 /// Utility functions
 ///
-fn capture_call_site_kont(k: &KontRef) -> KontRef {
-    // eprintln!("capture_call_site_kont: k = {:?}", k);
-    match &**k {
-        Kont::EvalArg { next, .. } | Kont::ApplyProc { next, .. } => capture_call_site_kont(next),
-        Kont::DynamicWind { procs, phase, next } => {
-            // eprintln!("capture_call_site_kont: DynamicWind before = {}, thunk = {}, after = {}, phase = {:?}", print_value(before), print_value(thunk), print_value(after), phase);
-            match phase {
-                DynamicWindPhase::Return => {
-                    // If dynamic-wind is already in Return phase, skip it completely
-                    // eprintln!("capture_call_site_kont: skipping Return phase DynamicWind frame");
-                    capture_call_site_kont(next)
-                }
-                DynamicWindPhase::After => {
-                    // If dynamic-wind is in After phase, we need to let it run its after thunk
-                    // and then return the result. Keep it in After phase so it will execute normally.
-                    let new_kont = Rc::new(Kont::DynamicWind {
-                        procs: procs.clone(),
-                        phase: DynamicWindPhase::After, // Keep in After phase
-                        next: capture_call_site_kont(next),
-                    });
-                    // eprintln!("capture_call_site_kont: preserving After phase DynamicWind frame = {:?}", new_kont);
-                    new_kont
-                }
-                DynamicWindPhase::Thunk => {
-                    // If we are capturing a continuation inside a dynamic-wind thunk,
-                    // the phase should be After, as the thunk has already run.
-                    let new_kont = Rc::new(Kont::DynamicWind {
-                        procs: procs.clone(),
-                        phase: DynamicWindPhase::After, // <--- Change phase here
-                        next: capture_call_site_kont(next), // Recursively process the next continuation
-                    });
-                    // eprintln!("capture_call_site_kont: returning new_kont = {:?}", new_kont);
-                    new_kont
-                }
-            }
-        }
-        _ => Rc::clone(k),
-    }
-}
-
 fn apply_arg_list(args: &[GcRef], heap: &mut GcHeap) -> GcRef {
     if args.is_empty() {
         heap.nil_s()

@@ -9,6 +9,9 @@
 (displayln "         =====Advanced Tests=====")
 (load "scheme/advanced_tests.scm")
 
+(displayln "         =====call/cc Re-entry Tests=====")
+(load "scheme/call_cc_tests.scm")
+
 (displayln "         =====Help System Tests=====")
 (load "scheme/help_tests.scm")
 

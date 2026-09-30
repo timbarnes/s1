@@ -214,7 +214,34 @@
 (define result
     (call/cc (lambda (k) (set! saved k) 'ok)))
 (test-equal 'ok result "Capture and re-use continuation")
-(test-equal 99 (saved 99) "Reuse previous continuation")
+;; Re-entry must stay inside one expression: invoking a continuation captured
+;; by a top-level define re-runs that define and abandons the caller.
+(test-equal '(99 ok)
+  (let ((k #f) (seen '()))
+    (let ((r (call/cc (lambda (c) (set! k c) 'ok))))
+      (set! seen (cons r seen))
+      (if (= (length seen) 1) (k 99))
+      seen))
+  "Reuse previous continuation")
+
+;; Escapes must keep the frames pending around the call/cc and drop the
+;; arguments already evaluated by the frames they abandon.
+(test-equal 6 (+ 1 (call/cc (lambda (k) (k 5)))) "call/cc escape from argument position keeps pending +")
+(define (escape-mid-args) (call/cc (lambda (k) (+ 10 (k 2)))))
+(test-equal '(1 2 3) (list 1 (escape-mid-args) 3) "call/cc escape discards abandoned arguments")
+
+;; before runs outside the extent: re-entering a continuation captured in
+;; before resumes it without winding in (no second before).
+(test-equal '(b t a t a)
+  (let ((k #f) (n 0) (trace '()))
+    (dynamic-wind
+      (lambda () (set! trace (cons 'b trace)) (call/cc (lambda (c) (set! k c))))
+      (lambda () (set! trace (cons 't trace)))
+      (lambda () (set! trace (cons 'a trace))))
+    (set! n (+ n 1))
+    (if (< n 2) (k #f))
+    (reverse trace))
+  "dynamic-wind: re-entry captured in before does not re-run before")
 
 ;; Additional call/cc regression tests
 ;; Basic call/cc with assignment (the original bug case)

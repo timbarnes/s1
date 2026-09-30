@@ -28,9 +28,8 @@ pub struct RunTimeStruct {
     /// `Vec`; nested calls simply extend it further and the innermost one
     /// truncates back on return, exactly like a native call stack. The one
     /// thing that breaks that LIFO discipline is a continuation: its chain
-    /// can retain `EvalArg` frames from further out (`capture_call_site_kont`
-    /// strips only the innermost), so `call/cc` snapshots this stack into
-    /// the continuation and `escape` restores it. Rooted whole in
+    /// retains every pending `EvalArg` frame, so `call/cc` snapshots this
+    /// stack into the continuation and `escape` restores it. Rooted whole in
     /// `GcHeap::mark_from`.
     pub arg_stack: Vec<GcRef>,
 }
