@@ -202,6 +202,12 @@ cargo build --release
 # Run tests
 cargo test
 
+# Run the Scheme regression suite
+cargo run --release -- -r -q
+
+# Run the R7RS conformance suite against its baseline (see tests/r7rs/README.md)
+tests/r7rs/run.sh
+
 # Run with specific file
 cargo run -- -f examples/test.scm
 ```

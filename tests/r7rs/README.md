@@ -1,0 +1,47 @@
+# R7RS conformance suite
+
+The yardstick for s1's R7RS-small work.
+
+| File | What it is |
+| --- | --- |
+| `r7rs-tests.scm` | chibi-scheme's R7RS test suite, vendored **unmodified** from [ashinn/chibi-scheme](https://github.com/ashinn/chibi-scheme) `tests/r7rs-tests.scm` at commit `c4e7367e867428889d8fe898a0b39f42e418b3f1`. BSD licence: `LICENSE-chibi`. |
+| `shim.scm` | Stand-in for `(chibi test)`: `test`, `test-assert`, `test-values`, `test-error`, `test-begin`, `test-end`, and a no-op `import`. Written with s1's `macro` form. |
+| `run.sh` | Runner. Splits the suite into its 20 sections, runs each in a fresh s1 process, prints a table and compares it with the baseline. |
+| `baseline.txt` | Pass counts per section from the last `--update`. |
+| `last-run.log` | Full output of the last run (git-ignored). Search it for `FAIL:` and `ERROR:` lines. |
+
+## Running
+
+```bash
+tests/r7rs/run.sh            # exits 1 if any section passes fewer tests than baseline.txt
+tests/r7rs/run.sh --update   # accept the current results as the new baseline
+```
+
+Run `--update` in the same commit as the work that changes the counts, so the
+baseline stays in step with the code. `S1_BIN` selects a prebuilt binary and
+`S1_TIMEOUT` the per-section timeout in seconds (default 15).
+
+## Reading the table
+
+- **pass / fail**: the test ran and its result did or did not match. Inexact
+  numbers match to a relative 1e-5, as in `(chibi test)`.
+- **error**: the test started but never reported back, because an error
+  aborted its top-level form. Until s1 can catch errors (plan phase 4),
+  `test-error` cannot pass: a correctly signalled error lands here.
+- **unrch** (unreached): tests in the section that never started, usually
+  because an earlier error aborted an enclosing `let` or `define-syntax`, or the
+  reader lost sync. It is `~total - attempted`.
+- **~total**: a static count of test forms per section. It is an estimate
+  (helpers defined inside `define-syntax` templates are counted too), so trust
+  `pass` as the metric to drive up.
+
+Each section runs in its own process, so a reader desync or crash in one
+section cannot swallow the next ones.
+
+## Known blockers at the phase-0 baseline (320 passing)
+
+- **6.7 Strings** stops after 8 tests: the reader mishandles `#\n` followed by
+  `)` (in `(string #\k ... #\n))`) and swallows the rest of the file (phase 2).
+- **4.3 Macros, Numeric syntax, Read syntax**: these need `define-syntax` /
+  `syntax-rules` (phase 5) and string ports (phase 8).
+- **6.11 Exceptions** and every `test-error`: these need `guard` / `raise` (phase 4).
