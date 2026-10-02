@@ -8,6 +8,10 @@ pub fn register_predicate_builtins(heap: &mut crate::gc::GcHeap, env: EnvRef) {
         "type-of" => (type_of, "(type-of <value>) Returns a symbol representing the type of the value"),
         "equal?" => (equal_q, "(equal? <value1> <value2>) Returns true if the values are equal"),
         "eq?" => (eq_q, "(eq? <value1> <value2>) Returns true if the values are the same object"),
+        "symbol=?" => (symbol_eq, "(symbol=? s1 s2 s3 ...) Returns #t if all the symbols are the same"),
+        "boolean=?" => (boolean_eq, "(boolean=? b1 b2 b3 ...) Returns #t if all the booleans are the same"),
+        "string->symbol" => (string_to_symbol, "(string->symbol string) Returns the symbol whose name is string"),
+        "symbol->string" => (symbol_to_string, "(symbol->string symbol) Returns the name of symbol as a new string"),
         "eqv?" => (eqv_q, "(eqv? <value1> <value2>) Returns true if the values are the same object, or numbers of the same exactness and value, or equal characters"),
     );
 }
@@ -37,6 +41,46 @@ pub fn eqv_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
 
     let is_eqv = crate::gc::eqv(heap, args[0], args[1]);
     Ok(new_bool(heap, is_eqv))
+}
+
+/// All of `args` (at least two) satisfy `is`, and are pairwise the same.
+fn all_same(heap: &mut GcHeap, args: &[GcRef], who: &str, is: fn(&SchemeValue) -> bool) -> Result<GcRef, String> {
+    if args.len() < 2 {
+        return Err(format!("{}: expects at least 2 arguments", who));
+    }
+    if let Some(bad) = args.iter().find(|a| !is(gc_value!(**a))) {
+        return Err(format!("{}: wrong type of argument: {}", who, crate::printer::print_value(bad)));
+    }
+    let same = args.windows(2).all(|w| crate::gc::eq(heap, w[0], w[1]));
+    Ok(new_bool(heap, same))
+}
+
+pub fn symbol_eq(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    all_same(heap, args, "symbol=?", |v| matches!(v, SchemeValue::Symbol(_)))
+}
+
+pub fn boolean_eq(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    all_same(heap, args, "boolean=?", |v| matches!(v, SchemeValue::Bool(_)))
+}
+
+pub fn string_to_symbol(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    match args {
+        [s] => match gc_value!(*s) {
+            SchemeValue::Str(name) => Ok(heap.intern_symbol(&name.clone())),
+            _ => Err("string->symbol: expected a string".to_string()),
+        },
+        _ => Err("string->symbol: expects 1 argument".to_string()),
+    }
+}
+
+pub fn symbol_to_string(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    match args {
+        [s] => match gc_value!(*s) {
+            SchemeValue::Symbol(name) => Ok(crate::gc::new_string(heap, &name.clone())),
+            _ => Err("symbol->string: expected a symbol".to_string()),
+        },
+        _ => Err("symbol->string: expects 1 argument".to_string()),
+    }
 }
 
 pub fn type_of(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {

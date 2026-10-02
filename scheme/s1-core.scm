@@ -35,6 +35,24 @@
     "(port? x) returns #t if x is a port, otherwise #f"
     (eq? (type-of x) 'port)))
 
+;; member and assoc take an optional equality predicate (R7RS 6.4); memq,
+;; memv, assq and assv are built in.
+(define (member x lst . compare)
+  "(member x list [compare]) returns the first sublist of list whose car is equal? (or compare) to x, or #f"
+  (let ((same? (if (null? compare) equal? (car compare))))
+    (let loop ((l lst))
+      (cond ((null? l) #f)
+            ((same? x (car l)) l)
+            (else (loop (cdr l)))))))
+
+(define (assoc x alist . compare)
+  "(assoc x alist [compare]) returns the first pair in alist whose car is equal? (or compare) to x, or #f"
+  (let ((same? (if (null? compare) equal? (car compare))))
+    (let loop ((l alist))
+      (cond ((null? l) #f)
+            ((same? x (caar l)) (car l))
+            (else (loop (cdr l)))))))
+
 (define (procedure? x)
     "(procedure? x) returns #t if x is callable (a builtin, closure, sys-builtin or case-lambda), otherwise #f"
     (if (memq (type-of x) '(builtin closure sys-builtin case-lambda))
@@ -86,48 +104,6 @@
     (eq? x '())))
 
 ;; Membership and association functions
-(define memq
-  (lambda (v l)
-    "(memq v l) returns the sublist of l starting with the first element eq? to v, or #f if none is found"
-    (cond ((null? l) #f)
-	  ((eq? v (car l)) l)
-	  (else (memq v (cdr l))))))
-
-(define memv
-  (lambda (v l)
-    "(memv v l) returns the sublist of l starting with the first element eqv? to v, or #f if none is found"
-    (cond ((null? l) #f)
-	  ((eqv? v (car l)) l)
-	  (else (memv v (cdr l))))))
-
-(define member
-  (lambda (v l)
-    "(member v l) returns the sublist of l starting with the first element equal? to v, or #f if none is found"
-    (cond ((null? l) #f)
-	  ((equal? v (car l)) l)
-	  (else (member v (cdr l))))))
-
-(define assoc
-    (lambda (key alist)
-        "(assoc key alist) returns the first pair in alist whose car is equal? to key, or #f if none is found"
-        (cond ((null? alist) #f)
-              ((equal? key (caar alist)) (car alist))
-              (else (assoc key (cdr alist))))))
-
-(define assv
-    (lambda (key alist)
-        "(assv key alist) returns the first pair in alist whose car is eqv? to key, or #f if none is found"
-        (cond ((null? alist) #f)
-              ((eqv? key (caar alist)) (car alist))
-              (else (assv key (cdr alist))))))
-
-(define assq
-    (lambda (key alist)
-        "(assq key alist) returns the first pair in alist whose car is eq? to key, or #f if none is found"
-        (cond ((null? alist) #f)
-              ((eq? key (caar alist)) (car alist))
-              (else (assq key (cdr alist))))))
-
 ;; List accessor functions (compositions of car and cdr)
 ;; These provide convenient access to nested list elements
 
@@ -267,12 +243,6 @@
             (/ sum total-count)
             (b form (- count 1) (+ sum (with-timer (eval form)))))))
     (b form count 0.0)))
-
-(define symbol->string (lambda (sym)
-    "(symbol->string sym) converts the symbol sym to a string and returns the string"
-    (if (symbol? sym)
-        (>string sym)
-        (error "symbol>string: not a symbol"))))
 
 (define def
   (macro (sig . body)

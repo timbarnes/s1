@@ -17,6 +17,14 @@ pub fn register_list_builtins(heap: &mut GcHeap, env: EnvRef) {
         "list-tail" => (list_tail_builtin, "(list-tail list n) -> nth element of list"),
         "list-ref" => (list_ref_builtin, "(list-ref list n) -> nth element of list"),
         "length" => (length_builtin, "(length list) -> length of list"),
+        "list?" => (list_q, "(list? obj) Returns #t if obj is a proper list (finite and ending in ())"),
+        "make-list" => (make_list, "(make-list k [fill]) Returns a list of k elements, each fill (default unspecified)"),
+        "list-copy" => (list_copy, "(list-copy obj) Returns a copy of the pairs of list obj (a non-list is returned as is)"),
+        "list-set!" => (list_set, "(list-set! list k obj) Stores obj in element k of list"),
+        "memq" => (memq, "(memq obj list) Returns the first sublist of list whose car is eq? to obj, or #f"),
+        "memv" => (memv, "(memv obj list) Returns the first sublist of list whose car is eqv? to obj, or #f"),
+        "assq" => (assq, "(assq obj alist) Returns the first pair in alist whose car is eq? to obj, or #f"),
+        "assv" => (assv, "(assv obj alist) Returns the first pair in alist whose car is eqv? to obj, or #f"),
     );
 }
 
@@ -230,12 +238,7 @@ pub fn length_builtin(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String
         SchemeValue::Nil => return Ok(new_int(heap, num_bigint::BigInt::from(0))),
         _ => return Err("length: argument must be a list".to_string()),
     }
-    let mut current = list;
-    let mut length = 0;
-    while let SchemeValue::Pair(_, cdr) = &gc_value!(current) {
-        length += 1;
-        current = *cdr;
-    }
+    let length = proper_length(list).ok_or("length: argument must be a proper list")?;
     let result = num_bigint::BigInt::from(length);
 
     Ok(new_int(heap, result))
@@ -484,4 +487,148 @@ mod tests {
         let result = list_ref_builtin(&mut ec.heap, &[list1, k]).unwrap();
         assert!(matches!(&ec.heap.get_value(result), SchemeValue::Int(i) if i.to_string() == "2"));
     }
+}
+
+/// The length of `list` if it is a proper list: finite (checked with a
+/// second pointer moving at double speed, so a cycle can't loop forever)
+/// and ending in ().
+fn proper_length(list: GcRef) -> Option<usize> {
+    let mut slow = list;
+    let mut fast = list;
+    let mut len = 0;
+    loop {
+        match gc_value!(fast) {
+            SchemeValue::Nil => return Some(len),
+            SchemeValue::Pair(_, next) => {
+                fast = *next;
+                len += 1;
+            }
+            _ => return None,
+        }
+        match gc_value!(fast) {
+            SchemeValue::Nil => return Some(len),
+            SchemeValue::Pair(_, next) => {
+                fast = *next;
+                len += 1;
+            }
+            _ => return None,
+        }
+        if let SchemeValue::Pair(_, next) = gc_value!(slow) {
+            slow = *next;
+        }
+        if std::ptr::eq(slow, fast) {
+            return None; // circular
+        }
+    }
+}
+
+fn expect_args(args: &[GcRef], min: usize, max: usize, who: &str) -> Result<(), String> {
+    if args.len() < min || args.len() > max {
+        Err(format!("{}: wrong number of arguments ({})", who, args.len()))
+    } else {
+        Ok(())
+    }
+}
+
+pub fn list_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    expect_args(args, 1, 1, "list?")?;
+    Ok(crate::gc::new_bool(heap, proper_length(args[0]).is_some()))
+}
+
+pub fn make_list(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    expect_args(args, 1, 2, "make-list")?;
+    let k = match gc_value!(args[0]) {
+        SchemeValue::Int(i) => i.to_usize(),
+        _ => None,
+    }
+    .ok_or("make-list: length must be a non-negative exact integer")?;
+    let fill = args.get(1).copied().unwrap_or_else(|| heap.unspecified());
+    let mut list = heap.nil_s();
+    for _ in 0..k {
+        list = new_pair(heap, fill, list);
+    }
+    Ok(list)
+}
+
+pub fn list_copy(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    expect_args(args, 1, 1, "list-copy")?;
+    let mut items = Vec::new();
+    let mut rest = args[0];
+    while let SchemeValue::Pair(car, cdr) = gc_value!(rest) {
+        items.push(*car);
+        rest = *cdr;
+        if std::ptr::eq(rest, args[0]) {
+            return Err("list-copy: circular list".to_string());
+        }
+    }
+    let mut result = rest; // the final cdr (or the object itself if not a pair)
+    for item in items.into_iter().rev() {
+        result = new_pair(heap, item, result);
+    }
+    Ok(result)
+}
+
+pub fn list_set(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    expect_args(args, 3, 3, "list-set!")?;
+    let k = match gc_value!(args[1]) {
+        SchemeValue::Int(i) => i.to_usize(),
+        _ => None,
+    }
+    .ok_or("list-set!: index must be a non-negative exact integer")?;
+    let mut pair = args[0];
+    for _ in 0..k {
+        pair = match gc_value!(pair) {
+            SchemeValue::Pair(_, cdr) => *cdr,
+            _ => return Err("list-set!: index out of range".to_string()),
+        };
+    }
+    match crate::gc_value_mut!(pair) {
+        SchemeValue::Pair(car, _) => *car = args[2],
+        _ => return Err("list-set!: index out of range".to_string()),
+    }
+    Ok(heap.unspecified())
+}
+
+/// The first sublist of `list` whose car satisfies `same` with `obj`.
+fn mem_by(heap: &mut GcHeap, args: &[GcRef], who: &str, same: fn(&GcHeap, GcRef, GcRef) -> bool) -> Result<GcRef, String> {
+    expect_args(args, 2, 2, who)?;
+    let mut rest = args[1];
+    while let SchemeValue::Pair(car, cdr) = gc_value!(rest) {
+        if same(heap, args[0], *car) {
+            return Ok(rest);
+        }
+        rest = *cdr;
+    }
+    Ok(heap.false_s())
+}
+
+/// The first pair in `alist` whose car satisfies `same` with `obj`.
+fn ass_by(heap: &mut GcHeap, args: &[GcRef], who: &str, same: fn(&GcHeap, GcRef, GcRef) -> bool) -> Result<GcRef, String> {
+    expect_args(args, 2, 2, who)?;
+    let mut rest = args[1];
+    while let SchemeValue::Pair(entry, cdr) = gc_value!(rest) {
+        match gc_value!(*entry) {
+            SchemeValue::Pair(key, _) if same(heap, args[0], *key) => return Ok(*entry),
+            SchemeValue::Pair(..) => {}
+            _ => return Err(format!("{}: alist element is not a pair", who)),
+        }
+        rest = *cdr;
+    }
+    Ok(heap.false_s())
+}
+
+pub fn memq(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    mem_by(heap, args, "memq", crate::gc::eq)
+}
+
+pub fn memv(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    mem_by(heap, args, "memv", crate::gc::eqv)
+}
+
+pub fn assq(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    ass_by(heap, args, "assq", crate::gc::eq)
+}
+
+pub fn assv(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    ass_by(heap, args, "assv", crate::gc::eqv)
 }

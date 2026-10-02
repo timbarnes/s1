@@ -56,79 +56,92 @@ pub fn eqv(heap: &GcHeap, a: GcRef, b: GcRef) -> bool {
     }
 }
 
+/// `equal?`: structural equality over pairs, vectors, strings and
+/// bytevectors, `eqv?` otherwise. Terminates on cyclic data, as R7RS
+/// requires: after many steps it starts recording which pairs of nodes are
+/// being compared, and treats meeting one again as equal (the comparison of
+/// that pair is already under way higher up).
 pub fn equal(heap: &GcHeap, a: GcRef, b: GcRef) -> bool {
-    match (heap.get_value(a), heap.get_value(b)) {
-        (SchemeValue::Pair(a1, d1), SchemeValue::Pair(a2, d2)) => {
-            equal(heap, *a1, *a2) && equal(heap, *d1, *d2)
+    let mut state = EqualState {
+        steps: 0,
+        seen: None,
+    };
+    equal_with(heap, a, b, &mut state)
+}
+
+struct EqualState {
+    steps: usize,
+    /// Node pairs under comparison; only kept once `steps` is large.
+    seen: Option<std::collections::HashSet<(usize, usize)>>,
+}
+
+/// Steps after which `equal` starts tracking visited node pairs.
+const EQUAL_TRACKING_AFTER: usize = 10_000;
+
+impl EqualState {
+    /// Note a visit to the node pair (a, b); false if it was seen before.
+    fn first_visit(&mut self, a: GcRef, b: GcRef) -> bool {
+        self.steps += 1;
+        if self.steps > EQUAL_TRACKING_AFTER {
+            let seen = self.seen.get_or_insert_with(Default::default);
+            return seen.insert((a as usize, b as usize));
         }
-        (SchemeValue::Str(a), SchemeValue::Str(b)) => a == b,
-        (SchemeValue::Bytevector(a), SchemeValue::Bytevector(b)) => a == b,
-        (SchemeValue::Vector(a), SchemeValue::Vector(b)) => {
-            if a.len() != b.len() {
-                return false;
-            }
-            for (x, y) in a.iter().zip(b.iter()) {
-                if !equal(heap, *x, *y) {
+        true
+    }
+}
+
+fn equal_with(heap: &GcHeap, mut a: GcRef, mut b: GcRef, st: &mut EqualState) -> bool {
+    loop {
+        match (heap.get_value(a), heap.get_value(b)) {
+            (SchemeValue::Pair(a1, d1), SchemeValue::Pair(a2, d2)) => {
+                if !st.first_visit(a, b) {
+                    return true;
+                }
+                if !equal_with(heap, *a1, *a2, st) {
                     return false;
                 }
+                // Iterate down the cdrs so long lists don't recurse deeply.
+                a = *d1;
+                b = *d2;
             }
-            true
+            (SchemeValue::Vector(x), SchemeValue::Vector(y)) => {
+                if x.len() != y.len() {
+                    return false;
+                }
+                if !st.first_visit(a, b) {
+                    return true;
+                }
+                return x.iter().zip(y.iter()).all(|(p, q)| equal_with(heap, *p, *q, st));
+            }
+            (SchemeValue::Str(x), SchemeValue::Str(y)) => return x == y,
+            (SchemeValue::Bytevector(x), SchemeValue::Bytevector(y)) => return x == y,
+            (SchemeValue::Callable(_), SchemeValue::Callable(_)) => return equal_callables(heap, a, b),
+            _ => return eqv(heap, a, b),
         }
-        (SchemeValue::Callable(a), SchemeValue::Callable(b)) => match (&**a, &**b) {
-            (Callable::Builtin { func: f1, .. }, Callable::Builtin { func: f2, .. }) => {
-                std::ptr::fn_addr_eq(*f1, *f2)
-            }
-            (Callable::SpecialForm { func: f1, .. }, Callable::SpecialForm { func: f2, .. }) => {
-                std::ptr::fn_addr_eq(*f1, *f2)
-            }
-            (
-                Callable::Closure {
-                    params: p1,
-                    body: b1,
-                    ..
-                },
-                Callable::Closure {
-                    params: p2,
-                    body: b2,
-                    ..
-                },
-            ) => {
-                if p1.len() != p2.len() {
-                    return false;
-                }
-                for (param1, param2) in p1.iter().zip(p2.iter()) {
-                    if !equal(heap, *param1, *param2) {
-                        return false;
-                    }
-                }
-                equal(heap, *b1, *b2)
-            }
-            (
-                Callable::Macro {
-                    params: p1,
-                    body: b1,
-                    ..
-                },
-                Callable::Macro {
-                    params: p2,
-                    body: b2,
-                    ..
-                },
-            ) => {
-                if p1.len() != p2.len() {
-                    return false;
-                }
-                for (param1, param2) in p1.iter().zip(p2.iter()) {
-                    if !equal(heap, *param1, *param2) {
-                        return false;
-                    }
-                }
-                equal(heap, *b1, *b2)
-            }
-            _ => false,
-        },
-        // For Primitive, just compare type (not function pointer)
-        _ => eq(heap, a, b),
+    }
+}
+
+/// s1 compares procedures structurally: builtins by function, closures and
+/// macros by parameters and body.
+fn equal_callables(heap: &GcHeap, a: GcRef, b: GcRef) -> bool {
+    let (SchemeValue::Callable(a), SchemeValue::Callable(b)) = (heap.get_value(a), heap.get_value(b)) else {
+        return false;
+    };
+    match (&**a, &**b) {
+        (Callable::Builtin { func: f1, .. }, Callable::Builtin { func: f2, .. }) => std::ptr::fn_addr_eq(*f1, *f2),
+        (Callable::SpecialForm { func: f1, .. }, Callable::SpecialForm { func: f2, .. }) => {
+            std::ptr::fn_addr_eq(*f1, *f2)
+        }
+        (
+            Callable::Closure { params: p1, body: b1, .. },
+            Callable::Closure { params: p2, body: b2, .. },
+        )
+        | (Callable::Macro { params: p1, body: b1, .. }, Callable::Macro { params: p2, body: b2, .. }) => {
+            p1.len() == p2.len()
+                && p1.iter().zip(p2.iter()).all(|(x, y)| equal(heap, *x, *y))
+                && equal(heap, *b1, *b2)
+        }
+        _ => std::ptr::eq(a, b),
     }
 }
 
