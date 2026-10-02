@@ -124,7 +124,6 @@ fn dump_control(control: &Control) -> String {
     match control {
         Control::Expr(obj) => format!("Expr:  {}", print_value(obj)),
         Control::Value(obj) => format!("Value: {}", print_value(obj)),
-        Control::Values(vals) => format!("Values[0]: {:20}", print_value(&vals[0])),
         Control::Empty => format!("Empty"),
     }
 }
@@ -147,13 +146,6 @@ pub fn dbg_cek(loc: &str, state: &CEKState) {
             eprintln!(
                 "Value  {};      Kont = {}",
                 print_value(obj),
-                dbg_one_kont("", &state.kont)
-            );
-        }
-        Control::Values(vals) => {
-            eprintln!(
-                "Values[0] {};      Kont = {}",
-                print_value(&vals[0]),
                 dbg_one_kont("", &state.kont)
             );
         }

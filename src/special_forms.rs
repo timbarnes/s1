@@ -613,6 +613,7 @@ fn qq_procs(env: &EnvRef, ec: &mut RunTime) -> Result<QqProcs, String> {
 /// qq(d, atom)                       ->  (quote atom)
 /// qq(1, (unquote x))                ->  x
 /// qq(d, (unquote x))          d > 1 ->  (list 'unquote qq(d-1, x))
+/// qq(d, (unquote-splicing x)) d > 1 ->  (list 'unquote-splicing qq(d-1, x))
 /// qq(d, (quasiquote x))             ->  (list 'quasiquote qq(d+1, x))
 /// qq(1, ((unquote-splicing x) . r)) ->  (append x qq(1, r))
 /// qq(d, (a . b))                    ->  (cons qq(d, a) qq(d, b))
@@ -645,6 +646,15 @@ fn lower_quasiquote(
                                     lower_quasiquote(depth - 1, inner, procs, ec)?;
                                 Ok(wrap_tag("unquote", lowered_inner, procs, ec))
                             };
+                        }
+                    }
+                    // Inside a nested quasiquote, unquote-splicing lowers the
+                    // depth just as unquote does. (At depth 1 it only splices
+                    // as a list element, handled below.)
+                    "unquote-splicing" if depth > 1 => {
+                        if let Some(inner) = qq_single_arg(rest) {
+                            let lowered_inner = lower_quasiquote(depth - 1, inner, procs, ec)?;
+                            return Ok(wrap_tag("unquote-splicing", lowered_inner, procs, ec));
                         }
                     }
                     _ => {}

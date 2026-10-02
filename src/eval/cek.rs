@@ -40,12 +40,10 @@ fn run_cek(mut state: &mut CEKState, rt: &mut RunTime) -> Result<Vec<GcRef>, Str
         }
         match &state.control {
             Control::Value(val) => match *state.kont {
-                Kont::Halt => return Ok(vec![*val]), // fully evaluated, exit
-                _ => continue,                       // Some continuation remains; continue loop
-            },
-            Control::Values(vals) => match *state.kont {
-                Kont::Halt => return Ok(vals.clone()), // fully evaluated, exit
-                _ => continue,                         // Some continuation remains; continue loop
+                // Fully evaluated: hand back each value of a (values ...)
+                // package separately.
+                Kont::Halt => return Ok(crate::gc::unpack_values(*val)),
+                _ => continue, // Some continuation remains; continue loop
             },
             Control::Expr(_) => continue, // Still evaluating an expression; continue loop
             Control::Empty => return Ok(vec![rt.heap.void()]),
@@ -78,11 +76,6 @@ fn step(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> {
             *ec.depth -= 1;
             state.control = Control::Value(val);
             dispatch_kont(state, ec, val)
-        }
-        Control::Values(vals) => {
-            eprintln!("step::Values");
-            *ec.depth -= 1;
-            dispatch_values_kont(state, vals.clone(), Rc::clone(&state.kont), ec)
         }
         Control::Empty => Err("Unexpected Control::Halt in step()".to_string()),
     }
@@ -185,28 +178,6 @@ pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
     }
 }
 
-#[inline]
-fn dispatch_values_kont(
-    state: &mut CEKState,
-    vals: Vec<GcRef>,
-    kont: KontRef,
-    rt: &mut RunTime,
-) -> Result<(), String> {
-    eprintln!("dispatch_values_kont: vals = {:?}", vals);
-    match &*kont {
-        Kont::CallWithValues { consumer, next } => {
-            // Construct ApplyProc with consumer and vals
-            state.kont = Rc::new(Kont::ApplyProc {
-                proc: *consumer,
-                evaluated_args: Rc::new(vals),
-                next: Rc::clone(&next),
-            });
-            apply_proc(state, rt)
-        }
-        _ => Err("Unexpected Kont in dispatch_values_kont".to_string()),
-    }
-}
-
 /// Take ownership of the top continuation frame.
 ///
 /// Frames carry `Vec`s (`EvalArg`'s pending and evaluated arguments, `Cond`'s
@@ -306,8 +277,14 @@ fn dispatch_kont(state: &mut CEKState, ec: &mut RunTime, val: GcRef) -> Result<(
         Kont::EvalSeq { forms, next } => handle_eval_seq(state, ec, forms, next),
         Kont::Timer { start, next } => handle_timer(state, ec, start, next),
         Kont::Halt => Ok(()),
-        Kont::CallWithValues { .. } => {
-            Err("Kont::CallWithValues reached dispatch_kont with a single value".to_string())
+        Kont::CallWithValues { consumer, next } => {
+            // The producer has returned: apply the consumer to its values.
+            state.kont = Rc::new(Kont::ApplyProc {
+                proc: consumer,
+                evaluated_args: Rc::new(crate::gc::unpack_values(val)),
+                next,
+            });
+            apply_proc(state, ec)
         }
         Kont::ApplyProc { .. } => {
             Err("Kont::ApplyProc reached dispatch_kont instead of being run directly".to_string())
@@ -436,7 +413,6 @@ fn handle_cond_clause(
             ));
         }
         Control::Empty => return Err("CondClause: Control::Empty".to_string()),
-        _ => return Err("CondClause: Unexpected control state".to_string()),
     };
     // helper to skip the Cond frame that wraps each clause
     let skip_cond = |k: &Rc<Kont>| -> Result<Rc<Kont>, String> {

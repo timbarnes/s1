@@ -34,6 +34,7 @@ pub fn register_number_builtins(heap: &mut GcHeap, env: EnvRef) {
         "asin" => (asin_b, "(asin n) Returns the arcsine of n"),
         "acos" => (acos_b, "(acos n) Returns the arccosine of n"),
         "atan" => (atan_b, "(atan n) Returns the arctangent of n"),
+        "number->string" => (number_to_string_b, "(number->string n [radix]) Returns the external representation of n in radix 2, 8, 10 (the default) or 16"),
     );
 }
 
@@ -50,6 +51,30 @@ macro_rules! unary_op {
             Ok(new_float($heap, num.$op()))
         }
     };
+}
+
+/// (number->string n [radix])
+pub fn number_to_string_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.is_empty() || args.len() > 2 {
+        return Err("number->string: expects 1 or 2 arguments".to_string());
+    }
+    let radix = match args.get(1).map(|r| gc_value!(*r)) {
+        None => 10,
+        Some(SchemeValue::Int(r)) => match r.to_u32() {
+            Some(r @ (2 | 8 | 10 | 16)) => r,
+            _ => return Err("number->string: radix must be 2, 8, 10 or 16".to_string()),
+        },
+        Some(_) => return Err("number->string: radix must be an integer".to_string()),
+    };
+    let s = match gc_value!(args[0]) {
+        SchemeValue::Int(i) => i.to_str_radix(radix),
+        SchemeValue::Float(f) if radix == 10 => crate::printer::format_float(*f),
+        SchemeValue::Float(_) => {
+            return Err("number->string: inexact numbers support only radix 10".to_string());
+        }
+        _ => return Err("number->string: argument must be a number".to_string()),
+    };
+    Ok(crate::gc::new_string(heap, &s))
 }
 
 pub fn exp_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {

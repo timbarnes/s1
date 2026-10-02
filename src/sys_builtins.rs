@@ -309,14 +309,20 @@ fn call_cc_sp(
         ec.dynamic_wind.clone(),
         ec.arg_stack.clone(),
     );
-    // Build the escape call
-    let sym_val = get_symbol(ec.heap, "val");
+    // Build the escape procedure `(lambda vals (<escape-values> k vals))`.
+    // It is variadic so that `(k)` and `(k 1 2)` deliver zero or several
+    // values, and the escape primitive is embedded as an object rather than
+    // named, so a local binding of `escape` at the call site can't capture it.
+    let sym_vals = get_symbol(ec.heap, "vals");
     let sym_lambda = get_symbol(ec.heap, "lambda");
-    let sym_escape = get_symbol(ec.heap, "escape");
+    let escape_values = new_sys_builtin(
+        ec,
+        escape_values_sp,
+        "escape-values: sys-builtin".to_string(),
+    );
 
-    let params = list(sym_val, ec.heap)?;
-    let body = list3(sym_escape, kont, sym_val, ec.heap)?;
-    let lambda = list3(sym_lambda, params, body, ec.heap)?;
+    let body = list3(escape_values, kont, sym_vals, ec.heap)?;
+    let lambda = list3(sym_lambda, sym_vals, body, ec.heap)?;
     create_callable(lambda, ec, state)?;
     let closure;
     match &state.control {
@@ -343,16 +349,40 @@ fn escape_sp(
     state: &mut CEKState,
     _next: KontRef,
 ) -> Result<(), String> {
-    // eprintln!("escape_sp: args[0] = {}, args[1] = {}", print_value(&args[0]), print_value(&args[1]));
     if args.len() != 2 {
         return Err("escape: requires two arguments".to_string());
     }
-    match gc_value!(args[0]) {
+    escape_to(ec, state, args[0], args[1])
+}
+
+/// (<escape-values> continuation list-of-values)
+/// The body of the procedure call/cc hands out: delivers every value in the
+/// list to the continuation, packaged by `new_values`.
+fn escape_values_sp(
+    ec: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    _next: KontRef,
+) -> Result<(), String> {
+    if args.len() != 2 {
+        return Err("escape-values: requires two arguments".to_string());
+    }
+    let vals = list_to_vec(ec.heap, args[1])?;
+    let result = crate::gc::new_values(ec.heap, vals);
+    escape_to(ec, state, args[0], result)
+}
+
+/// Reinstate continuation `k`, running any dynamic-wind transitions on the
+/// way, and deliver `result` to it.
+fn escape_to(
+    ec: &mut RunTime,
+    state: &mut CEKState,
+    k: GcRef,
+    result: GcRef,
+) -> Result<(), String> {
+    match gc_value!(k) {
         SchemeValue::Continuation(k) => {
-            let result = args[1];
-            // eprintln!("escape_sp: new_kont = {:?}, new_dw_stack.len() = {}", new_kont, new_dw_stack.len());
             let thunks = schedule_dynamic_wind_transitions(&ec.dynamic_wind, &k.dw_stack);
-            // eprintln!("escape_sp: thunks.len() = {}", thunks.len());
             crate::eval::kont::insert_escape(
                 state,
                 result,
@@ -363,7 +393,7 @@ fn escape_sp(
             );
             Ok(())
         }
-        _ => return Err("escape: first argument must be a continuation".to_string()),
+        _ => Err("escape: first argument must be a continuation".to_string()),
     }
 }
 
@@ -389,16 +419,12 @@ fn dynamic_wind_sp(
 }
 
 fn values_sp(
-    _ec: &mut RunTime,
+    ec: &mut RunTime,
     args: &[GcRef],
     state: &mut CEKState,
     next: KontRef,
 ) -> Result<(), String> {
-    match args.len() {
-        0 => return Err("values: requires at least one argument".to_string()),
-        1 => state.control = Control::Value(args[0]),
-        _ => state.control = Control::Values(args.to_vec()),
-    }
+    state.control = Control::Value(crate::gc::new_values(ec.heap, args.to_vec()));
     state.kont = next;
     Ok(())
 }
@@ -407,19 +433,17 @@ fn call_with_values_sp(
     ec: &mut RunTime,
     args: &[GcRef],
     state: &mut CEKState,
-    _next: KontRef,
+    next: KontRef,
 ) -> Result<(), String> {
     if args.len() != 2 {
         return Err("call-with-values: expected 2 arguments".to_string());
     }
     let producer = args[0];
     let consumer = args[1];
-    // Push continuation that remembers consumer
-    let prev = Rc::clone(&state.kont);
-    state.kont = Rc::new(Kont::CallWithValues {
-        consumer,
-        next: prev,
-    });
+    // Push a frame that applies the consumer to whatever the producer
+    // returns. It continues to `next`: `state.kont` is still this call's own
+    // ApplyProc frame.
+    state.kont = Rc::new(Kont::CallWithValues { consumer, next });
     // Evaluate the producer thunk
     state.control = Control::Expr(list(producer, ec.heap)?);
     // dump_cek("call_with_values_sp", state);

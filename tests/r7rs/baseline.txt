@@ -4,16 +4,16 @@
 4.2 Derived expression types	28	0	39	67	73	
 4.3 Macros	0	0	13	13	27	
 5 Program structure	3	0	12	15	15	
-6.1 Equivalence Predicates	22	0	3	25	25	
-6.2 Numbers	99	13	69	181	219	
+6.1 Equivalence Predicates	25	0	0	25	25	
+6.2 Numbers	99	13	78	190	219	
 6.3 Booleans	13	0	5	18	18	
-6.4 Lists	37	1	17	55	65	
+6.4 Lists	39	1	15	55	65	
 6.5 Symbols	7	1	9	17	17	
 6.6 Characters	42	8	29	79	79	
 6.7 Strings	8	0	0	8	130	
 6.8 Vectors	13	0	30	43	43	
 6.9 Bytevectors	0	0	17	17	39	
-6.10 Control Features	16	0	18	34	34	
+6.10 Control Features	19	0	15	34	34	
 6.11 Exceptions	2	2	16	20	30	
 6.12 Environments and evaluation	0	0	4	4	4	
 6.13 Input and output	3	0	43	46	63	

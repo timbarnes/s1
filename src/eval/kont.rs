@@ -419,7 +419,6 @@ const _: () = assert!(std::mem::size_of::<Kont>() <= 40);
 pub enum Control {
     Expr(GcRef),        // Unevaluated expression
     Value(GcRef),       // Fully evaluated result
-    Values(Vec<GcRef>), // For multiple value return
     Empty,
 }
 
@@ -452,11 +451,6 @@ impl crate::gc::Mark for Control {
         match self {
             Control::Expr(expr) => visit(*expr),
             Control::Value(val) => visit(*val),
-            Control::Values(vals) => {
-                for val in vals {
-                    visit(*val);
-                }
-            }
             Control::Empty => {}
         }
     }

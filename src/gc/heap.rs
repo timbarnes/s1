@@ -371,7 +371,7 @@ fn mark_reachable(start: GcRef, epoch: u64, worklist: &mut Vec<GcRef>) {
                 push_if_unmarked(*car, epoch, worklist);
                 push_if_unmarked(*cdr, epoch, worklist);
             }
-            SchemeValue::Vector(vec) => {
+            SchemeValue::Vector(vec) | SchemeValue::Values(vec) => {
                 for item in vec {
                     push_if_unmarked(*item, epoch, worklist);
                 }

@@ -46,6 +46,15 @@ pub fn eq(heap: &GcHeap, a: GcRef, b: GcRef) -> bool {
     }
 }
 
+/// `eqv?`: `eq` except that flonums compare by bit pattern, so `0.0` and
+/// `-0.0` differ while a NaN is eqv to an identical NaN, as R7RS asks.
+pub fn eqv(heap: &GcHeap, a: GcRef, b: GcRef) -> bool {
+    match (heap.get_value(a), heap.get_value(b)) {
+        (SchemeValue::Float(x), SchemeValue::Float(y)) => x.to_bits() == y.to_bits(),
+        _ => eq(heap, a, b),
+    }
+}
+
 pub fn equal(heap: &GcHeap, a: GcRef, b: GcRef) -> bool {
     match (heap.get_value(a), heap.get_value(b)) {
         (SchemeValue::Pair(a1, d1), SchemeValue::Pair(a2, d2)) => {
@@ -283,6 +292,27 @@ pub fn new_vector(heap: &mut GcHeap, elements: Vec<GcRef>) -> GcRef {
         marked: 0,
     };
     heap.alloc(obj)
+}
+
+/// Package `vals` as the result of a `(values ...)` call: a single value is
+/// returned as itself, anything else is wrapped in `SchemeValue::Values`.
+pub fn new_values(heap: &mut GcHeap, vals: Vec<GcRef>) -> GcRef {
+    if vals.len() == 1 {
+        return vals[0];
+    }
+    heap.alloc(GcObject {
+        value: SchemeValue::Values(vals),
+        marked: 0,
+    })
+}
+
+/// The values a result stands for: the elements of a `Values` package, or
+/// the result itself.
+pub fn unpack_values(val: GcRef) -> Vec<GcRef> {
+    match gc_value!(val) {
+        SchemeValue::Values(vals) => vals.clone(),
+        _ => vec![val],
+    }
 }
 
 /// Create a new continuation.

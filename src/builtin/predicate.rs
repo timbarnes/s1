@@ -9,6 +9,7 @@ pub fn register_predicate_builtins(heap: &mut crate::gc::GcHeap, env: EnvRef) {
         "equal?" => (equal_q, "(equal? <value1> <value2>) Returns true if the values are equal"),
         "number?" => (number_q, "(number? <value>) Returns true if the value is a number"),
         "eq?" => (eq_q, "(eq? <value1> <value2>) Returns true if the values are the same object"),
+        "eqv?" => (eqv_q, "(eqv? <value1> <value2>) Returns true if the values are the same object, or numbers of the same exactness and value, or equal characters"),
     );
 }
 
@@ -37,6 +38,15 @@ pub fn eq_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
 
     let is_equal = crate::gc::eq(heap, args[0], args[1]);
     Ok(new_bool(heap, is_equal))
+}
+
+pub fn eqv_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 2 {
+        return Err("eqv?: expected exactly 2 arguments".to_string());
+    }
+
+    let is_eqv = crate::gc::eqv(heap, args[0], args[1]);
+    Ok(new_bool(heap, is_eqv))
 }
 
 pub fn type_of(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {

@@ -232,9 +232,9 @@ Returns the minimum of its arguments. Implemented in `s1-core.scm`.
 
 ## `number->string`
 
-`(number->string n)`
+`(number->string n [radix])`
 
-Returns a string representation of `n`. Implemented in `s1-core.scm`.
+Returns the external representation of `n` in `radix` (2, 8, 10 or 16; default 10). Inexact numbers support only radix 10 and always print with a decimal point or exponent (`2.0`, `1e21`), or as `+inf.0`, `-inf.0` or `+nan.0`.
 
 ## `string->number`
 

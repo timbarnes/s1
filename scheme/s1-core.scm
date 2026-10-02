@@ -137,17 +137,6 @@
               ((eq? key (caar alist)) (car alist))
               (else (assq key (cdr alist))))))
 
-(define eqv? (lambda (x y)
-    "(eqv? x y) returns #t if x and y are the same object, or equal atoms of the same primitive type, otherwise #f"
-    (cond ((eq? x y) #t)
-        ((and (closure? x) (closure? y)) (eq? x y))
-        ((and (macro? x) (macro? y)) (eq? x y))
-        ((and (boolean? x) (boolean? y)) (eq? x y))
-        ((and (char? x) (char? y)) (eq? x y))
-        ((and (primitive? x) (primitive? y)) (eq? x y))
-        ((and (env-frame? x) (env-frame? y)) (eq? x y))
-        (else #f))))
-
 (define exact? (lambda (n)
     "(exact? n) returns #t if n is an integer, otherwise #f"
     (integer? n)))
@@ -269,12 +258,6 @@
                 (_min acc (cdr l))))))
     (_min (car x) (cdr x))))
 
-(define number->string (lambda (n)
-    "(number->string n) converts the number n to its string representation and returns the string"
-    (if (number? n)
-        (>string n)
-        (error "number>string: not a number"))))
-
 (define (string->number str)
     "(string->number str) parses str as a number and returns the number"
     (if (string? str)
@@ -312,9 +295,13 @@
   (define (cdrs ls)
     (if (null? ls) '()
         (cons (cdar ls) (cdrs (cdr ls)))))
+  (define (any-null? ls)
+    (cond ((null? ls) #f)
+          ((null? (car ls)) #t)
+          (else (any-null? (cdr ls)))))
   ;; main loop
   (define (loop ls)
-    (if (or (null? ls) (null? (car ls))) ; stop when shortest list ends
+    (if (or (null? ls) (any-null? ls)) ; stop when the shortest list ends
         '()
         (cons (apply f (cars ls))
               (loop (cdrs ls)))))

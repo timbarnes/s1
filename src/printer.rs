@@ -3,96 +3,139 @@ use crate::gc::SchemeValue::*;
 use crate::gc::{Callable, GcRef};
 use crate::gc_value;
 
+/// The external representation `display` produces: strings and characters
+/// appear as their raw text, at any depth.
 pub fn display_value(obj: &GcRef) -> String {
-    let val = gc_value!(*obj);
-    match val {
-        Str(s) => s.clone(),
-        // Char(c) => format!("{c}"),
-        _ => print_value(obj),
-    }
+    let mut out = String::new();
+    print_into(&mut out, *obj, false);
+    out
 }
 
+/// The external representation `write` produces: strings and characters in
+/// the escaped form the reader accepts.
 pub fn print_value(obj: &GcRef) -> String {
-    let val = gc_value!(*obj);
-    match val {
+    let mut out = String::new();
+    print_into(&mut out, *obj, true);
+    out
+}
+
+fn print_into(out: &mut String, obj: GcRef, write: bool) {
+    match gc_value!(obj) {
         Pair(_, _) => {
-            let mut s = String::from("(");
+            out.push('(');
+            let mut current = obj;
             let mut first = true;
-            let mut current = *obj;
             loop {
-                let value = gc_value!(current);
-                match value {
+                match gc_value!(current) {
                     Pair(car, cdr) => {
                         if !first {
-                            s.push(' ');
+                            out.push(' ');
                         }
-                        s.push_str(&print_value(car));
+                        print_into(out, *car, write);
                         current = *cdr;
                         first = false;
                     }
-                    Nil => {
-                        s.push(')');
-                        break;
-                    }
+                    Nil => break,
                     _ => {
-                        s.push_str(" . ");
-                        s.push_str(&print_value(&current));
-                        s.push(')');
+                        out.push_str(" . ");
+                        print_into(out, current, write);
                         break;
                     }
                 }
             }
-            s
+            out.push(')');
         }
-        Symbol(s) => s.clone(),
         Vector(v) => {
-            let mut s = "#(".to_string();
-            let mut first = true;
-            for value in v.iter() {
-                if !first {
-                    s.push(' ');
-                }
-                s.push_str(print_value(&value).as_str());
-                first = false;
-            }
-            s.push(')');
-            s
+            out.push_str("#(");
+            print_separated(out, v, write);
+            out.push(')');
         }
-        Int(i) => i.to_string(),
-        Float(f) => f.to_string(),
-        Str(s) => {
-            let mut res = "\"".to_string();
-            res.push_str(s);
-            res.push('"');
-            res
-        }
-        Bool(true) => "#t".to_string(),
-        Bool(false) => "#f".to_string(),
-        Char(c) => {
-            let mut ch = String::new();
-            match c {
-                '\n' => ch.push_str("newline"),
-                '\t' => ch.push_str("tab"),
-                '\r' => ch.push_str("return"),
-                _ => ch.push(*c),
-            };
-            format!("#\\{}", ch) // Changed to use format! with named argument
-        }
-        Nil => "()".to_string(),
-        Void => "".to_string(),
-        //Void => "#<void>".to_string(),
-        Undefined => "#<undefined>".to_string(),
-        Eof => "#<eof>".to_string(),
-        Callable(variant) => match &**variant {
+        // The values of a `(values ...)` package that reached a printer.
+        Values(v) => print_separated(out, v, write),
+        Symbol(s) => out.push_str(s),
+        Int(i) => out.push_str(&i.to_string()),
+        Float(f) => out.push_str(&format_float(*f)),
+        Str(s) if write => write_string(out, s),
+        Str(s) => out.push_str(s),
+        Char(c) if write => write_char(out, *c),
+        Char(c) => out.push(*c),
+        Bool(true) => out.push_str("#t"),
+        Bool(false) => out.push_str("#f"),
+        Nil => out.push_str("()"),
+        Void => {}
+        Undefined => out.push_str("#<undefined>"),
+        Eof => out.push_str("#<eof>"),
+        Callable(variant) => out.push_str(&match &**variant {
             Callable::Builtin { func: _, doc } => format!("Primitive {} ", doc),
-            Callable::SpecialForm { doc, .. } => format!("SpecialForm {} ", doc), // Changed
+            Callable::SpecialForm { doc, .. } => format!("SpecialForm {} ", doc),
             Callable::Closure { params, body, .. } => print_callable("Closure", params, *body),
             Callable::Macro { params, body, .. } => print_callable("Macro", params, *body),
-            Callable::SysBuiltin { func: _, doc } => format!("SysBuiltin {}", doc), // Changed
-        },
-        Port(port) => format!("Port<{:?}>", port), // Changed
-        Continuation(k) => format!("Continuation<{:?}>", k.kont), // Changed
-        _ => format!("print_value: unprintable."),
+            Callable::SysBuiltin { func: _, doc } => format!("SysBuiltin {}", doc),
+        }),
+        Port(port) => out.push_str(&format!("Port<{:?}>", port)),
+        Continuation(k) => out.push_str(&format!("Continuation<{:?}>", k.kont)),
+        TailCallScheduled => out.push_str("print_value: unprintable."),
+    }
+}
+
+fn print_separated(out: &mut String, items: &[GcRef], write: bool) {
+    for (i, item) in items.iter().enumerate() {
+        if i > 0 {
+            out.push(' ');
+        }
+        print_into(out, *item, write);
+    }
+}
+
+/// Format a flonum so it reads back as one: always with a decimal point or
+/// exponent (`2.0`, not `2`), and the R7RS spellings of the infinities and
+/// NaN. Rust's `Debug` output is already shortest-round-trip and switches
+/// to exponent notation for very large and small magnitudes (`1e21`).
+pub fn format_float(f: f64) -> String {
+    if f.is_nan() {
+        "+nan.0".to_string()
+    } else if f.is_infinite() {
+        if f > 0.0 { "+inf.0" } else { "-inf.0" }.to_string()
+    } else {
+        format!("{:?}", f)
+    }
+}
+
+/// Write a string literal with the escapes R7RS's reader understands.
+fn write_string(out: &mut String, s: &str) {
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            '\u{7}' => out.push_str("\\a"),
+            '\u{8}' => out.push_str("\\b"),
+            c if c.is_control() => out.push_str(&format!("\\x{:x};", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+}
+
+/// Write a character literal, using R7RS's character names where they
+/// exist and hex escapes for other control characters.
+fn write_char(out: &mut String, c: char) {
+    out.push_str("#\\");
+    match c {
+        '\u{7}' => out.push_str("alarm"),
+        '\u{8}' => out.push_str("backspace"),
+        '\u{7f}' => out.push_str("delete"),
+        '\u{1b}' => out.push_str("escape"),
+        '\n' => out.push_str("newline"),
+        '\0' => out.push_str("null"),
+        '\r' => out.push_str("return"),
+        ' ' => out.push_str("space"),
+        '\t' => out.push_str("tab"),
+        c if c.is_control() => out.push_str(&format!("x{:x}", c as u32)),
+        c => out.push(c),
     }
 }
 
@@ -156,6 +199,40 @@ mod tests {
     }
 
     #[test]
+    fn test_write_escapes_and_float_format() {
+        let mut ev = RunTimeStruct::new();
+        let mut ec = RunTime::from_eval(&mut ev);
+        let heap = &mut ec.heap;
+
+        // Strings: quote, backslash and control characters are escaped.
+        let s = new_string(heap, "a\"b\\c\nd\te\u{1}");
+        assert_eq!(print_value(&s), r#""a\"b\\c\nd\te\x1;""#);
+        assert_eq!(display_value(&s), "a\"b\\c\nd\te\u{1}");
+
+        // Characters use R7RS names.
+        assert_eq!(print_value(&new_char(heap, ' ')), "#\\space");
+        assert_eq!(print_value(&new_char(heap, '\u{7}')), "#\\alarm");
+        assert_eq!(print_value(&new_char(heap, '\0')), "#\\null");
+        assert_eq!(print_value(&new_char(heap, '\u{1}')), "#\\x1");
+
+        // Flonums always read back as inexact.
+        assert_eq!(print_value(&new_float(heap, 2.0)), "2.0");
+        assert_eq!(print_value(&new_float(heap, -0.0)), "-0.0");
+        assert_eq!(print_value(&new_float(heap, 1e21)), "1e21");
+        assert_eq!(print_value(&new_float(heap, f64::INFINITY)), "+inf.0");
+        assert_eq!(print_value(&new_float(heap, f64::NEG_INFINITY)), "-inf.0");
+        assert_eq!(print_value(&new_float(heap, f64::NAN)), "+nan.0");
+
+        // display reaches strings and characters nested in a list.
+        let c = new_char(heap, 'x');
+        let str_in_list = new_string(heap, "s");
+        let tail = new_pair(heap, c, heap.nil_s());
+        let list = new_pair(heap, str_in_list, tail);
+        assert_eq!(display_value(&list), "(s x)");
+        assert_eq!(print_value(&list), "(\"s\" #\\x)");
+    }
+
+    #[test]
     fn test_print_value_compound_types() {
         let mut ev = RunTimeStruct::new();
         let mut ec = RunTime::from_eval(&mut ev);
@@ -195,8 +272,8 @@ mod tests {
         assert_eq!(display_value(&new_bool(heap, true)), "#t");
         assert_eq!(display_value(&new_bool(heap, false)), "#f");
         assert_eq!(display_value(&new_string(heap, "hello")), "hello"); // No quotes
-        assert_eq!(display_value(&new_char(heap, 'a')), "#\\a");
-        assert_eq!(display_value(&new_char(heap, '\n')), "#\\newline");
+        assert_eq!(display_value(&new_char(heap, 'a')), "a"); // No #\ prefix
+        assert_eq!(display_value(&new_char(heap, '\n')), "\n");
         assert_eq!(display_value(&heap.intern_symbol("foo")), "foo");
         assert_eq!(display_value(&heap.nil_s()), "()");
         assert_eq!(display_value(&heap.void()), "");
@@ -230,9 +307,7 @@ mod tests {
         let vec_val2 = new_bool(heap, true);
         let vec_val3 = new_string(heap, "foo");
         let vector = new_vector(heap, vec![vec_val1, vec_val2, vec_val3]);
-        // Note: display_value for compound types calls print_value for elements,
-        // so strings within vectors will still have quotes if not specifically handled.
-        // The current implementation of display_value only special cases the top-level string.
-        assert_eq!(display_value(&vector), "#(1 #t \"foo\")");
+        // display applies at every depth, so the nested string is unquoted.
+        assert_eq!(display_value(&vector), "#(1 #t foo)");
     }
 }
