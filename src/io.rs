@@ -1,6 +1,6 @@
 use rustc_hash::FxHashMap as HashMap;
 use std::fs::File;
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, Read, Write};
 
 // use std::io::BufReader as StdBufReader;
 use crate::eval::RunTime;
@@ -215,63 +215,6 @@ impl FileTable {
     }
 }
 
-/// Helper function to read a line from a string port and update its position
-fn read_line_from_string_port(
-    port_kind: &mut PortKind,
-    file_table: &mut FileTable,
-) -> Option<(String, PortKind)> {
-    if let PortKind::StringPortInput { content, pos } = port_kind {
-        let current_pos = pos.get();
-        let mut lines = content[current_pos..].lines();
-        if let Some(line) = lines.next() {
-            let new_pos = current_pos + line.len() + 1; // +1 for the newline character
-            pos.set(new_pos);
-            Some((line.to_string() + "\n", port_kind.clone()))
-        } else {
-            None
-        }
-    } else if let PortKind::File { id, pos, .. } = port_kind {
-        if let Some(file) = file_table.get(*id) {
-            let mut reader = std::io::BufReader::new(file);
-            let mut buf = String::new();
-            let n = reader.read_line(&mut buf).ok()?;
-            if n == 0 {
-                None
-            } else {
-                pos.set(pos.get() + n);
-                Some((buf, port_kind.clone()))
-            }
-        } else {
-            None
-        }
-    } else {
-        None
-    }
-}
-
-/// Read a line from the current input port.
-///
-/// This function reads from the current port. If the current
-/// port is exhausted (EOF), it returns None.
-///
-pub fn read_line(port_kind: &mut PortKind, file_table: &mut FileTable) -> Option<String> {
-    // Handle StringPort case separately to avoid borrow checker issues
-    if let Some((line, _)) = read_line_from_string_port(port_kind, file_table) {
-        return Some(line);
-    }
-
-    // Handle other port types
-    match port_kind {
-        PortKind::Stdin => {
-            io::stdout().flush().ok();
-            let mut buf = String::new();
-            let n = io::stdin().read_line(&mut buf).ok()?;
-            if n == 0 { None } else { Some(buf) }
-        }
-        _ => None,
-    }
-}
-
 /// Write a line to the current output port.
 ///
 /// This function writes to the current port. For stdout ports,
@@ -446,15 +389,6 @@ pub fn get_output_string(port_kind: &mut PortKind) -> String {
     }
 }
 
-/// Get the current position of a string port safely.
-/// This function should be called through the GC heap accessor.
-pub fn get_string_port_pos(port_kind: &mut PortKind) -> Option<usize> {
-    match port_kind {
-        PortKind::StringPortInput { pos, .. } => Some(pos.get()),
-        _ => None,
-    }
-}
-
 /// Update the position of a string port safely.
 /// This function should be called through the GC heap accessor.
 pub fn update_string_port_pos(port_kind: &mut PortKind, new_pos: usize) -> bool {
@@ -465,12 +399,6 @@ pub fn update_string_port_pos(port_kind: &mut PortKind, new_pos: usize) -> bool 
         }
         _ => false,
     }
-}
-
-/// Convert a Rust Port to a Scheme port object.
-pub fn port_to_scheme_port(rt: &mut RunTime, port_kind: PortKind) -> GcRef {
-    let heap = &mut rt.heap;
-    crate::gc::new_port(heap, port_kind)
 }
 
 /// Extract a PortKind from aScheme port
@@ -497,7 +425,7 @@ mod tests {
         };
         //let original_port = crate::gc::new_port(&mut heap, port_kind);
 
-        let scheme_port = port_to_scheme_port(&mut rt, orig_port_kind.clone());
+        let scheme_port = crate::gc::new_port(&mut rt.heap, orig_port_kind.clone());
         let converted_port = port_kind_from_scheme_port(&mut rt, scheme_port);
 
         assert_eq!(&orig_port_kind, &converted_port);

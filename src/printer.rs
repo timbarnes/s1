@@ -133,7 +133,6 @@ mod tests {
     use super::*;
     use crate::eval::{RunTime, RunTimeStruct};
     use crate::gc::*;
-    use crate::gc_value;
     use num_bigint::BigInt;
 
     #[test]

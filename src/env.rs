@@ -7,7 +7,6 @@
 //! - Public get/set global binding helpers
 
 use crate::gc::GcRef;
-use crate::printer::print_value;
 use rustc_hash::FxHashMap as HashMap;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -34,13 +33,6 @@ impl Bindings {
         match self {
             Bindings::Small(v) => v.iter().find(|(k, _)| *k == symbol).map(|(_, v)| *v),
             Bindings::Large(m) => m.get(&symbol).copied(),
-        }
-    }
-
-    fn contains_key(&self, symbol: GcRef) -> bool {
-        match self {
-            Bindings::Small(v) => v.iter().any(|(k, _)| *k == symbol),
-            Bindings::Large(m) => m.contains_key(&symbol),
         }
     }
 
@@ -105,9 +97,6 @@ pub trait EnvOps {
     fn lookup_local(&self, symbol: GcRef) -> Option<GcRef>; // Search only this frame
     fn lookup_with_frame(&self, symbol: GcRef) -> Option<(GcRef, EnvRef)>; // Search all frames and return the frame where the binding was found
     fn define(&self, symbol: GcRef, val: GcRef); // Define a binding in this frame
-    fn set(&self, symbol: GcRef, val: GcRef) -> Result<(), String>; // Set in any frame where defined
-    fn set_local(&self, symbol: GcRef, val: GcRef) -> Result<(), String>; // Set in this frame only
-    fn has_symbol(&self, symbol: GcRef) -> bool; // Check if a symbol is defined in this frame and chain
     fn extend(&self) -> EnvRef; // Create a new frame with this frame as parent
     fn parent(&self) -> Option<EnvRef>;
 }
@@ -148,34 +137,6 @@ impl EnvOps for EnvRef {
     fn define(&self, symbol: GcRef, val: GcRef) {
         // Define a binding in this frame
         self.borrow_mut().bindings.insert(symbol, val);
-    }
-
-    // Set a binding in this frame using a symbol key
-    fn set(&self, symbol: GcRef, val: GcRef) -> Result<(), String> {
-        let mut current = Some(self.clone());
-        while let Some(env) = current {
-            let mut frame = env.borrow_mut();
-            if frame.bindings.contains_key(symbol) {
-                frame.bindings.insert(symbol, val);
-                return Ok(());
-            }
-            current = frame.parent.clone();
-        }
-        Err(format!("Unbound variable: {}", print_value(&symbol)))
-    }
-
-    fn set_local(&self, symbol: GcRef, val: GcRef) -> Result<(), String> {
-        let mut frame = self.borrow_mut();
-        if frame.bindings.contains_key(symbol) {
-            frame.bindings.insert(symbol, val);
-            Ok(())
-        } else {
-            Err(format!("Unbound variable: {}", print_value(&symbol)))
-        }
-    }
-
-    fn has_symbol(&self, symbol: GcRef) -> bool {
-        self.borrow().bindings.contains_key(symbol)
     }
 
     // Add a new frame with this frame as parent
@@ -494,10 +455,5 @@ mod tests {
         let shadow_val = new_string(ec.heap, "shadowed");
         extended_env.define(global_sym, shadow_val);
         assert!(extended_env.lookup_local(global_sym).is_some());
-
-        // Test symbol-based has methods
-        assert!(env.has_symbol(global_sym));
-        assert!(env.has_symbol(local_sym));
-        assert!(!env.has_symbol(extended_sym));
     }
 }

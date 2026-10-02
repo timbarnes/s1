@@ -95,7 +95,7 @@ pub struct GcObject {
     pub marked: u64,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum Callable {
     // Standard library / core functions
     Builtin {
@@ -135,7 +135,7 @@ pub enum Callable {
 /// Every heap object is sized by the largest variant, so the rare, wide
 /// payloads (`Callable` is 72 bytes, `PortKind` 48) are boxed: a cons cell
 /// would otherwise pay for them too. See the size assertion below.
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum SchemeValue {
     Int(BigInt),
     Float(f64),

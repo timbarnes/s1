@@ -64,6 +64,7 @@ pub fn type_of(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     Ok(get_symbol(heap, type_name))
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
 

@@ -199,8 +199,8 @@ mod tests {
         let result = vector(heap, &[arg1, arg2]).unwrap();
         if let SchemeValue::Vector(v) = heap.get_value(result) {
             assert_eq!(v.len(), 2);
-            assert_eq!(*heap.get_value(v[0]), SchemeValue::Int(BigInt::from(1)));
-            assert_eq!(*heap.get_value(v[1]), SchemeValue::Bool(true));
+            assert!(matches!(heap.get_value(v[0]), SchemeValue::Int(i) if *i == BigInt::from(1)));
+            assert!(matches!(heap.get_value(v[1]), SchemeValue::Bool(true)));
         } else {
             panic!("Expected vector");
         }
@@ -218,7 +218,7 @@ mod tests {
         if let SchemeValue::Vector(v) = heap.get_value(result) {
             assert_eq!(v.len(), 3);
             for elem in v {
-                assert_eq!(*heap.get_value(*elem), SchemeValue::Nil);
+                assert!(matches!(heap.get_value(*elem), SchemeValue::Nil));
             }
         } else {
             panic!("Expected vector");
@@ -231,7 +231,7 @@ mod tests {
         if let SchemeValue::Vector(v) = heap.get_value(result) {
             assert_eq!(v.len(), 5);
             for elem in v {
-                assert_eq!(*heap.get_value(*elem), SchemeValue::Char('a'));
+                assert!(matches!(heap.get_value(*elem), SchemeValue::Char('a')));
             }
         } else {
             panic!("Expected vector");
@@ -263,11 +263,11 @@ mod tests {
         let val = new_int(heap, BigInt::from(1));
         let vec_arg = vector(heap, &[val]).unwrap();
         let len = vector_length(heap, &[vec_arg]).unwrap();
-        assert_eq!(*heap.get_value(len), SchemeValue::Int(BigInt::from(1)));
+        assert!(matches!(heap.get_value(len), SchemeValue::Int(i) if *i == BigInt::from(1)));
 
         let empty_vec = vector(heap, &[]).unwrap();
         let len = vector_length(heap, &[empty_vec]).unwrap();
-        assert_eq!(*heap.get_value(len), SchemeValue::Int(BigInt::from(0)));
+        assert!(matches!(heap.get_value(len), SchemeValue::Int(i) if *i == BigInt::from(0)));
 
         assert!(vector_length(heap, &[]).is_err());
         let non_vec_arg = new_int(heap, BigInt::from(1));

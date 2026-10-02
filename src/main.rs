@@ -21,7 +21,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use argh::FromArgs;
-use std::io as stdio;
 
 // Measured ~15% on the GC-heavy regression suite, where sweep frees objects
 // en masse; roughly neutral on the call-heavy micro benchmarks. See
