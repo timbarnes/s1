@@ -4,15 +4,17 @@
 (define m1 (macro (x) `(list 11 ,x)))
 (test-equal '(11 22) (m1 22) "Simple macro")
 
-(define when (macro (p body)
+;; Named m-when / m-unless so they don't replace the standard when/unless
+;; for the rest of the regression run.
+(define m-when (macro (p body)
     `(if ,p ,body nil)))
-(test-equal 22 (when #t 22) "when with #t")
-(test-equal nil (when #f 22) "when with #f")
+(test-equal 22 (m-when #t 22) "when with #t")
+(test-equal nil (m-when #f 22) "when with #f")
 
-(define unless (macro (p body)
+(define m-unless (macro (p body)
     `(if (not ,p) ,body nil)))
-(test-equal nil (unless #t 22) "unless with #t")
-(test-equal 22 (unless #f 22) "when with #f")
+(test-equal nil (m-unless #t 22) "unless with #t")
+(test-equal 22 (m-unless #f 22) "when with #f")
 
 (define m1 (macro (x) `(list ,x)))
 (test-equal '(42) (m1 42) "macro (m1 42)")

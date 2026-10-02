@@ -41,6 +41,9 @@ pub enum Kont {
     Cond {
         // processes cond
         remaining: Vec<CondClause>,
+        /// Whether the cond form is in tail position: a clause's body (or
+        /// `=>` call) is then too.
+        tail: bool,
         next: KontRef,
     },
     CondClause {
@@ -135,6 +138,8 @@ pub enum Kont {
         // processes if
         then_branch: GcRef,
         else_branch: GcRef,
+        /// Whether the if form is in tail position; its branches inherit it.
+        tail: bool,
         next: KontRef,
     },
     RestoreEnv {
@@ -143,6 +148,8 @@ pub enum Kont {
     },
     Seq {
         rest: Vec<GcRef>, // remaining expressions in the sequence (head first)
+        /// Whether the sequence is in tail position; its last form inherits it.
+        tail: bool,
         next: KontRef,
     },
     // Exception handler frame - used later for raise/handler support
@@ -271,7 +278,7 @@ impl std::fmt::Debug for Kont {
             Kont::If {
                 then_branch,
                 else_branch,
-                next,
+                next, ..
             } => {
                 write!(
                     f,
@@ -281,7 +288,7 @@ impl std::fmt::Debug for Kont {
                     next
                 )
             }
-            Kont::Cond { remaining, next } => {
+            Kont::Cond { remaining, next, .. } => {
                 write!(
                     f,
                     "Cond {{ remaining: {}, next: {:?} }}",
@@ -319,7 +326,7 @@ impl std::fmt::Debug for Kont {
                     )
                 }
             },
-            Kont::Seq { rest, next } => {
+            Kont::Seq { rest, next, .. } => {
                 write!(f, "Seq {{ rest: {:?}, next: {:?} }}", rest, next)
             }
             Kont::AndOr { kind, rest, next } => {
@@ -537,7 +544,7 @@ impl crate::gc::Mark for KontRef {
                     visit(*consumer);
                     worklist.push(Rc::clone(next));
                 }
-                Kont::Cond { remaining, next } => {
+                Kont::Cond { remaining, next, .. } => {
                     for clause in remaining {
                         clause.mark(visit);
                     }
@@ -618,7 +625,7 @@ impl crate::gc::Mark for KontRef {
                 Kont::If {
                     then_branch,
                     else_branch,
-                    next,
+                    next, ..
                 } => {
                     visit(*then_branch);
                     visit(*else_branch);
@@ -628,7 +635,7 @@ impl crate::gc::Mark for KontRef {
                     old_env.mark(visit);
                     worklist.push(Rc::clone(next));
                 }
-                Kont::Seq { rest, next } => {
+                Kont::Seq { rest, next, .. } => {
                     for item in rest {
                         visit(*item);
                     }
@@ -706,6 +713,9 @@ pub fn insert_and_or(state: &mut CEKState, kind: AndOrKind, mut exprs: Vec<GcRef
     exprs.reverse();
     let prev = Rc::clone(&state.kont);
     state.control = Control::Expr(exprs.pop().unwrap());
+    // The AndOr frame evaluates more operands after this one, so this one
+    // must not be treated as a tail call (it would leave the callee's env).
+    state.tail = false;
     state.kont = Rc::new(Kont::AndOr {
         kind,
         rest: exprs,
@@ -792,6 +802,7 @@ pub fn insert_cond(state: &mut CEKState, remaining: Vec<CondClause>) {
     let prev = Rc::clone(&state.kont);
     state.kont = Rc::new(Kont::Cond {
         remaining,
+        tail: state.tail,
         next: prev,
     });
 }
@@ -816,6 +827,7 @@ pub fn insert_if(state: &mut CEKState, then_branch: GcRef, else_branch: GcRef) {
     state.kont = Rc::new(Kont::If {
         then_branch,
         else_branch,
+        tail: state.tail,
         next: prev,
     });
 }
@@ -827,6 +839,7 @@ pub fn insert_seq(state: &mut CEKState, mut exprs: Vec<GcRef>) {
     let prev = Rc::clone(&state.kont);
     state.kont = Rc::new(Kont::Seq {
         rest: exprs,
+        tail: state.tail,
         next: prev,
     });
 }

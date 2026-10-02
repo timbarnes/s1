@@ -110,7 +110,7 @@ fn eval_string_sp(
         next,
     });
     state.control = Control::Expr(first);
-    state.tail = true;
+    state.tail = false;
     Ok(())
 }
 
@@ -184,11 +184,18 @@ fn apply_sp(
                     crate::eval::bind_params(&params[..], &applied_args, &closure_env, ec.heap)?;
                 let old_env = state.env.clone();
 
-                // `apply` is never a tail call, so always push RestoreEnv
+                // `apply` is never a tail call, so always push RestoreEnv;
+                // the body itself is then in tail position (see apply_proc).
                 state.kont = Rc::new(Kont::RestoreEnv { old_env, next: nxt });
                 state.env = new_env;
                 state.control = Control::Expr(*body);
+                state.tail = true;
                 return Ok(());
+            }
+            Callable::CaseLambda { clauses } => {
+                let count = list_to_vec(ec.heap, arglist)?.len();
+                let chosen = crate::eval::select_clause(clauses, count)?;
+                return apply_sp(ec, &[chosen, arglist], state, nxt);
             }
             _ => return Err("apply: first argument must be a function".to_string()),
         },
@@ -295,7 +302,10 @@ fn call_cc_sp(
     let func = gc_value!(args[0]);
     match &func {
         SchemeValue::Callable(func) => match **func {
-            Callable::Closure { .. } | Callable::Builtin { .. } | Callable::SysBuiltin { .. } => {}
+            Callable::Closure { .. }
+            | Callable::Builtin { .. }
+            | Callable::SysBuiltin { .. }
+            | Callable::CaseLambda { .. } => {}
             _ => return Err("call/cc: argument must be a function".to_string()),
         },
         _ => return Err("call/cc: argument must be a function".to_string()),
@@ -418,6 +428,7 @@ fn dynamic_wind_sp(
     state.kont = next; // Delete the ApplyProc before installing the new continuation
     insert_dynamic_wind(state, before, thunk, after);
     state.control = Control::Expr(before);
+    state.tail = false;
     Ok(())
 }
 
@@ -449,6 +460,7 @@ fn call_with_values_sp(
     state.kont = Rc::new(Kont::CallWithValues { consumer, next });
     // Evaluate the producer thunk
     state.control = Control::Expr(list(producer, ec.heap)?);
+    state.tail = false;
     // dump_cek("call_with_values_sp", state);
     Ok(())
 }

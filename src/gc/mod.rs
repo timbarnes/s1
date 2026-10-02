@@ -120,6 +120,11 @@ pub enum Callable {
         // Extracted from a leading string literal in the lambda/define body, if present.
         doc: Option<String>,
     },
+    // A `case-lambda` procedure: one closure per clause, applied according
+    // to the number of arguments (the first clause that accepts them)
+    CaseLambda {
+        clauses: Vec<GcRef>,
+    },
     // A hygienic `syntax-rules` transformer (src/syntax_rules.rs)
     SyntaxRules(Box<crate::syntax_rules::SyntaxRules>),
     // Scheme-implemented macros

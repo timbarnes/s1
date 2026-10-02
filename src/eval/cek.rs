@@ -249,7 +249,11 @@ fn dispatch_kont(state: &mut CEKState, ec: &mut RunTime, val: GcRef) -> Result<(
             is_define,
             next,
         } => handle_bind(state, ec, symbol, env, is_define, next),
-        Kont::Cond { remaining, next } => handle_cond(state, ec, remaining, next),
+        Kont::Cond {
+            remaining,
+            tail,
+            next,
+        } => handle_cond(state, ec, remaining, tail, next),
         Kont::CondClause { clause, next } => handle_cond_clause(state, ec, clause, next),
         Kont::DynamicWind { procs, phase, next } => {
             handle_dynamic_wind(state, ec.dynamic_wind, ec.dw_next, procs, phase, next)
@@ -283,11 +287,12 @@ fn dispatch_kont(state: &mut CEKState, ec: &mut RunTime, val: GcRef) -> Result<(
         Kont::If {
             then_branch,
             else_branch,
+            tail,
             next,
-        } => handle_if(state, then_branch, else_branch, next),
+        } => handle_if(state, then_branch, else_branch, tail, next),
         Kont::RestoreEnv { old_env, next } => handle_restore_env(state, ec, old_env, next),
         Kont::Escape { payload, new_kont } => handle_escape(state, ec, payload, new_kont),
-        Kont::Seq { rest, next } => handle_seq(state, rest, next),
+        Kont::Seq { rest, tail, next } => handle_seq(state, rest, tail, next),
         Kont::MacroExpand {
             call_env,
             mode,
@@ -399,10 +404,15 @@ fn handle_cond(
     state: &mut CEKState,
     ec: &mut RunTime,
     mut remaining: Vec<CondClause>,
+    tail: bool,
     next: KontRef,
 ) -> Result<(), String> {
     if let Some(clause) = remaining.pop() {
-        state.kont = Rc::new(Kont::Cond { remaining, next });
+        state.kont = Rc::new(Kont::Cond {
+            remaining,
+            tail,
+            next,
+        });
         let test_expr = match &clause {
             CondClause::Normal { test, .. } => test,
             CondClause::Arrow { test, .. } => test,
@@ -443,7 +453,12 @@ fn handle_cond_clause(
         }
         Control::Empty => return Err("CondClause: Control::Empty".to_string()),
     };
-    // helper to skip the Cond frame that wraps each clause
+    // The Cond frame that wraps each clause, and whether the cond is in
+    // tail position (a chosen clause's body inherits that).
+    let cond_tail = match next.as_ref() {
+        Kont::Cond { tail, .. } => *tail,
+        _ => return Err("expected Cond frame after CondClause".to_string()),
+    };
     let skip_cond = |k: &Rc<Kont>| -> Result<Rc<Kont>, String> {
         if let Kont::Cond {
             next: cond_next, ..
@@ -460,7 +475,7 @@ fn handle_cond_clause(
             if !is_false(*test_value) {
                 if let Some(body_expr) = body {
                     state.kont = skip_cond(&next)?; // drop Cond
-                    insert_eval(state, body_expr, true);
+                    insert_eval(state, body_expr, cond_tail);
                 } else {
                     state.kont = skip_cond(&next)?; // drop Cond
                     state.control = Control::Value(*test_value);
@@ -484,7 +499,7 @@ fn handle_cond_clause(
                 let quoted = cons(quote, quoted, ec.heap)?;
                 let mut call_expr = cons(quoted, nil, ec.heap)?;
                 call_expr = cons(arrow_proc, call_expr, ec.heap)?;
-                insert_eval(state, call_expr, true);
+                insert_eval(state, call_expr, cond_tail);
             } else {
                 state.kont = next; // keep Cond for more clauses
             }
@@ -510,6 +525,7 @@ fn handle_dynamic_wind(
             dw.push(DynamicWind::new(*dw_next, procs.before, after));
             *dw_next += 1;
             state.control = Control::Expr(procs.thunk);
+            state.tail = false;
             procs.thunk_result = None;
             state.kont = Rc::new(Kont::DynamicWind {
                 procs,
@@ -522,6 +538,7 @@ fn handle_dynamic_wind(
             // Save incoming value from thunk
             if let Control::Value(result) = state.control {
                 state.control = Control::Expr(after);
+                state.tail = false;
                 procs.thunk_result = Some(result);
                 state.kont = Rc::new(Kont::DynamicWind {
                     procs,
@@ -567,6 +584,7 @@ fn handle_escape(
         // eprintln!("handle_escape: running thunk = {}", print_value(&thunk));
         state.kont = Rc::new(Kont::Escape { payload, new_kont });
         state.control = Control::Expr(thunk);
+        state.tail = false;
     } else {
         // eprintln!(
         //     "handle_escape: no more thunks, restoring state. result = {}",
@@ -594,6 +612,7 @@ fn handle_eval(
                 // Capture environment and move to first expression evaluation
                 let new_env = Some(env_val);
                 state.control = Control::Expr(expr);
+                state.tail = false;
                 state.kont = Rc::new(Kont::Eval {
                     expr,
                     env: new_env,
@@ -608,6 +627,7 @@ fn handle_eval(
             if let Control::Value(val) = state.control {
                 // Save the intermediate result, then prepare to re-evaluate
                 state.control = Control::Expr(val);
+                state.tail = false;
                 state.kont = Rc::new(Kont::Eval {
                     expr: val,
                     env,
@@ -706,6 +726,7 @@ fn handle_if(
     state: &mut CEKState,
     then_branch: GcRef,
     else_branch: GcRef,
+    tail: bool,
     next: KontRef,
 ) -> Result<(), String> {
     //dump_cek("handle_if", state);
@@ -716,7 +737,10 @@ fn handle_if(
             } else {
                 state.control = Control::Expr(then_branch);
             }
-            state.tail = true;
+            // A branch is in tail position only if the if form is. Forcing it
+            // true made a closure call in the branch of a non-tail if skip its
+            // RestoreEnv frame, so code after the if ran in the callee's env.
+            state.tail = tail;
             state.kont = next;
             Ok(())
         }
@@ -754,7 +778,12 @@ fn handle_restore_env(
     Ok(())
 }
 
-fn handle_seq(state: &mut CEKState, mut rest: Vec<GcRef>, next: Rc<Kont>) -> Result<(), String> {
+fn handle_seq(
+    state: &mut CEKState,
+    mut rest: Vec<GcRef>,
+    tail: bool,
+    next: Rc<Kont>,
+) -> Result<(), String> {
     // Pop the next expression from the sequence
     let next_expr = rest.pop().unwrap(); // safe: Seq always has >=2 exprs
 
@@ -763,11 +792,11 @@ fn handle_seq(state: &mut CEKState, mut rest: Vec<GcRef>, next: Rc<Kont>) -> Res
 
     // Determine if this is the last expression
     if rest.is_empty() {
-        // Last expression: mark tail if needed and drop the Seq frame
-        state.tail = true;
+        // Last expression: in tail position if the sequence is
+        state.tail = tail;
         state.kont = next;
     } else {
-        state.kont = Rc::new(Kont::Seq { rest, next });
+        state.kont = Rc::new(Kont::Seq { rest, tail, next });
     }
     Ok(())
 }
@@ -787,7 +816,9 @@ fn handle_macro_expand(
             match mode {
                 MacroMode::Evaluate => {
                     state.control = Control::Expr(val);
-                    state.tail = true;
+                    // The use's own tail position isn't recorded in this
+                    // frame; false is always safe (it only costs a frame).
+                    state.tail = false;
                 }
                 MacroMode::Expand => {
                     state.control = Control::Value(val);
@@ -875,7 +906,8 @@ fn handle_eval_seq(
     }
     if let Some(next_form) = forms.remaining.pop() {
         state.control = Control::Expr(next_form);
-        state.tail = true;
+        // More forms (or the result list) follow: not a tail position.
+        state.tail = false;
         state.kont = Rc::new(Kont::EvalSeq { forms, next });
     } else {
         let list = crate::gc::list_from_slice(&forms.results, ec.heap);
@@ -1056,8 +1088,23 @@ pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> 
                     });
                     state.env = new_env;
                     state.control = Control::Expr(*body);
+                    // The body is in tail position relative to its own
+                    // frame: the RestoreEnv below restores the caller's env,
+                    // so calls in tail position inside it need no frame of
+                    // their own. (Forms inside the body inherit this.)
+                    state.tail = true;
                     Ok(())
                 }
+            }
+            Callable::CaseLambda { clauses } => {
+                // Apply the first clause that accepts this many arguments.
+                let chosen = crate::eval::select_clause(clauses, evaluated_args.len())?;
+                state.kont = Rc::new(Kont::ApplyProc {
+                    proc: chosen,
+                    evaluated_args,
+                    next,
+                });
+                apply_proc(state, ec)
             }
             _ => Err("apply_proc expected Builtin or Closure".to_string()),
         },

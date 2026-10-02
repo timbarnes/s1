@@ -217,7 +217,7 @@ pub fn dbg_one_kont(loc: &str, frame: &Kont) -> String {
         Kont::If {
             then_branch,
             else_branch,
-            next,
+            next, ..
         } => result.push_str(
             format!(
                 "If{{then={}, else={}, next={:?}}}",

@@ -15,6 +15,9 @@
 (displayln "         =====syntax-rules Tests=====")
 (load "scheme/syntax_rules_tests.scm")
 
+(displayln "         =====Derived Syntax Tests=====")
+(load "scheme/derived_tests.scm")
+
 (displayln "         =====Exception Tests=====")
 (load "scheme/exception_tests.scm")
 

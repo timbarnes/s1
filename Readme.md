@@ -27,6 +27,7 @@ A comprehensive Scheme interpreter written in Rust that aims to closely follow t
 - `quote` - Prevent evaluation
 - `lambda` - Function definition
 - `define-syntax`, `let-syntax`, `letrec-syntax`, `syntax-rules` - Hygienic macros
+- `when`, `unless`, `case`, `do`, named `let`, `let*`, `letrec`, `letrec*`, `let-values`, `let*-values`, `define-values`, `case-lambda`, `parameterize`, `delay`, `delay-force`, `guard` - R7RS derived forms (see [Docs/derived-expressions.md](Docs/derived-expressions.md))
 - `macro` - Procedural (non-hygienic) macro definition, an s1 extension
 - `define` - Variable and function binding
 - `set!` - Variable assignment

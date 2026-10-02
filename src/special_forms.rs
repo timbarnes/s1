@@ -58,6 +58,7 @@ pub fn register_special_forms(heap: &mut GcHeap, env: EnvRef) {
         "with-timer" => with_timer_sf,
         "guard" => guard_sf,
         "syntax-rules" => syntax_rules_sf,
+        "case-lambda" => case_lambda_sf,
         "define-syntax" => define_sf,
         "let-syntax" => let_syntax_sf,
         "letrec-syntax" => letrec_syntax_sf,
@@ -207,7 +208,7 @@ fn begin_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), S
     match argvec.len() {
         0 => return Err("begin: no arguments provided".to_string()),
         1 => insert_value(state, ec.heap.false_s()),
-        2 => insert_eval(state, argvec[1], true),
+        2 => insert_eval(state, argvec[1], state.tail),
         _ => {
             // If there are more than two arguments, evaluate the sequence.
             argvec = argvec[1..].to_vec();
@@ -401,7 +402,7 @@ pub fn let_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(),
             let letrec_sym = ec.heap.core_form("letrec");
             let letrec_expr = list_from_slice(&[letrec_sym, name_bindings, call_expr], ec.heap);
 
-            insert_eval(state, letrec_expr, false);
+            insert_eval(state, letrec_expr, state.tail);
             Ok(())
         }
         _ => {
@@ -429,7 +430,7 @@ pub fn let_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(),
             // cons the lambda to the list of values
             let call = cons(lambda_expr, exprs, ec.heap)?;
 
-            insert_eval(state, call, false);
+            insert_eval(state, call, state.tail);
             Ok(())
         }
     }
@@ -443,7 +444,7 @@ pub fn let_star_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Resul
     if bindings.is_empty() {
         // No bindings, just evaluate the body in sequence
         let wrapped_body = wrap_body_in_begin(&formvec[2..], ec.heap);
-        insert_eval(state, wrapped_body, false);
+        insert_eval(state, wrapped_body, state.tail);
         return Ok(());
     }
 
@@ -468,7 +469,7 @@ pub fn let_star_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Resul
     let first_binding_list = list_from_slice(&[first_binding], ec.heap);
     let outer_let = list_from_slice(&[let_sym, first_binding_list, inner_expr], ec.heap);
 
-    insert_eval(state, outer_let, false);
+    insert_eval(state, outer_let, state.tail);
     Ok(())
 }
 
@@ -480,7 +481,7 @@ pub fn letrec_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
     if bindings.is_empty() {
         // No bindings, just evaluate the body in sequence
         let wrapped_body = wrap_body_in_begin(&formvec[2..], ec.heap);
-        insert_eval(state, wrapped_body, false);
+        insert_eval(state, wrapped_body, state.tail);
         return Ok(());
     }
 
@@ -525,7 +526,7 @@ pub fn letrec_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
     let let_body = wrap_body_in_begin(&all_exprs[..], ec.heap);
     let letrec_as_let = list_from_slice(&[let_sym, init_bindings_list, let_body], ec.heap);
 
-    insert_eval(state, letrec_as_let, false);
+    insert_eval(state, letrec_as_let, state.tail);
     Ok(())
 }
 
@@ -559,7 +560,7 @@ fn quasiquote_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
     let template = car(cdr(expr)?)?;
     let procs = qq_procs(&state.env, ec)?;
     let lowered = lower_quasiquote(1, template, &procs, ec)?;
-    insert_eval(state, lowered, true);
+    insert_eval(state, lowered, state.tail);
     Ok(())
 }
 
@@ -863,6 +864,34 @@ fn syntax_rules_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Resul
     Ok(())
 }
 
+/// (case-lambda (formals body ...) ...)
+///
+/// A procedure that, when called, applies the first clause whose formals
+/// accept that many arguments. Each clause is made into a closure here, so
+/// a call only selects one (`eval::select_clause`) and applies it.
+fn case_lambda_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
+    let clause_forms = list_to_vec(ec.heap, cdr(expr)?)?;
+    let lambda = ec.heap.core_id("lambda");
+    let mut clauses = Vec::with_capacity(clause_forms.len());
+    for clause in clause_forms {
+        let parts = list_to_vec(ec.heap, clause)
+            .map_err(|_| "case-lambda: each clause must be (formals body ...)".to_string())?;
+        if parts.len() < 2 {
+            return Err("case-lambda: each clause must be (formals body ...)".to_string());
+        }
+        let mut form = vec![lambda];
+        form.extend_from_slice(&parts);
+        let (params, ptype) = params_to_vec(ec.heap, parts[0]);
+        clauses.push(create_lambda_or_macro(&form, &params, ptype, ec, state.env.clone())?);
+    }
+    let procedure = ec.heap.alloc(crate::gc::GcObject {
+        value: SchemeValue::Callable(Box::new(crate::gc::Callable::CaseLambda { clauses })),
+        marked: 0,
+    });
+    insert_value(state, procedure);
+    Ok(())
+}
+
 /// (let-syntax ((keyword transformer) ...) body ...): `let` over the
 /// transformers, so they are evaluated in the enclosing environment and the
 /// body (including any definitions in it) runs in a new frame.
@@ -904,7 +933,7 @@ pub fn and_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(),
     match argvec.len() {
         0 => return Err("and: no arguments provided".to_string()),
         1 => insert_value(state, ec.heap.true_s()),
-        2 => insert_eval(state, argvec[1], true),
+        2 => insert_eval(state, argvec[1], state.tail),
         _ => {
             // If there are more than two arguments, evaluate the sequence.
             argvec = argvec[1..].to_vec();
@@ -924,7 +953,7 @@ pub fn or_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), 
     match argvec.len() {
         0 => return Err("or: no arguments provided".to_string()),
         1 => insert_value(state, ec.heap.false_s()),
-        2 => insert_eval(state, argvec[1], true),
+        2 => insert_eval(state, argvec[1], state.tail),
         _ => {
             // If there are more than two arguments, evaluate the sequence.
             argvec = argvec[1..].to_vec();
@@ -1038,7 +1067,7 @@ pub fn do_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), 
     // Create the complete named let: (let loop ((var1 init1) ...) (if ...))
     let named_let = list_from_slice(&[let_sym, loop_sym, init_bindings_list, if_expr], ec.heap);
 
-    insert_eval(state, named_let, false);
+    insert_eval(state, named_let, state.tail);
     Ok(())
 }
 
@@ -1050,15 +1079,19 @@ fn transform_internal_defines(body_exprs: &[GcRef], heap: &mut GcHeap) -> Result
     let mut expressions = Vec::new();
     let mut defines_done = false;
 
+    // The leading definitions become a letrec. Once an expression has been
+    // seen, the remaining forms stay in the body as they are, definitions
+    // included: a macro use that expands into definitions (define-values,
+    // say) looks like an expression here, so a definition after it is
+    // legitimate. Those bind into the body's frame when they run.
     for expr in body_exprs {
-        if let SchemeValue::Pair(car, _) = heap.get_value(*expr) {
-            if let SchemeValue::Symbol(sym) = heap.get_value(*car) {
-                if sym == "define" || sym == "define-syntax" {
-                    if defines_done {
-                        return Err("define: must be at the beginning of the body".to_string());
+        if !defines_done {
+            if let SchemeValue::Pair(car, _) = heap.get_value(*expr) {
+                if let SchemeValue::Symbol(sym) = heap.get_value(*car) {
+                    if sym == "define" || sym == "define-syntax" {
+                        defines.push(*expr);
+                        continue;
                     }
-                    defines.push(*expr);
-                    continue;
                 }
             }
         }

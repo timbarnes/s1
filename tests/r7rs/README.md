@@ -38,7 +38,9 @@ baseline stays in step with the code. `S1_BIN` selects a prebuilt binary and
 Each section runs in its own process, so a reader desync or crash in one
 section cannot swallow the next ones.
 
-## Known blockers (550 passing after phase 5)
+## Known blockers (604 passing after phase 6)
+
+- **5 Program structure**: the remaining tests use `define-record-type` (phase 7).
 
 - **Read syntax, Numeric syntax, 6.13 Input and output**: these need string
   ports (phase 8). Their helper macros now define correctly.

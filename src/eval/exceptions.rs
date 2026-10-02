@@ -201,7 +201,10 @@ fn is_procedure(v: GcRef) -> bool {
         gc_value!(v),
         SchemeValue::Callable(c) if matches!(
             **c,
-            Callable::Builtin { .. } | Callable::SysBuiltin { .. } | Callable::Closure { .. }
+            Callable::Builtin { .. }
+                | Callable::SysBuiltin { .. }
+                | Callable::Closure { .. }
+                | Callable::CaseLambda { .. }
         )
     )
 }

@@ -36,22 +36,22 @@
     (eq? (type-of x) 'port)))
 
 (define (procedure? x)
-    "(procedure? x) returns #t if x is callable (a builtin, closure, or sys-builtin), otherwise #f"
-    (if (memq (type-of x) '(builtin closure sys-builtin))
+    "(procedure? x) returns #t if x is callable (a builtin, closure, sys-builtin or case-lambda), otherwise #f"
+    (if (memq (type-of x) '(builtin closure sys-builtin case-lambda))
         #t #f))
 
 ;; Character comparisons and predicates
 (define char<=?
-  (lambda (c1 c2)
-    "(char<=? c1 c2) returns #t if c1 is less than or equal to c2, otherwise #f"
-    (or (char<? c1 c2)
-        (char=? c1 c2))))
+  (lambda (c1 c2 . rest)
+    "(char<=? c1 c2 c3 ...) returns #t if each character is less than or equal to the next, otherwise #f"
+    (and (or (char<? c1 c2) (char=? c1 c2))
+         (or (null? rest) (apply char<=? c2 rest)))))
 
 (define char>=?
-  (lambda (c1 c2)
-    "(char>=? c1 c2) returns #t if c1 is greater than or equal to c2, otherwise #f"
-    (or (char>? c1 c2)
-        (char=? c1 c2))))
+  (lambda (c1 c2 . rest)
+    "(char>=? c1 c2 c3 ...) returns #t if each character is greater than or equal to the next, otherwise #f"
+    (and (or (char>? c1 c2) (char=? c1 c2))
+         (or (null? rest) (apply char>=? c2 rest)))))
 
 (define char-alphabetic?
   (lambda (c)
@@ -274,31 +274,6 @@
         (>string sym)
         (error "symbol>string: not a symbol"))))
 
-;; (delay expr) and (force p)
-(define delay (macro (expr)
-    "(delay expr) returns a promise that, when forced, evaluates expr at most once and caches the result"
-    `(make-promise (lambda () ,expr))))
-
-(define force (lambda (p)
-    "(force p) evaluates the promise p (if not already forced) and returns its value"
-    (p)))
-
-(define make-promise
-    (lambda (proc)
-        "(make-promise proc) wraps thunk proc in a promise that calls proc and caches its result the first time it's invoked, and returns the cached result on later calls"
-        (let ((result-ready? #f)
-              (result #f))
-          (lambda ()
-            (if result-ready?
-                result
-                (let ((x (proc)))
-                  (if result-ready?
-                      result
-                      (begin (set! result-ready? #t)
-                             (set! result x)
-                             result))))))))
-
-
 (define def
   (macro (sig . body)
       "(def sig . body) defines a function if sig is (name . args), or a variable if sig is a plain symbol"
@@ -340,3 +315,150 @@
       (let ((result (proc port)))
         (close-output-port port)
         result))))
+
+;;; ---------------------------------------------------------------------------
+;;; R7RS derived expression types (section 4.2) and related procedures.
+;;; Most definitions follow R7RS's own reference implementations (7.3), which
+;;; rely on syntax-rules hygiene: the `tmp`, `x` and `args` they introduce
+;;; can't capture user variables. case-lambda and guard are built in.
+;;; ---------------------------------------------------------------------------
+
+(define-syntax when
+  (syntax-rules ()
+    ((_ test result1 result2 ...) (if test (begin result1 result2 ...)))))
+
+(define-syntax unless
+  (syntax-rules ()
+    ((_ test result1 result2 ...) (if (not test) (begin result1 result2 ...)))))
+
+(define-syntax case
+  (syntax-rules (else =>)
+    ((_ (key ...) clauses ...)
+     (let ((atom-key (key ...))) (case atom-key clauses ...)))
+    ((_ key (else => result)) (result key))
+    ((_ key (else result1 result2 ...)) (begin result1 result2 ...))
+    ((_ key ((atoms ...) => result))
+     (if (memv key '(atoms ...)) (result key)))
+    ((_ key ((atoms ...) result1 result2 ...))
+     (if (memv key '(atoms ...)) (begin result1 result2 ...)))
+    ((_ key ((atoms ...) => result) clause clauses ...)
+     (if (memv key '(atoms ...)) (result key) (case key clause clauses ...)))
+    ((_ key ((atoms ...) result1 result2 ...) clause clauses ...)
+     (if (memv key '(atoms ...)) (begin result1 result2 ...) (case key clause clauses ...)))))
+
+;; s1's letrec already initialises its bindings left to right, which is
+;; letrec*'s guarantee.
+(define-syntax letrec*
+  (syntax-rules ()
+    ((_ bindings body1 body2 ...) (letrec bindings body1 body2 ...))))
+
+(define-syntax let*-values
+  (syntax-rules ()
+    ((_ () body1 body2 ...) (let () body1 body2 ...))
+    ((_ ((formals init) binding ...) body1 body2 ...)
+     (call-with-values (lambda () init)
+       (lambda formals (let*-values (binding ...) body1 body2 ...))))))
+
+;; All inits are evaluated before any variable is bound: each formal is first
+;; bound to a fresh temporary, and the real names are bound together at the end.
+(define-syntax let-values
+  (syntax-rules ()
+    ((_ (binding ...) body0 body1 ...)
+     (let-values "bind" (binding ...) () (let () body0 body1 ...)))
+    ((_ "bind" () tmps body)
+     (let tmps body))
+    ((_ "bind" ((b0 e0) binding ...) tmps body)
+     (let-values "mktmp" b0 e0 () (binding ...) tmps body))
+    ((_ "mktmp" () e0 args bindings tmps body)
+     (call-with-values (lambda () e0)
+       (lambda args (let-values "bind" bindings tmps body))))
+    ((_ "mktmp" (a . b) e0 (arg ...) bindings (tmp ...) body)
+     (let-values "mktmp" b e0 (arg ... x) bindings (tmp ... (a x)) body))
+    ((_ "mktmp" a e0 (arg ...) bindings (tmp ...) body)
+     (call-with-values (lambda () e0)
+       (lambda (arg ... . x) (let-values "bind" bindings (tmp ... (a x)) body))))))
+
+(define-syntax define-values
+  (syntax-rules ()
+    ((_ () expr)
+     (define dummy (call-with-values (lambda () expr) (lambda args #f))))
+    ((_ (var) expr)
+     (define var expr))
+    ((_ (var0 var1 ... varn) expr)
+     (begin
+       (define var0 (call-with-values (lambda () expr) list))
+       (define var1 (let ((v (cadr var0))) (set-cdr! var0 (cddr var0)) v)) ...
+       (define varn (let ((v (cadr var0))) (set! var0 (car var0)) v))))
+    ((_ (var0 var1 ... . varn) expr)
+     (begin
+       (define var0 (call-with-values (lambda () expr) list))
+       (define var1 (let ((v (cadr var0))) (set-cdr! var0 (cddr var0)) v)) ...
+       (define varn (let ((v (cdr var0))) (set! var0 (car var0)) v))))
+    ((_ var expr)
+     (define var (call-with-values (lambda () expr) list)))))
+
+;; --- Parameters (R7RS 4.2.6)
+;; A parameter object is a procedure: called with no arguments it returns the
+;; current value. parameterize talks to it through two private markers.
+(define %param-set (list 'param-set))
+(define %param-converter (list 'param-converter))
+
+(define (make-parameter value . converter)
+  "(make-parameter value [converter]) returns a parameter object whose value is (converter value)"
+  (let* ((convert (if (null? converter) (lambda (x) x) (car converter)))
+         (current (convert value)))
+    (lambda args
+      (cond ((null? args) current)
+            ((eq? (car args) %param-set) (set! current (cadr args)))
+            ((eq? (car args) %param-converter) convert)
+            (else (error "parameter object called with arguments" args))))))
+
+;; Each binding swaps the converted value in on entry to its dynamic extent
+;; and back out on exit, including exits and re-entries through continuations.
+(define-syntax parameterize
+  (syntax-rules ()
+    ((_ () body ...) (let () body ...))
+    ((_ ((param value) rest ...) body ...)
+     (let* ((p param)
+            (new ((p %param-converter) value))
+            (old #f))
+       (dynamic-wind
+         (lambda () (set! old (p)) (p %param-set new))
+         (lambda () (parameterize (rest ...) body ...))
+         (lambda () (set! new (p)) (p %param-set old)))))))
+
+;; --- Promises (R7RS 4.2.5), following the reference implementation, which
+;; forces chains of delay-force iteratively (in constant space).
+;; A promise is a vector #(tag box) where box is (done? . value-or-thunk);
+;; promises that share a box were merged by force.
+(define %promise-tag (list 'promise))
+(define (%make-promise done? value) (vector %promise-tag (cons done? value)))
+(define (promise? obj)
+  "(promise? obj) returns #t if obj is a promise"
+  (and (vector? obj) (= (vector-length obj) 2) (eq? (vector-ref obj 0) %promise-tag)))
+(define (%promise-done? p) (car (vector-ref p 1)))
+(define (%promise-value p) (cdr (vector-ref p 1)))
+(define (%promise-update! new old)
+  (set-car! (vector-ref old 1) (%promise-done? new))
+  (set-cdr! (vector-ref old 1) (%promise-value new))
+  (vector-set! new 1 (vector-ref old 1)))
+
+(define (force promise)
+  "(force promise) returns the value of promise, computing it the first time; a non-promise is returned as is"
+  (if (promise? promise)
+      (if (%promise-done? promise)
+          (%promise-value promise)
+          (%force-step promise ((%promise-value promise))))
+      promise))
+(define (%force-step promise promise*)
+  (if (not (%promise-done? promise)) (%promise-update! promise* promise))
+  (force promise))
+
+(define (make-promise obj)
+  "(make-promise obj) returns obj if it is a promise, otherwise a promise already forced to obj"
+  (if (promise? obj) obj (%make-promise #t obj)))
+
+(define-syntax delay-force
+  (syntax-rules () ((_ expr) (%make-promise #f (lambda () expr)))))
+(define-syntax delay
+  (syntax-rules () ((_ expr) (delay-force (%make-promise #t expr)))))

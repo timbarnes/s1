@@ -173,6 +173,25 @@ pub fn eval_string(
 // HELPER FUNCTIONS
 // ============================================================================
 
+/// The first `case-lambda` clause (a closure) that accepts `n` arguments.
+pub fn select_clause(clauses: &[GcRef], n: usize) -> Result<GcRef, String> {
+    clauses
+        .iter()
+        .copied()
+        .find(|c| match crate::gc_value!(*c).as_callable() {
+            // Parameters are encoded as in `bind_params`: none; a lone rest
+            // symbol; or a rest slot (nil for a fixed list) then the names.
+            Some(crate::gc::Callable::Closure { params, .. }) => match params.len() {
+                0 => n == 0,
+                1 => true,
+                len if matches!(crate::gc_value!(params[0]), SchemeValue::Nil) => n == len - 1,
+                len => n >= len - 1,
+            },
+            _ => false,
+        })
+        .ok_or_else(|| format!("case-lambda: no clause accepts {} argument{}", n, if n == 1 { "" } else { "s" }))
+}
+
 pub fn bind_params(
     params: &[GcRef],
     args: &[GcRef],
@@ -195,6 +214,11 @@ pub fn bind_params(
             let num_required = params.len() - 1;
             if args.len() < num_required {
                 return Err("not enough arguments".to_string());
+            }
+            // A fixed parameter list is encoded with nil in the rest slot;
+            // it takes exactly `num_required` arguments.
+            if matches!(heap.get_value(params[0]), SchemeValue::Nil) && args.len() > num_required {
+                return Err("too many arguments".to_string());
             }
 
             // Bind the required parameters.
