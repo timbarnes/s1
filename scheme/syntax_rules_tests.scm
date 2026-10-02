@@ -169,3 +169,11 @@
 (test-equal 3 (let ((let 1)) (let* ((a 1) (b 2)) (+ a b))) "let* with a local let")
 (test-equal 1 (let ((set! #f)) (letrec ((f (lambda () 1))) (f))) "letrec with a local set!")
 (test-equal '(x y) (let ((quote list)) `(x y)) "quasiquote with a local quote")
+
+;; --- expansion cache: a use is expanded once per transformer
+(define-syntax which-version (syntax-rules () ((_) 'first)))
+(define (call-which) (which-version))
+(test-equal 'first (call-which) "cached expansion of a use")
+(test-equal 'first (call-which) "the same use again")
+(define-syntax which-version (syntax-rules () ((_) 'second)))
+(test-equal 'second (call-which) "redefining the macro invalidates the cached expansion")

@@ -52,6 +52,20 @@ pub struct GcHeap {
     core_ids: HashMap<&'static str, GcRef>,
     /// Cached special-form objects (see `core_form`); GC roots.
     core_forms: HashMap<&'static str, GcRef>,
+    /// `syntax-rules` expansions, keyed by the macro-use form (the pair), so
+    /// a use evaluated repeatedly is expanded once. Another ephemeron table:
+    /// an entry keeps its transformer and expansion alive only while the use
+    /// form is reachable. See Docs/hygiene-design.md section 7.
+    expansions: HashMap<GcRef, CachedExpansion>,
+}
+
+/// A cached expansion; see `GcHeap::expansions`.
+pub struct CachedExpansion {
+    /// The transformer that produced it: a use re-bound to a different
+    /// macro misses the cache.
+    transformer: GcRef,
+    expansion: GcRef,
+    traced: std::cell::Cell<u64>,
 }
 
 /// An alias's renaming record; see `GcHeap::aliases`.
@@ -95,6 +109,7 @@ impl GcHeap {
             global_env: None,
             core_ids: HashMap::default(),
             core_forms: HashMap::default(),
+            expansions: HashMap::default(),
         };
 
         // Pre-allocate singleton objects
@@ -329,6 +344,31 @@ impl GcHeap {
         }
     }
 
+    /// The cached expansion of the use `form` by `transformer`, if any.
+    pub fn cached_expansion(&self, form: GcRef, transformer: GcRef) -> Option<GcRef> {
+        match self.expansions.get(&form) {
+            Some(e) if e.transformer == transformer => Some(e.expansion),
+            _ => None,
+        }
+    }
+
+    /// Remember that `transformer` expanded the use `form` to `expansion`.
+    pub fn cache_expansion(&mut self, form: GcRef, transformer: GcRef, expansion: GcRef) {
+        self.expansions.insert(
+            form,
+            CachedExpansion {
+                transformer,
+                expansion,
+                traced: std::cell::Cell::new(0),
+            },
+        );
+    }
+
+    /// The number of cached expansions (for tests and diagnostics).
+    pub fn expansion_count(&self) -> usize {
+        self.expansions.len()
+    }
+
     /// The renaming record for `id`, if it is an alias.
     pub fn alias(&self, id: GcRef) -> Option<&Alias> {
         self.aliases.get(&id)
@@ -451,12 +491,22 @@ impl GcHeap {
             mark_reachable(id, epoch, &mut self.worklist);
         }
 
-        // Alias table, as ephemerons: a reachable alias keeps its original
-        // and environment alive. Marking an environment can reach more
-        // aliases, so repeat until a pass traces nothing new.
+        // Alias table and expansion cache, as ephemerons: a reachable alias
+        // keeps its original and environment alive, and a reachable use form
+        // its transformer and expansion. Marking either can reach more keys,
+        // so repeat until a pass traces nothing new.
         let worklist = &mut self.worklist;
         loop {
             let mut traced_any = false;
+            for (&form, entry) in self.expansions.iter() {
+                if *crate::gc_marked!(form) != epoch || entry.traced.get() == epoch {
+                    continue;
+                }
+                entry.traced.set(epoch);
+                traced_any = true;
+                mark_reachable(entry.transformer, epoch, worklist);
+                mark_reachable(entry.expansion, epoch, worklist);
+            }
             for (&alias, entry) in self.aliases.iter() {
                 if *crate::gc_marked!(alias) != epoch || entry.traced.get() == epoch {
                     continue;
@@ -477,9 +527,11 @@ impl GcHeap {
     fn sweep(&mut self) {
         let poison = self.poison_sweep;
         let epoch = self.current_epoch;
-        // Forget aliases that are about to be freed.
+        // Forget aliases and cached expansions whose keys are about to be freed.
         self.aliases
             .retain(|&alias, _| unsafe { (*alias).marked } == epoch);
+        self.expansions
+            .retain(|&form, _| unsafe { (*form).marked } == epoch);
         self.objects.retain(|obj| {
             let marked = unsafe { (**obj).marked } == epoch;
             if !marked {

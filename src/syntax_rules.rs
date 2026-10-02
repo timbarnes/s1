@@ -925,4 +925,40 @@ mod tests {
         assert!(parse_err(heap, &env, "(syntax-rules () (_ 1))").contains("must be a list"));
         assert!(parse_err(heap, &env, "(syntax-rules (1) ((_) 1))").contains("identifiers"));
     }
+
+    #[test]
+    fn gc_keeps_a_cached_expansion_while_its_use_form_lives() {
+        let (mut ev, env) = setup();
+        ev.heap.set_poison_sweep(true);
+        let state = crate::eval::CEKState::new(env.clone());
+        let mut rt = RunTime::from_eval(&mut ev);
+        let sr = rules(rt.heap, &env, "(syntax-rules () ((_ x) (list x x)))");
+        let transformer = rt.heap.alloc(crate::gc::GcObject {
+            value: SchemeValue::Callable(Box::new(crate::gc::Callable::SyntaxRules(Box::new(sr)))),
+            marked: 0,
+        });
+        let form = read(rt.heap, "(m 7)");
+        let expansion = match gc_value!(transformer).as_callable() {
+            Some(crate::gc::Callable::SyntaxRules(sr)) => sr.expand(rt.heap, form, &env).unwrap(),
+            _ => unreachable!(),
+        };
+        rt.heap.cache_expansion(form, transformer, expansion);
+
+        let collect = |rt: &mut RunTime, roots: &[GcRef]| {
+            rt.heap
+                .collect_garbage(&state, *rt.current_output_port, rt.port_stack, &[], roots, *rt.handlers);
+        };
+        // Only the use form is rooted: the entry keeps transformer and
+        // expansion (and the expansion's aliases) alive.
+        collect(&mut rt, &[form]);
+        assert_eq!(rt.heap.expansion_count(), 1);
+        assert_eq!(rt.heap.cached_expansion(form, transformer), Some(expansion));
+        assert_eq!(print_value(&expansion), "(list 7 7)", "expansion must not have been freed");
+        let list = crate::gc::car(expansion).unwrap();
+        assert!(rt.heap.alias(list).is_some(), "the expansion's alias entry survives too");
+
+        // Use form unreachable: the entry goes.
+        collect(&mut rt, &[]);
+        assert_eq!(rt.heap.expansion_count(), 0);
+    }
 }

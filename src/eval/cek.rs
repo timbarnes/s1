@@ -139,7 +139,7 @@ pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
                     Some(Callable::SyntaxRules(sr)) => {
                         // Replace the use by its expansion, in the same
                         // environment and continuation, keeping tail position.
-                        match sr.expand(rt.heap, expr, &state.env) {
+                        match expand_use(rt, op, sr, expr, &state.env) {
                             Ok(expansion) => insert_eval(state, expansion, state.tail),
                             Err(err) => post_error(state, rt, &err),
                         }
@@ -905,6 +905,26 @@ fn handle_timer(
     }
 }
 
+/// Expand the macro use `form` with `transformer` (whose payload is `sr`),
+/// reusing a cached expansion of the same form by the same transformer.
+/// Expansion is deterministic given those two, short of a literal like
+/// `else` being rebound between evaluations of the same code, so a use in a
+/// loop or a frequently called procedure is expanded once.
+fn expand_use(
+    rt: &mut RunTime,
+    transformer: GcRef,
+    sr: &crate::syntax_rules::SyntaxRules,
+    form: GcRef,
+    env: &EnvRef,
+) -> Result<GcRef, String> {
+    if let Some(expansion) = rt.heap.cached_expansion(form, transformer) {
+        return Ok(expansion);
+    }
+    let expansion = sr.expand(rt.heap, form, env)?;
+    rt.heap.cache_expansion(form, transformer, expansion);
+    Ok(expansion)
+}
+
 /// Process applications that do not require argument evaluation: macros, special forms, and call-with-values.
 ///
 fn apply_unevaluated(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> {
@@ -949,7 +969,7 @@ fn apply_unevaluated(state: &mut CEKState, ec: &mut RunTime) -> Result<(), Strin
         Some(Callable::SyntaxRules(sr)) => {
             // An operator expression that evaluated to a transformer (the
             // identifier case is handled directly in eval_cek).
-            match sr.expand(ec.heap, *original_call, &state.env) {
+            match expand_use(ec, *proc, sr, *original_call, &state.env) {
                 Ok(expansion) => {
                     state.kont = next;
                     insert_eval(state, expansion, false);
