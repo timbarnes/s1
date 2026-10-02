@@ -3,6 +3,7 @@ mod env;
 mod eval;
 mod gc;
 mod io;
+mod number_syntax;
 mod parser;
 mod printer;
 mod special_forms;

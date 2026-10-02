@@ -86,9 +86,9 @@ Returns a newly allocated string formed from the characters in `list`.
 
 ## `string-copy`
 
-`(string-copy string)`
+`(string-copy string [start [end]])`
 
-Returns a newly allocated copy of the given `string`.
+Returns a newly allocated copy of the given `string`, or of its characters from index `start` (inclusive, default 0) to `end` (exclusive, default the length).
 
 ## `string-fill!`
 

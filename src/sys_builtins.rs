@@ -672,7 +672,7 @@ fn read_sp(
             return Err("Expected port on port stack".to_string());
         }
     } else {
-        let mut port_kind = port_kind_from_scheme_port(ec, args[0]);
+        let mut port_kind = port_kind_from_scheme_port(ec, args[0])?;
         match port_kind {
             PortKind::Stdin | PortKind::StringPortInput { .. } /* | PortKind::File { .. } */ => {
                 parse(ec.heap, &mut port_kind)
@@ -758,7 +758,7 @@ fn write_sp(
     } else {
         *rt.current_output_port
     };
-    let mut port_kind = crate::io::port_kind_from_scheme_port(rt, port);
+    let mut port_kind = crate::io::port_kind_from_scheme_port(rt, port)?;
 
     match port_kind {
         PortKind::Stdout | PortKind::Stderr | PortKind::StringPortOutput { .. } => {}
@@ -795,7 +795,7 @@ fn display_sp(
     } else {
         *rt.current_output_port
     };
-    let mut port_kind = crate::io::port_kind_from_scheme_port(rt, port);
+    let mut port_kind = crate::io::port_kind_from_scheme_port(rt, port)?;
 
     match port_kind {
         PortKind::Stdout | PortKind::Stderr | PortKind::StringPortOutput { .. } => {}
@@ -901,8 +901,8 @@ fn write_char_sp(
     next: KontRef,
 ) -> Result<(), String> {
     let port = match args.len() {
-        1 => port_kind_from_scheme_port(rt, *rt.current_output_port),
-        2 => port_kind_from_scheme_port(rt, args[1]),
+        1 => port_kind_from_scheme_port(rt, *rt.current_output_port)?,
+        2 => port_kind_from_scheme_port(rt, args[1])?,
         _ => return Err("write-char: expected 1 or 2 arguments".to_string()),
     };
     match gc_value!(args[0]) {
@@ -938,7 +938,7 @@ fn peek_char_sp(
             return Err("Expected port on port stack".to_string());
         }
     } else {
-        let port_kind = crate::io::port_kind_from_scheme_port(rt, args[0]);
+        let port_kind = crate::io::port_kind_from_scheme_port(rt, args[0])?;
         match port_kind {
             PortKind::Stdin | PortKind::StringPortInput { .. } => {}
             PortKind::File { write, .. } => {
@@ -982,7 +982,7 @@ fn char_ready_sp(
             return Err("Expected port on port stack".to_string());
         }
     } else {
-        let port_kind = crate::io::port_kind_from_scheme_port(rt, args[0]);
+        let port_kind = crate::io::port_kind_from_scheme_port(rt, args[0])?;
         match port_kind {
             PortKind::Stdin | PortKind::StringPortInput { .. } => {}
             PortKind::File { write, .. } => {
@@ -1049,7 +1049,7 @@ fn flush_output_sp(
         args[0]
     };
 
-    let f = port_kind_from_scheme_port(rt, port);
+    let f = port_kind_from_scheme_port(rt, port)?;
     match f {
         crate::io::PortKind::Stdout => {
             std::io::stdout().flush().ok();

@@ -25,8 +25,8 @@ pub fn register_string_builtins(heap: &mut GcHeap, env: EnvRef) {
         ">string" => (to_string, "(>string <char1> [<char2> ..]) Create a string from the provided characters"),
         "string-upcase" => (string_upcase, "(string-upcase <string>) Convert a string to uppercase"),
         "string-downcase" => (string_downcase, "(string-downcase <string>) Convert a string to lowercase"),
-        "substring" => (substring, "(substring <string> <start> [<end>]) Extract a substring from the given string"),
-        "string-copy" => (string_copy, "(string-copy <string>) Create a copy of the given string"),
+        "substring" => (substring, "(substring <string> <start> <end>) The characters from index start up to, not including, end"),
+        "string-copy" => (string_copy, "(string-copy <string> [<start> [<end>]]) Copy all of string, or the characters from start up to, not including, end"),
         "string-append" => (string_append, "(string-append <string1> <string2> ..) Concatenate the provided strings"),
         "string-length" => (string_length, "(string-length <string>) Return the length of the given string"),
         "string-ref" => (string_ref, "(string-ref <string> <index>) Return the character at the given index"),
@@ -144,17 +144,41 @@ fn string_downcase(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
 }
 
 /// (substring string start end)
-/// Extract a substring from a string (equivalent to string-copy with the same arguments)
+/// The characters of `string` from index `start` up to, not including, `end`.
 fn substring(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() == 3 {
-        let start = get_integer(heap, args[1]).unwrap() as usize;
-        let end = get_integer(heap, args[2]).unwrap() as usize;
-        let string_val = get_string(heap, args[0])?;
-        let result = string_val[start..end + 1].to_string();
-        Ok(new_string(heap, result.as_str()))
-    } else {
-        Err("to-string expects string, start, end arguments".to_string())
+    if args.len() != 3 {
+        return Err("substring: expects string, start and end arguments".to_string());
     }
+    copy_range(heap, args, "substring")
+}
+
+/// The characters of `args[0]` between the optional start (`args[1]`,
+/// default 0) and end (`args[2]`, default the length) character indexes,
+/// end exclusive, as a new string. Indexes are checked rather than trusted:
+/// slicing a Rust `String` by them directly would panic on a bad range or a
+/// multi-byte character.
+fn copy_range(heap: &mut GcHeap, args: &[GcRef], name: &str) -> Result<GcRef, String> {
+    let s = get_string(heap, args[0]).map_err(|e| format!("{}: {}", name, e))?;
+    let len = s.chars().count();
+    let index = |heap: &mut GcHeap, i: usize, default: usize| -> Result<usize, String> {
+        match args.get(i) {
+            None => Ok(default),
+            Some(arg) => get_integer(heap, *arg)
+                .ok()
+                .and_then(|n| usize::try_from(n).ok())
+                .ok_or_else(|| format!("{}: index must be a non-negative integer", name)),
+        }
+    };
+    let start = index(heap, 1, 0)?;
+    let end = index(heap, 2, len)?;
+    if start > end || end > len {
+        return Err(format!(
+            "{}: range {}..{} is out of bounds for a string of length {}",
+            name, start, end, len
+        ));
+    }
+    let result: String = s.chars().skip(start).take(end - start).collect();
+    Ok(new_string(heap, &result))
 }
 
 /// (string-append string1 string2 ...)
@@ -175,28 +199,11 @@ fn string_append(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
 
 /// (string-copy string [start [end]])
 /// Create a new string by copying all or part of the given string.
-/// Start and end are optional, but if end is provided, start must also be provided.
 fn string_copy(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    let result;
-    match args.len() {
-        1 => {
-            let s = get_string(heap, args[0]).unwrap();
-            result = new_string(heap, s.as_str());
-        }
-        2 => {
-            let s = get_string(heap, args[0]).unwrap();
-            let start = get_integer(heap, args[1]).unwrap() as usize;
-            result = new_string(heap, &s.as_str()[start..]);
-        }
-        3 => {
-            let s = get_string(heap, args[0]).unwrap();
-            let start = get_integer(heap, args[1]).unwrap() as usize;
-            let end = get_integer(heap, args[2]).unwrap() as usize;
-            result = new_string(heap, &s[start..end]);
-        }
-        _ => return Err("string-copy expects 1 to 3 arguments".to_string()),
+    if args.is_empty() || args.len() > 3 {
+        return Err("string-copy expects 1 to 3 arguments".to_string());
     }
-    Ok(result)
+    copy_range(heap, args, "string-copy")
 }
 
 /// (string-length string)

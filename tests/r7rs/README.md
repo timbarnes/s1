@@ -38,10 +38,11 @@ baseline stays in step with the code. `S1_BIN` selects a prebuilt binary and
 Each section runs in its own process, so a reader desync or crash in one
 section cannot swallow the next ones.
 
-## Known blockers at the phase-0 baseline (320 passing)
+## Known blockers (412 passing after phase 2)
 
-- **6.7 Strings** stops after 8 tests: the reader mishandles `#\n` followed by
-  `)` (in `(string #\k ... #\n))`) and swallows the rest of the file (phase 2).
-- **4.3 Macros, Numeric syntax, Read syntax**: these need `define-syntax` /
-  `syntax-rules` (phase 5) and string ports (phase 8).
+- **Read syntax, Numeric syntax, 6.13 Input and output**: these need string
+  ports (phase 8); Numeric syntax also needs `syntax-rules` (phase 5).
+- **4.3 Macros**: needs `define-syntax` / `syntax-rules` (phase 5).
 - **6.11 Exceptions** and every `test-error`: these need `guard` / `raise` (phase 4).
+- **Rationals and complex numbers** are reported as parse errors ("not supported
+  yet" / "not supported"), as are bytevector literals until phase 7.

@@ -1,30 +1,27 @@
 //! Parser for Scheme s-expressions.
 //!
-//! This module provides a stateless parser that consumes tokens from a self-contained Tokenizer
-//! and produces unevaluated, interned s-expressions (SchemeValue) using the GC heap.
-//! The parser is designed to be extensible for additional Scheme forms and does not own any state.
+//! Turns the tokens of a `Tokenizer` into unevaluated s-expressions on the GC
+//! heap, one datum per `parse` call. Besides lists, vectors and the quote
+//! abbreviations it handles `#;` datum comments and `#n=` / `#n#` datum
+//! labels, which may make a datum refer to itself.
 //!
-//! # Example
-//!
-//! ```rust
-//! use s1::parser::Parser;
-//! use s1::tokenizer::Tokenizer;
-//! use s1::io::{Port, PortKind};
-//! use s1::gc::GcHeap;
-//!
-//! let mut heap = GcHeap::new();
-//! let mut port = new_string_port("42") };
-//! let mut parser = Parser::new();
-//! let expr = parser.parse(&mut heap, &mut port).unwrap();
-//! ```
+//! Errors come in two kinds. Structural ones (an unexpected `)`, a list left
+//! open at end of input) stop parsing at once. Errors in a complete token
+//! (an unknown character name, a bad escape, `1/2` or `#u8(...)` whose types
+//! s1 doesn't have yet) are remembered while the rest of the top-level datum
+//! is read, then reported. That leaves the port positioned after the datum,
+//! so a bad literal deep in a list doesn't make the reader misread the rest
+//! of the list as new top-level forms.
 
 use crate::gc::{
-    GcHeap, GcRef, get_symbol, new_bool, new_char, new_float, new_int, new_pair, new_string,
-    new_vector,
+    GcHeap, GcRef, SchemeValue, get_symbol, new_bool, new_char, new_float, new_int, new_pair,
+    new_string, new_vector,
 };
+use crate::gc_value_mut;
 use crate::io::PortKind;
+use crate::number_syntax::{Number, NumberSyntax, parse_number};
 use crate::tokenizer::{Token, Tokenizer};
-use num_bigint::BigInt;
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 #[derive(Debug, PartialEq)]
 pub enum ParseError {
@@ -32,191 +29,206 @@ pub enum ParseError {
     Syntax(String),
 }
 
-/// Parser for Scheme s-expressions using the reference-based GC system.
-///
-/// This parser uses GcRefSimple (&'static GcObject) for better performance and simpler code.
-/// The parser is stateless and consumes tokens from a Tokenizer, producing interned s-expressions
-/// (SchemeValue) using the GC heap. All state is passed as arguments.
-
-/// Parse a single s-expression from the token stream.
-///
-/// Returns Ok(GcRefSimple) for a valid s-expression, or Err(String) for a syntax error.
-///
-/// # Arguments
-/// * `heap` - The GC heap for allocating Scheme values
-/// * `port` - The input port to read from
+/// Parse a single datum from `port_ref`.
 pub fn parse(heap: &mut GcHeap, port_ref: &mut PortKind) -> Result<GcRef, ParseError> {
-    let mut tokenizer = Tokenizer::new(port_ref);
-    let token = tokenizer.next_token();
-    match token {
-        Some(Token::Quote) => parse_quoted_expression(heap, &mut tokenizer, "quote".to_string()),
-        Some(token) => parse_from_token(heap, Some(token), &mut tokenizer),
-        None => Err(ParseError::Eof),
+    let mut reader = Reader {
+        tokens: Tokenizer::new(port_ref),
+        heap,
+        labels: HashMap::default(),
+        deferred: None,
+    };
+    let token = reader.next_datum_token()?;
+    let datum = reader.datum(token)?;
+    match reader.deferred {
+        Some(msg) => Err(ParseError::Syntax(msg)),
+        None => Ok(datum),
     }
 }
 
-/// Parse a quoted expression (after encountering a quote token).
-fn parse_quoted_expression(
-    heap: &mut GcHeap,
-    tokenizer: &mut Tokenizer,
-    sym: String, //
-) -> Result<GcRef, ParseError> {
-    let next_token = tokenizer.next_token();
-    let quoted = parse_from_token(heap, next_token, tokenizer)?;
-    let quote_sym = get_symbol(heap, sym.as_str());
-    let nil = heap.nil_s();
-    let quoted_list = new_pair(heap, quoted, nil);
-    Ok(new_pair(heap, quote_sym, quoted_list))
+struct Reader<'a, 'b> {
+    tokens: Tokenizer<'a>,
+    heap: &'b mut GcHeap,
+    /// Datum labels defined so far in this top-level datum.
+    labels: HashMap<u64, GcRef>,
+    /// The first error found in a complete token; see the module docs.
+    deferred: Option<String>,
 }
 
-fn parse_number_token(heap: &mut GcHeap, s: &str) -> Result<GcRef, ParseError> {
-    if s.contains('.') || s.contains('e') || s.contains('E') {
-        // Parse as float if it looks like a float
-        if let Ok(f) = s.parse::<f64>() {
-            Ok(new_float(heap, f))
-        } else {
-            Err(ParseError::Syntax(format!("Invalid float literal: {}", s)))
-        }
-    } else {
-        // Parse as BigInt
-        if let Some(i) = BigInt::parse_bytes(s.as_bytes(), 10) {
-            Ok(new_int(heap, i))
-        } else {
-            Err(ParseError::Syntax(format!(
-                "Invalid integer literal: {}",
-                s
-            )))
-        }
+impl Reader<'_, '_> {
+    /// Remember `msg` (if it's the first error) and stand in a placeholder
+    /// value so reading can continue to the end of the datum.
+    fn defer(&mut self, msg: String) -> GcRef {
+        self.deferred.get_or_insert(msg);
+        self.heap.unspecified()
     }
-}
 
-fn parse_symbol_token(heap: &mut GcHeap, s: &str) -> Result<GcRef, ParseError> {
-    if s == "nil" || s == "()" {
-        Ok(heap.nil_s())
-    } else if s.starts_with("#\\") {
-        let ch = match &s[2..] {
-            "space" => Some(' '),
-            "newline" => Some('\n'),
-            rest if rest.len() == 1 => rest.chars().next(),
-            _ => None,
-        };
-        if let Some(c) = ch {
-            Ok(new_char(heap, c))
-        } else {
-            Err(ParseError::Syntax(format!(
-                "Invalid character literal: {}",
-                s
-            )))
-        }
-    } else {
-        Ok(get_symbol(heap, s))
-    }
-}
-
-fn parse_vector_token(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<GcRef, ParseError> {
-    let mut vec_elems = Vec::new();
-    loop {
-        let t = tokenizer.next_token();
-        if let Some(Token::RightBracket) = t {
-            break;
-        }
-        if let None = t {
-            return Err(ParseError::Syntax(
-                "Unclosed vector (unexpected EOF)".to_string(),
-            ));
-        }
-        vec_elems.push(parse_from_token(heap, t, tokenizer)?);
-    }
-    Ok(new_vector(heap, vec_elems))
-}
-
-fn parse_hash_vector(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<GcRef, ParseError> {
-    let list = parse_list(heap, tokenizer)?;
-    let vec = crate::gc::list_to_vec(heap, list);
-    match vec {
-        Ok(vec) => Ok(new_vector(heap, vec)),
-        Err(err) => Err(ParseError::Syntax(format!(
-            "Error converting list to vector: {}",
-            err
-        ))),
-    }
-    //Ok(new_vector(heap, vec))
-}
-
-/// Parse an s-expression from a given token (used for list elements and recursive parsing).
-fn parse_from_token(
-    heap: &mut GcHeap,
-    token: Option<Token>,
-    tokenizer: &mut Tokenizer,
-) -> Result<GcRef, ParseError> {
-    match token {
-        Some(Token::Number(s)) => parse_number_token(heap, &s),
-        Some(Token::String(s)) => Ok(new_string(heap, &s)),
-        Some(Token::Boolean(b)) => Ok(new_bool(heap, b)),
-        Some(Token::Character(c)) => Ok(new_char(heap, c)),
-        Some(Token::Symbol(s)) => parse_symbol_token(heap, &s),
-        Some(Token::LeftParen) => parse_list(heap, tokenizer),
-        Some(Token::RightParen) => Err(ParseError::Syntax("Unexpected ')'".to_string())),
-        Some(Token::Dot) => Err(ParseError::Syntax("Unexpected '.'".to_string())),
-        Some(Token::Quote) => parse_quoted_expression(heap, tokenizer, "quote".to_string()),
-        Some(Token::LeftBracket) => parse_vector_token(heap, tokenizer),
-        Some(Token::RightBracket) => Err(ParseError::Syntax("Unexpected ']'".to_string())),
-        Some(Token::HashParen) => parse_hash_vector(heap, tokenizer),
-        Some(Token::QuasiQuote) => {
-            parse_quoted_expression(heap, tokenizer, "quasiquote".to_string())
-        }
-        Some(Token::Unquote) => parse_quoted_expression(heap, tokenizer, "unquote".to_string()),
-        Some(Token::UnquoteSplicing) => {
-            parse_quoted_expression(heap, tokenizer, "unquote-splicing".to_string())
-        }
-        Some(Token::Eof) => Err(ParseError::Eof),
-        None => Err(ParseError::Eof),
-    }
-}
-
-/// Parse a Scheme list (after encountering a left parenthesis).
-fn parse_list(heap: &mut GcHeap, tokenizer: &mut Tokenizer) -> Result<GcRef, ParseError> {
-    let mut elements = Vec::new();
-    loop {
-        let token = tokenizer.next_token();
-        match token {
-            Some(Token::RightParen) => {
-                // End of list
-                let mut list = heap.nil_s();
-                for elem in elements.into_iter().rev() {
-                    list = new_pair(heap, elem, list);
+    /// The next token that can start a datum, after skipping `#;` comments.
+    fn next_datum_token(&mut self) -> Result<Token, ParseError> {
+        loop {
+            match self.tokens.next_token() {
+                Some(Token::DatumComment) => {
+                    let commented = self.next_datum_token()?;
+                    self.datum(commented)?;
                 }
-                return Ok(list);
+                Some(token) => return Ok(token),
+                None => return Ok(Token::Eof),
             }
-            None | Some(Token::Eof) => {
-                return Err(ParseError::Syntax(
-                    "Unclosed list (unexpected EOF)".to_string(),
-                ));
+        }
+    }
+
+    fn datum(&mut self, token: Token) -> Result<GcRef, ParseError> {
+        Ok(match token {
+            Token::Eof => return Err(ParseError::Eof),
+            Token::Number(s) => match parse_number(&s, 10) {
+                NumberSyntax::Value(Number::Int(i)) => new_int(self.heap, i),
+                NumberSyntax::Value(Number::Float(f)) => new_float(self.heap, f),
+                NumberSyntax::Error(msg) => self.defer(msg),
+                NumberSyntax::NotANumber => self.defer(format!("invalid number {}", s)),
+            },
+            Token::String(s) => new_string(self.heap, &s),
+            Token::Boolean(b) => new_bool(self.heap, b),
+            Token::Character(c) => new_char(self.heap, c),
+            // `nil` reads as the empty list: an s1 extension, used widely in
+            // its own Scheme code. `|nil|` is the plain symbol.
+            Token::Symbol(s) if s == "nil" => self.heap.nil_s(),
+            Token::Symbol(s) | Token::BarSymbol(s) => get_symbol(self.heap, &s),
+            Token::LeftParen => self.list(Token::RightParen)?,
+            Token::LeftBracket => {
+                let elems = self.sequence(Token::RightBracket, "vector")?;
+                new_vector(self.heap, elems)
             }
-            Some(Token::Dot) => {
-                // Dotted pair: (a b . c)
-                let tail = parse_from_token(heap, tokenizer.next_token(), tokenizer)?;
-                if let Some(Token::RightParen) = tokenizer.next_token() {
-                    let mut list = tail;
-                    for elem in elements.into_iter().rev() {
-                        list = new_pair(heap, elem, list);
+            Token::HashParen => {
+                let elems = self.sequence(Token::RightParen, "vector")?;
+                new_vector(self.heap, elems)
+            }
+            Token::ByteVectorStart => {
+                self.sequence(Token::RightParen, "bytevector")?;
+                self.defer("bytevectors are not supported yet".to_string())
+            }
+            Token::Quote => self.abbreviation("quote")?,
+            Token::QuasiQuote => self.abbreviation("quasiquote")?,
+            Token::Unquote => self.abbreviation("unquote")?,
+            Token::UnquoteSplicing => self.abbreviation("unquote-splicing")?,
+            Token::LabelDef(n) => self.labelled(n)?,
+            Token::LabelRef(n) => match self.labels.get(&n) {
+                Some(datum) => *datum,
+                None => self.defer(format!("undefined datum label #{}#", n)),
+            },
+            Token::Error(msg) => self.defer(msg),
+            Token::RightParen => return Err(ParseError::Syntax("Unexpected ')'".to_string())),
+            Token::RightBracket => return Err(ParseError::Syntax("Unexpected ']'".to_string())),
+            Token::Dot => return Err(ParseError::Syntax("Unexpected '.'".to_string())),
+            Token::DatumComment => {
+                // next_datum_token never hands these out
+                return Err(ParseError::Syntax("Unexpected #;".to_string()));
+            }
+        })
+    }
+
+    /// `'x` and friends: `(name x)`.
+    fn abbreviation(&mut self, name: &str) -> Result<GcRef, ParseError> {
+        let token = self.next_datum_token()?;
+        let quoted = self.datum(token)?;
+        let sym = get_symbol(self.heap, name);
+        let nil = self.heap.nil_s();
+        let tail = new_pair(self.heap, quoted, nil);
+        Ok(new_pair(self.heap, sym, tail))
+    }
+
+    /// The elements of a vector or bytevector, up to `close`.
+    fn sequence(&mut self, close: Token, what: &str) -> Result<Vec<GcRef>, ParseError> {
+        let mut elems = Vec::new();
+        loop {
+            match self.next_datum_token()? {
+                t if t == close => return Ok(elems),
+                Token::Eof => {
+                    return Err(ParseError::Syntax(format!("Unclosed {} (unexpected EOF)", what)));
+                }
+                t => elems.push(self.datum(t)?),
+            }
+        }
+    }
+
+    /// A list after its opening parenthesis, possibly dotted.
+    fn list(&mut self, close: Token) -> Result<GcRef, ParseError> {
+        let mut elems = Vec::new();
+        let mut tail = self.heap.nil_s();
+        loop {
+            match self.next_datum_token()? {
+                t if t == close => break,
+                Token::Eof => {
+                    return Err(ParseError::Syntax("Unclosed list (unexpected EOF)".to_string()));
+                }
+                Token::Dot if !elems.is_empty() => {
+                    let t = self.next_datum_token()?;
+                    tail = self.datum(t)?;
+                    if self.next_datum_token()? != close {
+                        return Err(ParseError::Syntax(
+                            "Expected ')' after dotted pair".to_string(),
+                        ));
                     }
-                    return Ok(list);
-                } else {
-                    return Err(ParseError::Syntax(
-                        "Expected ')' after dotted pair".to_string(),
-                    ));
+                    break;
+                }
+                t => elems.push(self.datum(t)?),
+            }
+        }
+        for elem in elems.into_iter().rev() {
+            tail = new_pair(self.heap, elem, tail);
+        }
+        Ok(tail)
+    }
+
+    /// `#n=datum`. References to `#n#` inside the datum are read as a
+    /// placeholder, which is then replaced by the datum itself.
+    fn labelled(&mut self, n: u64) -> Result<GcRef, ParseError> {
+        let nil = self.heap.nil_s();
+        let placeholder = new_pair(self.heap, nil, nil);
+        self.labels.insert(n, placeholder);
+        let token = self.next_datum_token()?;
+        let datum = self.datum(token)?;
+        if datum == placeholder {
+            return Ok(self.defer(format!("datum label #{}= refers only to itself", n)));
+        }
+        self.labels.insert(n, datum);
+        replace_refs(datum, placeholder, datum);
+        Ok(datum)
+    }
+}
+
+/// Replace every reference to `from` inside the pairs and vectors reachable
+/// from `root` with `to`. The structure may already be cyclic, so each
+/// object is visited once.
+fn replace_refs(root: GcRef, from: GcRef, to: GcRef) {
+    let mut seen = HashSet::default();
+    let mut work = vec![root];
+    let swap = |slot: &mut GcRef| {
+        if *slot == from {
+            *slot = to;
+        }
+    };
+    while let Some(obj) = work.pop() {
+        if !seen.insert(obj) {
+            continue;
+        }
+        match gc_value_mut!(obj) {
+            SchemeValue::Pair(car, cdr) => {
+                swap(car);
+                swap(cdr);
+                work.push(*car);
+                work.push(*cdr);
+            }
+            SchemeValue::Vector(elems) => {
+                for elem in elems.iter_mut() {
+                    swap(elem);
+                    work.push(*elem);
                 }
             }
-            Some(token) => {
-                // Parse the element directly from the token
-                let elem = parse_from_token(heap, Some(token), tokenizer)?;
-                elements.push(elem);
-            }
+            _ => {}
         }
     }
 }
 
+#[cfg(test)]
 mod tests {
     #[allow(unused_imports)]
     use super::*;
@@ -463,5 +475,72 @@ mod tests {
             SchemeValue::Float(f) => assert_eq!(*f, 3.14),
             _ => panic!("Expected float, got {}", print_value(&expr)),
         }
+    }
+
+    fn read_all(s: &str) -> Vec<Result<String, ParseError>> {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let ec = crate::eval::RunTime::from_eval(&mut ev);
+        let mut port = crate::io::new_string_port_input(s);
+        let mut out = Vec::new();
+        loop {
+            match parse(ec.heap, &mut port) {
+                Err(ParseError::Eof) => return out,
+                r => out.push(r.map(|v| crate::printer::print_value(&v))),
+            }
+        }
+    }
+
+    #[test]
+    fn parse_datum_comments() {
+        assert_eq!(
+            read_all("(1 #;(2 3) 4) #;5 6 (#;7)"),
+            vec![Ok("(1 4)".to_string()), Ok("6".to_string()), Ok("()".to_string())]
+        );
+    }
+
+    #[test]
+    fn parse_datum_labels() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let ec = crate::eval::RunTime::from_eval(&mut ev);
+        let mut port = crate::io::new_string_port_input("#0=(a b . #0#)");
+        let expr = parse(ec.heap, &mut port).unwrap();
+        let third = crate::gc::cdr(crate::gc::cdr(expr).unwrap()).unwrap();
+        assert!(std::ptr::eq(third, expr), "the tail refers back to the list");
+
+        assert_eq!(read_all("(#1=(x) #1#)"), vec![Ok("((x) (x))".to_string())]);
+        assert!(matches!(read_all("#2#")[..], [Err(ParseError::Syntax(_))]));
+    }
+
+    #[test]
+    fn parse_unsupported_values_keep_reader_in_sync() {
+        // Each error is reported after its whole datum, so the next datum
+        // reads normally.
+        let results = read_all("(1 1/2 3) ok1 #u8(1 2) ok2 (#\\bogus x) ok3 1+2i ok4");
+        let msgs: Vec<String> = results
+            .iter()
+            .map(|r| match r {
+                Ok(s) => s.clone(),
+                Err(ParseError::Syntax(m)) => format!("ERR {}", m),
+                Err(ParseError::Eof) => "EOF".to_string(),
+            })
+            .collect();
+        assert_eq!(msgs.len(), 8, "{:?}", msgs);
+        assert!(msgs[0].contains("rational numbers are not supported yet"));
+        assert_eq!(msgs[1], "ok1");
+        assert!(msgs[2].contains("bytevectors are not supported yet"));
+        assert_eq!(msgs[3], "ok2");
+        assert!(msgs[4].contains("unknown character name"));
+        assert_eq!(msgs[5], "ok3");
+        assert!(msgs[6].contains("complex numbers are not supported"));
+        assert_eq!(msgs[7], "ok4");
+    }
+
+    #[test]
+    fn parse_nil_and_bar_symbols() {
+        assert_eq!(read_all("nil |nil| |a b|"), vec![
+            Ok("()".to_string()),
+            Ok("|nil|".to_string()),
+            Ok("|a b|".to_string()),
+        ]);
     }
 }

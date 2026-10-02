@@ -52,6 +52,7 @@ fn print_into(out: &mut String, obj: GcRef, write: bool) {
         }
         // The values of a `(values ...)` package that reached a printer.
         Values(v) => print_separated(out, v, write),
+        Symbol(s) if write => write_symbol(out, s),
         Symbol(s) => out.push_str(s),
         Int(i) => out.push_str(&i.to_string()),
         Float(f) => out.push_str(&format_float(*f)),
@@ -99,6 +100,46 @@ pub fn format_float(f: f64) -> String {
     } else {
         format!("{:?}", f)
     }
+}
+
+/// Write a symbol, in `|...|` form when its bare name would read back as
+/// something else.
+fn write_symbol(out: &mut String, s: &str) {
+    if !needs_bars(s) {
+        out.push_str(s);
+        return;
+    }
+    out.push('|');
+    for c in s.chars() {
+        match c {
+            '|' => out.push_str("\\|"),
+            '\\' => out.push_str("\\\\"),
+            c if c.is_control() => out.push_str(&format!("\\x{:x};", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('|');
+}
+
+fn needs_bars(s: &str) -> bool {
+    let mut chars = s.chars();
+    let Some(first) = chars.next() else {
+        return true; // the empty symbol
+    };
+    let second = chars.next();
+    let numeric_start = first.is_ascii_digit()
+        || (first == '.' && second.is_some_and(|c| c.is_ascii_digit()))
+        || (matches!(first, '+' | '-')
+            && (second.is_some_and(|c| c.is_ascii_digit() || c == '.')
+                || s[1..].to_ascii_lowercase().starts_with("inf")
+                || s[1..].to_ascii_lowercase().starts_with("nan")));
+    s == "."
+        // `nil` reads as the empty list in s1
+        || s == "nil"
+        || first == '#'
+        || numeric_start
+        || crate::number_syntax::parse_number(s, 10) != crate::number_syntax::NumberSyntax::NotANumber
+        || s.chars().any(|c| c.is_whitespace() || c.is_control() || "()[]\";'`,|\\".contains(c))
 }
 
 /// Write a string literal with the escapes R7RS's reader understands.
@@ -222,6 +263,28 @@ mod tests {
         assert_eq!(print_value(&new_float(heap, f64::INFINITY)), "+inf.0");
         assert_eq!(print_value(&new_float(heap, f64::NEG_INFINITY)), "-inf.0");
         assert_eq!(print_value(&new_float(heap, f64::NAN)), "+nan.0");
+
+        // Symbols that wouldn't read back bare are written with bars.
+        for (name, written) in [
+            ("abc", "abc"),
+            ("->x", "->x"),
+            ("...", "..."),
+            ("a b", "|a b|"),
+            ("", "||"),
+            (".", "|.|"),
+            ("2", "|2|"),
+            ("+3", "|+3|"),
+            ("-.4", "|-.4|"),
+            ("+i", "|+i|"),
+            ("+NaN.0abc", "|+NaN.0abc|"),
+            ("|", "|\\||"),
+            ("\\123", "|\\\\123|"),
+            ("nil", "|nil|"),
+        ] {
+            let sym = heap.intern_symbol(name);
+            assert_eq!(print_value(&sym), written, "symbol {:?}", name);
+            assert_eq!(display_value(&sym), name);
+        }
 
         // display reaches strings and characters nested in a list.
         let c = new_char(heap, 'x');

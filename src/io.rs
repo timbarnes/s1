@@ -32,6 +32,10 @@ pub enum PortKind {
     StringPortInput {
         content: String,
         pos: Cell<usize>,
+        /// Set by the `#!fold-case` directive (cleared by `#!no-fold-case`):
+        /// the reader then folds identifiers and character names to lower
+        /// case for the rest of this port.
+        fold_case: Cell<bool>,
     },
     // In-memory string port for output with accumulating content
     StringPortOutput {
@@ -56,9 +60,14 @@ impl Clone for PortKind {
                 write: *write,
                 pos: Cell::new(pos.get()),
             },
-            PortKind::StringPortInput { content, pos } => PortKind::StringPortInput {
+            PortKind::StringPortInput {
+                content,
+                pos,
+                fold_case,
+            } => PortKind::StringPortInput {
                 content: content.clone(),
                 pos: Cell::new(pos.get()),
+                fold_case: Cell::new(fold_case.get()),
             },
             PortKind::StringPortOutput { content } => PortKind::StringPortOutput {
                 content: content.clone(),
@@ -91,10 +100,12 @@ impl PartialEq for PortKind {
                 PortKind::StringPortInput {
                     content: c1,
                     pos: p1,
+                    ..
                 },
                 PortKind::StringPortInput {
                     content: c2,
                     pos: p2,
+                    ..
                 },
             ) => c1 == c2 && p1.get() == p2.get(),
             (
@@ -109,7 +120,7 @@ impl PartialEq for PortKind {
 impl PortKind {
     pub fn next_char_utf8(&mut self) -> Option<char> {
         match self {
-            PortKind::StringPortInput { content, pos } => {
+            PortKind::StringPortInput { content, pos, .. } => {
                 let mut p = pos.get();
                 if p >= content.len() {
                     return None;
@@ -121,31 +132,78 @@ impl PortKind {
                 pos.set(p);
                 Some(ch)
             }
-            PortKind::Stdin => {
-                io::stdout().flush().ok();
-                let stdin = io::stdin();
-                let mut handle = stdin.lock();
-                let mut buf = [0u8; 4]; // max size of UTF-8 char
-                let mut first = [0u8; 1];
-                if handle.read_exact(&mut first).is_err() {
-                    return None;
-                }
-
-                let needed = utf8_char_width(first[0]);
-                buf[0] = first[0];
-                if needed > 1 {
-                    if handle.read_exact(&mut buf[1..needed]).is_err() {
-                        return None;
-                    }
-                }
-
-                std::str::from_utf8(&buf[..needed])
-                    .ok()
-                    .and_then(|s| s.chars().next())
-            }
+            PortKind::Stdin => stdin_next_char(),
             _ => todo!("next_char_utf8 PortKind types"),
         }
     }
+
+    /// Push back `c`, the character most recently read from this port, so
+    /// the next read returns it again. Several characters can be pushed back
+    /// as long as it is done in reverse order of reading. The reader relies
+    /// on this to look ahead without losing characters between datums.
+    pub fn unread_char(&mut self, c: char) {
+        match self {
+            PortKind::StringPortInput { pos, .. } => pos.set(pos.get() - c.len_utf8()),
+            PortKind::Stdin => STDIN_STATE.with(|st| st.borrow_mut().pushback.push(c)),
+            _ => {}
+        }
+    }
+
+    /// Whether `#!fold-case` is in effect for this port.
+    pub fn fold_case(&self) -> bool {
+        match self {
+            PortKind::StringPortInput { fold_case, .. } => fold_case.get(),
+            PortKind::Stdin => STDIN_STATE.with(|st| st.borrow().fold_case),
+            _ => false,
+        }
+    }
+
+    pub fn set_fold_case(&mut self, on: bool) {
+        match self {
+            PortKind::StringPortInput { fold_case, .. } => fold_case.set(on),
+            PortKind::Stdin => STDIN_STATE.with(|st| st.borrow_mut().fold_case = on),
+            _ => {}
+        }
+    }
+}
+
+/// Reader state for standard input, which (unlike a string port) has no
+/// position to rewind or field to hold it. There is only one stdin.
+#[derive(Default)]
+struct StdinState {
+    pushback: Vec<char>,
+    fold_case: bool,
+}
+
+thread_local! {
+    static STDIN_STATE: std::cell::RefCell<StdinState> = Default::default();
+}
+
+/// Read one UTF-8 character from stdin, after any pushed-back characters.
+fn stdin_next_char() -> Option<char> {
+    if let Some(c) = STDIN_STATE.with(|st| st.borrow_mut().pushback.pop()) {
+        return Some(c);
+    }
+    io::stdout().flush().ok();
+    let stdin = io::stdin();
+    let mut handle = stdin.lock();
+    let mut buf = [0u8; 4]; // max size of UTF-8 char
+    let mut first = [0u8; 1];
+    if handle.read_exact(&mut first).is_err() {
+        return None;
+    }
+
+    let needed = utf8_char_width(first[0]);
+    buf[0] = first[0];
+    if needed > 1 {
+        if handle.read_exact(&mut buf[1..needed]).is_err() {
+            return None;
+        }
+    }
+
+    std::str::from_utf8(&buf[..needed])
+        .ok()
+        .and_then(|s| s.chars().next())
 }
 
 /// UTF-8 width helper
@@ -254,14 +312,7 @@ pub fn write_line(port_kind: &mut PortKind, file_table: &mut FileTable, line: &s
 ///
 pub fn read_char(port_kind: &PortKind, file_table: &mut FileTable) -> Option<char> {
     match port_kind {
-        PortKind::Stdin => {
-            io::stdout().flush().ok();
-            let mut buf = [0u8; 1];
-            match std::io::stdin().read_exact(&mut buf) {
-                Ok(_) => Some(buf[0] as char),
-                Err(_) => None,
-            }
-        }
+        PortKind::Stdin => stdin_next_char(),
         PortKind::Stdout => None,
         PortKind::Stderr => None,
         PortKind::File { id, pos, .. } => {
@@ -279,7 +330,7 @@ pub fn read_char(port_kind: &PortKind, file_table: &mut FileTable) -> Option<cha
                 None
             }
         }
-        PortKind::StringPortInput { content, pos } => {
+        PortKind::StringPortInput { content, pos, .. } => {
             let current_pos = pos.get();
             if current_pos < content.len() {
                 let ch = content[current_pos..].chars().next().unwrap();
@@ -329,7 +380,7 @@ pub fn write_char(port_kind: &PortKind, file_table: &mut FileTable, ch: char) ->
 /// Currently only supported for String ports.
 pub fn peek_char(port_kind: &PortKind, _file_table: &mut FileTable) -> Option<char> {
     match port_kind {
-        PortKind::StringPortInput { content, pos } => {
+        PortKind::StringPortInput { content, pos, .. } => {
             let p = pos.get();
             if p >= content.len() {
                 None
@@ -347,7 +398,7 @@ pub fn peek_char(port_kind: &PortKind, _file_table: &mut FileTable) -> Option<ch
 /// and `false` otherwise.
 pub fn char_ready(port_kind: &PortKind) -> bool {
     match port_kind {
-        PortKind::StringPortInput { content, pos } => pos.get() < content.len(),
+        PortKind::StringPortInput { content, pos, .. } => pos.get() < content.len(),
         PortKind::File { .. } => true, // Assume file is always ready until EOF
         PortKind::Stdin => false,      // Stdin blocking check not supported
         _ => false,
@@ -363,6 +414,7 @@ pub fn new_string_port_input(content: &str) -> PortKind {
     PortKind::StringPortInput {
         content: content.to_string(),
         pos: Cell::new(0),
+        fold_case: Cell::new(false),
     }
 }
 
@@ -402,11 +454,14 @@ pub fn update_string_port_pos(port_kind: &mut PortKind, new_pos: usize) -> bool 
 }
 
 /// Extract a PortKind from aScheme port
-pub fn port_kind_from_scheme_port(rt: &mut RunTime, scheme_port: GcRef) -> PortKind {
+pub fn port_kind_from_scheme_port(rt: &mut RunTime, scheme_port: GcRef) -> Result<PortKind, String> {
     let s_p = rt.heap.get_value(scheme_port);
     match s_p {
-        crate::gc::SchemeValue::Port(kind) => (**kind).clone(),
-        _ => panic!("Expected port object"),
+        crate::gc::SchemeValue::Port(kind) => Ok((**kind).clone()),
+        _ => Err(format!(
+            "expected a port, got {}",
+            crate::printer::print_value(&scheme_port)
+        )),
     }
 }
 
@@ -422,11 +477,12 @@ mod tests {
         let orig_port_kind = PortKind::StringPortInput {
             content: "hello".to_string(),
             pos: Cell::new(0),
+            fold_case: Cell::new(false),
         };
         //let original_port = crate::gc::new_port(&mut heap, port_kind);
 
         let scheme_port = crate::gc::new_port(&mut rt.heap, orig_port_kind.clone());
-        let converted_port = port_kind_from_scheme_port(&mut rt, scheme_port);
+        let converted_port = port_kind_from_scheme_port(&mut rt, scheme_port).unwrap();
 
         assert_eq!(&orig_port_kind, &converted_port);
     }
