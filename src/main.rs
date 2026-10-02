@@ -7,6 +7,7 @@ mod number_syntax;
 mod parser;
 mod printer;
 mod special_forms;
+mod syntax_rules;
 mod sys_builtins;
 mod tokenizer;
 mod utilities;
