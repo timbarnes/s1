@@ -5,11 +5,13 @@
 ;; yet (plan phase 5). Load it before r7rs-tests.scm; run.sh does this.
 ;;
 ;; Counting: every test bumps %r7rs-attempted before its expression is
-;; evaluated. s1 has no exception system yet (plan phase 4), so an error inside
-;; a test aborts the whole enclosing top-level form; the test never reports
-;; and is counted as an error when the next test (or test-end) notices the
-;; pending one. Tests in a top-level form that aborted before reaching them are
-;; never attempted at all; run.sh reports those as "not reached".
+;; evaluated, inside a `guard`. A test whose expression raises is counted as
+;; an error (or a pass, for test-error) and the next test runs normally. If
+;; something still escapes the guard, the test never reports; it is counted
+;; as an error when the next test (or test-end) notices the pending one.
+;; Tests in a top-level form that failed before reaching them (say, a
+;; definition the form needs raised) are never attempted at all; run.sh
+;; reports those as "not reached".
 
 ;; No library system yet (plan phase 9): accept and ignore (import ...).
 (define import (macro args #t))
@@ -68,8 +70,25 @@
 
 (define (%r7rs-check name expr expected thunk)
   (%r7rs-start expr)
-  (let ((actual (thunk)))
-    (%r7rs-report (%r7rs-equal? expected actual) name expr expected actual)))
+  (guard (e (#t (%r7rs-raised name expr e)))
+    (let ((actual (thunk)))
+      (%r7rs-report (%r7rs-equal? expected actual) name expr expected actual))))
+
+;; A test's expression raised `e`.
+(define (%r7rs-raised name expr e)
+  (set! %r7rs-pending #f)
+  (set! %r7rs-error (+ %r7rs-error 1))
+  (display "ERROR: [")
+  (display (%r7rs-section-name))
+  (display "] ")
+  (if name (begin (write name) (display " ")))
+  (write expr)
+  (display " raised ")
+  (if (error-object? e)
+      (begin (display (error-object-message e))
+             (for-each (lambda (i) (display " ") (write i)) (error-object-irritants e)))
+      (write e))
+  (newline))
 
 ;; (test [name] expected expr)
 (define test
@@ -87,8 +106,9 @@
           (expr (if (= (length args) 2) (cadr args) (car args))))
       `(begin
          (%r7rs-start ',expr)
-         (let ((actual ,expr))
-           (%r7rs-report (if actual #t #f) ,name ',expr #t actual))))))
+         (guard (e (#t (%r7rs-raised ,name ',expr e)))
+           (let ((actual ,expr))
+             (%r7rs-report (if actual #t #f) ,name ',expr #t actual)))))))
 
 ;; (test-values expected-expr expr): compares all returned values.
 (define test-values
@@ -97,15 +117,14 @@
                   (call-with-values (lambda () ,expected) list)
                   (lambda () (call-with-values (lambda () ,expr) list)))))
 
-;; (test-error expr): passes when expr signals an error. Until s1 can catch
-;; errors (plan phase 4), a correct signal aborts the form and lands in the
-;; error count; only a wrong "no error" outcome can be reported, as a FAIL.
+;; (test-error expr): passes when expr raises.
 (define test-error
   (macro (expr)
     `(begin
        (%r7rs-start ',expr)
-       (let ((actual ,expr))
-         (%r7rs-report #f #f ',expr 'an-error actual)))))
+       (guard (e (#t (%r7rs-report #t #f ',expr 'an-error e)))
+         (let ((actual ,expr))
+           (%r7rs-report #f #f ',expr 'an-error actual))))))
 
 (define (test-begin . name)
   (%r7rs-settle-pending)

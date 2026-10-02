@@ -296,6 +296,23 @@ pub fn new_rational(heap: &mut GcHeap, val: num_rational::BigRational) -> GcRef 
     })
 }
 
+/// Create a new error object.
+pub fn new_error_object(
+    heap: &mut GcHeap,
+    kind: super::ErrorKind,
+    message: GcRef,
+    irritants: GcRef,
+) -> GcRef {
+    heap.alloc(GcObject {
+        value: SchemeValue::ErrorObject(Box::new(super::ErrorObject {
+            kind,
+            message,
+            irritants,
+        })),
+        marked: 0,
+    })
+}
+
 /// Create a new vector.
 pub fn new_vector(heap: &mut GcHeap, elements: Vec<GcRef>) -> GcRef {
     let obj = GcObject {
@@ -332,12 +349,14 @@ pub fn new_continuation(
     kont: KontRef,
     dw_stack: Vec<DynamicWind>,
     arg_stack: Vec<GcRef>,
+    handlers: GcRef,
 ) -> GcRef {
     let obj = GcObject {
         value: SchemeValue::Continuation(Box::new(super::ContinuationData {
             kont,
             dw_stack,
             arg_stack,
+            handlers,
         })),
         marked: 0,
     };

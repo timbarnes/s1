@@ -60,6 +60,7 @@ pub fn type_of(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
         },
         SchemeValue::Nil => "null",
         SchemeValue::Port(_) => "port",
+        SchemeValue::ErrorObject(_) => "error-object",
         _ => "unknown",
     };
     Ok(get_symbol(heap, type_name))

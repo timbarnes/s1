@@ -76,6 +76,17 @@ fn print_into(out: &mut String, obj: GcRef, write: bool) {
         }),
         Port(port) => out.push_str(&format!("Port<{:?}>", port)),
         Continuation(k) => out.push_str(&format!("Continuation<{:?}>", k.kont)),
+        ErrorObject(e) => {
+            out.push_str("#<error ");
+            print_into(out, e.message, true);
+            let mut rest = e.irritants;
+            while let Pair(car, cdr) = gc_value!(rest) {
+                out.push(' ');
+                print_into(out, *car, true);
+                rest = *cdr;
+            }
+            out.push('>');
+        }
         TailCallScheduled => out.push_str("print_value: unprintable."),
     }
 }

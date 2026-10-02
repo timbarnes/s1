@@ -160,9 +160,31 @@ pub enum SchemeValue {
     TailCallScheduled,
     Port(Box<PortKind>),
     Continuation(Box<ContinuationData>),
+    /// A condition made by `error`, or by a built-in procedure failing.
+    ErrorObject(Box<ErrorObject>),
     Eof,
     Void,
     Undefined,
+}
+
+/// Which `...-error?` predicate an error object satisfies.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ErrorKind {
+    /// From `error`, or a built-in procedure's failure
+    General,
+    /// `read` met malformed input (`read-error?`)
+    Read,
+    /// A file could not be opened (`file-error?`)
+    File,
+}
+
+#[derive(Debug)]
+pub struct ErrorObject {
+    pub kind: ErrorKind,
+    /// Usually a string; `error` accepts any object
+    pub message: GcRef,
+    /// A proper list
+    pub irritants: GcRef,
 }
 
 /// A captured continuation: everything `escape` has to reinstate.
@@ -176,6 +198,8 @@ pub struct ContinuationData {
     /// `args_base` indices — plus any arguments they had already evaluated —
     /// refer to this stack as it was then, not as it is when `k` is invoked.
     pub arg_stack: Vec<GcRef>,
+    /// The exception handler list (`RunTime::handlers`) at capture.
+    pub handlers: GcRef,
 }
 
 // Keeps `GcObject` in a 48-byte allocation (one object per cache line). A new

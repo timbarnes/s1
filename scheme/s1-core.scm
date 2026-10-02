@@ -1,8 +1,5 @@
 ;; s1-core.scm: Scheme-level core predicates and utilities
 
-(define error (lambda msg
-    "(error msg ...) displays msg and any additional arguments followed by a newline; used to report a condition since there is no error/condition system"
-    (apply displayln msg)))
 ;; Type predicates using type-of function
 (define float? (lambda (x)
     "(float? x) returns #t if x is a float, otherwise #f"

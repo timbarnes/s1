@@ -218,6 +218,17 @@ impl GcHeap {
         symbol_ref
     }
 
+    /// A new symbol that is not in the symbol table: distinct from every
+    /// other symbol, including the interned one with the same name. Used for
+    /// temporaries in code the interpreter builds, so they can't capture or
+    /// be captured by user variables.
+    pub fn fresh_symbol(&mut self, name: &str) -> GcRef {
+        self.alloc(GcObject {
+            value: SchemeValue::Symbol(name.to_string()),
+            marked: 0,
+        })
+    }
+
     /// Get statistics about the symbol table.
     pub fn symbol_table_stats(&self) -> usize {
         self.symbol_table.len()
@@ -242,6 +253,7 @@ impl GcHeap {
         port_stack: &[GcRef],
         dynamic_wind: &[DynamicWind],
         arg_stack: &[GcRef],
+        handlers: GcRef,
     ) {
         // println!("GC: Starting collection, {} objects, {} ports in stack",
         //          self.objects.len(), port_stack.len());
@@ -256,7 +268,7 @@ impl GcHeap {
         // Mirror it for env::Frame's own visited-this-epoch tracking (F6);
         // see `crate::gc::GC_EPOCH`.
         crate::gc::GC_EPOCH.store(self.current_epoch, std::sync::atomic::Ordering::Relaxed);
-        self.mark_from(state, current_output_port, port_stack, dynamic_wind, arg_stack);
+        self.mark_from(state, current_output_port, port_stack, dynamic_wind, arg_stack, handlers);
         self.sweep();
     }
 
@@ -267,6 +279,7 @@ impl GcHeap {
         port_stack: &[GcRef],
         dynamic_wind: &[DynamicWind],
         arg_stack: &[GcRef],
+        handlers: GcRef,
     ) {
         // Copied out so the marking closures below don't need to borrow
         // `self` (they already borrow `self.worklist` mutably).
@@ -294,6 +307,9 @@ impl GcHeap {
         for arg in arg_stack {
             mark_reachable(*arg, epoch, &mut self.worklist);
         }
+
+        // The exception handler list
+        mark_reachable(handlers, epoch, &mut self.worklist);
 
         // Singleton objects
         for &obj in [
@@ -393,6 +409,11 @@ fn mark_reachable(start: GcRef, epoch: u64, worklist: &mut Vec<GcRef>) {
                 for arg in &k.arg_stack {
                     push_if_unmarked(*arg, epoch, worklist);
                 }
+                push_if_unmarked(k.handlers, epoch, worklist);
+            }
+            SchemeValue::ErrorObject(e) => {
+                push_if_unmarked(e.message, epoch, worklist);
+                push_if_unmarked(e.irritants, epoch, worklist);
             }
             _ => {}
         }

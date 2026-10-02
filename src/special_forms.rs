@@ -56,6 +56,7 @@ pub fn register_special_forms(heap: &mut GcHeap, env: EnvRef) {
         "unquote" => unquote_sf,
         "unquote-splicing" => unquote_splicing_sf,
         "with-timer" => with_timer_sf,
+        "guard" => guard_sf,
     );
 }
 
@@ -96,40 +97,20 @@ fn create_lambda_or_macro(
 
     match ptype {
         Ptype::Empty => { /* no params */ }
+        // Parameters are kept as the symbol objects written, not re-interned
+        // by name: code built by the interpreter (guard's expansion) uses
+        // fresh uninterned symbols that must not be confused with a user's
+        // variable of the same name.
         Ptype::List => {
             let nil = heap.nil_s();
             args.push(nil);
-
-            for arg in params.iter() {
-                let val = heap.get_value(*arg);
-                if let SchemeValue::Symbol(name) = val {
-                    let name: String = name.clone();
-                    let sym = heap.intern_symbol(&name);
-                    args.push(sym);
-                }
-            }
+            args.extend(params.iter().filter(|p| is_symbol(**p)));
         }
         Ptype::Variadic => {
-            match heap.get_value(params[0]) {
-                SchemeValue::Symbol(name) => {
-                    let name: String = name.clone();
-                    let sym = heap.intern_symbol(&name);
-                    args.push(sym);
-                }
-                _ => { /* ignore */ }
-            }
+            args.extend(params.iter().take(1).filter(|p| is_symbol(**p)));
         }
         Ptype::Dotted => {
-            for arg in params.iter() {
-                match heap.get_value(*arg) {
-                    SchemeValue::Symbol(name) => {
-                        let name: String = name.clone();
-                        let sym = heap.intern_symbol(&name);
-                        args.push(sym);
-                    }
-                    _ => { /* ignore */ }
-                }
-            }
+            args.extend(params.iter().filter(|p| is_symbol(**p)));
         }
     }
 
@@ -715,6 +696,142 @@ fn wrap_tag(tag: &str, inner_code: GcRef, procs: &QqProcs, ec: &mut RunTime) -> 
     list_from_slice(&[procs.cons, quoted_tag, inner_cons], ec.heap)
 }
 
+/// The value bound to `name` in the global environment (the root of `env`),
+/// bypassing any local shadowing at the call site.
+fn global_value(env: &EnvRef, ec: &mut RunTime, name: &str) -> Result<GcRef, String> {
+    let mut global = env.clone();
+    while let Some(parent) = global.parent() {
+        global = parent;
+    }
+    let sym = ec.heap.intern_symbol(name);
+    global
+        .lookup_local(sym)
+        .ok_or_else(|| format!("{} is not bound", name))
+}
+
+/// (guard (var clause ...) body ...)
+///
+/// Evaluates the body with an exception handler. If it raises, the handler
+/// escapes back to the guard's dynamic environment (running dynamic-wind
+/// `after` thunks), binds the raised object to `var`, and evaluates the
+/// clauses as in `cond`. If no clause applies, the object is re-raised with
+/// `raise-continuable` in the dynamic environment of the original raise.
+///
+/// Expands to R7RS's reference definition (section 7.3):
+///
+/// ```text
+/// ((call/cc
+///    (lambda (guard-k)
+///      (with-exception-handler
+///       (lambda (condition)
+///         ((call/cc
+///            (lambda (handler-k)
+///              (guard-k
+///               (lambda ()
+///                 (let ((var condition))
+///                   (cond clause ...
+///                         (else (handler-k
+///                                (lambda () (raise-continuable condition))))))))))))
+///       (lambda ()
+///         (call-with-values
+///          (lambda () body ...)
+///          (lambda args (guard-k (lambda () (apply values args))))))))))
+/// ```
+///
+/// The procedures are embedded as objects taken from the global
+/// environment, and `guard-k`, `condition`, `handler-k` and `args` are fresh
+/// uninterned symbols, so the expansion can't be disturbed by, or capture,
+/// the user's variables. `lambda`, `let`, `cond` and `else` are still
+/// looked up by name until hygienic macros arrive.
+fn guard_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
+    const USAGE: &str = "guard: expected (guard (var clause ...) body ...)";
+    let form = list_to_vec(ec.heap, expr).map_err(|_| USAGE.to_string())?;
+    if form.len() < 3 {
+        return Err(USAGE.to_string());
+    }
+    let spec = list_to_vec(ec.heap, form[1]).map_err(|_| USAGE.to_string())?;
+    let var = match spec.first() {
+        Some(v) if is_symbol(*v) => *v,
+        _ => return Err(USAGE.to_string()),
+    };
+    let clauses = &spec[1..];
+    let body = &form[2..];
+
+    let env = state.env.clone();
+    let call_cc = global_value(&env, ec, "call/cc")?;
+    let with_handler = global_value(&env, ec, "with-exception-handler")?;
+    let call_with_values = global_value(&env, ec, "call-with-values")?;
+    let apply = global_value(&env, ec, "apply")?;
+    let values = global_value(&env, ec, "values")?;
+    let raise_continuable = global_value(&env, ec, "raise-continuable")?;
+
+    let heap = &mut *ec.heap;
+    let guard_k = heap.fresh_symbol("guard-k");
+    let condition = heap.fresh_symbol("condition");
+    let handler_k = heap.fresh_symbol("handler-k");
+    let args = heap.fresh_symbol("args");
+    let lambda = heap.intern_symbol("lambda");
+    let let_ = heap.intern_symbol("let");
+    let cond = heap.intern_symbol("cond");
+    let else_ = heap.intern_symbol("else");
+    let nil = heap.nil_s();
+    let l = |items: &[GcRef], heap: &mut GcHeap| list_from_slice(items, heap);
+
+    // (handler-k (lambda () (raise-continuable condition)))
+    let reraise_call = l(&[raise_continuable, condition], heap);
+    let reraise_thunk = l(&[lambda, nil, reraise_call], heap);
+    let reraise = l(&[handler_k, reraise_thunk], heap);
+
+    // (cond clause ... [(else reraise)])
+    let has_else = clauses.last().is_some_and(|c| match gc_value!(*c) {
+        SchemeValue::Pair(head, _) => matches_sym(*head, "else"),
+        _ => false,
+    });
+    let mut cond_form = vec![cond];
+    cond_form.extend_from_slice(clauses);
+    if !has_else {
+        cond_form.push(l(&[else_, reraise], heap));
+    }
+    let cond_expr = l(&cond_form, heap);
+
+    // (guard-k (lambda () (let ((var condition)) cond-expr)))
+    let binding = l(&[var, condition], heap);
+    let bindings = l(&[binding], heap);
+    let let_expr = l(&[let_, bindings, cond_expr], heap);
+    let clauses_thunk = l(&[lambda, nil, let_expr], heap);
+    let to_guard = l(&[guard_k, clauses_thunk], heap);
+
+    // (lambda (condition) ((call/cc (lambda (handler-k) to-guard))))
+    let handler_k_params = l(&[handler_k], heap);
+    let handler_k_lambda = l(&[lambda, handler_k_params, to_guard], heap);
+    let capture_handler_k = l(&[call_cc, handler_k_lambda], heap);
+    let run_thunk = l(&[capture_handler_k], heap);
+    let condition_params = l(&[condition], heap);
+    let handler = l(&[lambda, condition_params, run_thunk], heap);
+
+    // (lambda () (call-with-values (lambda () body ...)
+    //                              (lambda args (guard-k (lambda () (apply values args))))))
+    let mut producer = vec![lambda, nil];
+    producer.extend_from_slice(body);
+    let producer = l(&producer, heap);
+    let apply_values = l(&[apply, values, args], heap);
+    let deliver_thunk = l(&[lambda, nil, apply_values], heap);
+    let deliver = l(&[guard_k, deliver_thunk], heap);
+    let consumer = l(&[lambda, args, deliver], heap);
+    let cwv = l(&[call_with_values, producer, consumer], heap);
+    let thunk = l(&[lambda, nil, cwv], heap);
+
+    // ((call/cc (lambda (guard-k) (with-exception-handler handler thunk))))
+    let install = l(&[with_handler, handler, thunk], heap);
+    let guard_k_params = l(&[guard_k], heap);
+    let guard_k_lambda = l(&[lambda, guard_k_params, install], heap);
+    let capture_guard_k = l(&[call_cc, guard_k_lambda], heap);
+    let expansion = l(&[capture_guard_k], heap);
+
+    insert_eval(state, expansion, state.tail);
+    Ok(())
+}
+
 /// (unquote x) at the top level is an error: it must appear inside a quasiquote.
 fn unquote_sf(_expr: GcRef, _ec: &mut RunTime, _state: &mut CEKState) -> Result<(), String> {
     Err("unquote: not inside a quasiquote".to_string())
@@ -949,6 +1066,10 @@ pub fn wrap_body_in_begin(body_exprs: &[GcRef], heap: &mut GcHeap) -> GcRef {
 }
 
 // Convert a parameter list, returning the list and a flag indicating the type of list
+fn is_symbol(v: GcRef) -> bool {
+    matches!(gc_value!(v), SchemeValue::Symbol(_))
+}
+
 fn params_to_vec(heap: &mut GcHeap, mut list: GcRef) -> (Vec<GcRef>, Ptype) {
     let mut result = Vec::new();
     match &heap.get_value(list) {

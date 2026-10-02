@@ -1,4 +1,5 @@
 pub mod cek;
+pub mod exceptions;
 pub mod kont;
 
 use crate::env::{EnvOps, EnvRef};
@@ -32,6 +33,11 @@ pub struct RunTimeStruct {
     /// stack into the continuation and `escape` restores it. Rooted whole in
     /// `GcHeap::mark_from`.
     pub arg_stack: Vec<GcRef>,
+    /// The current exception handlers, innermost first, as a Scheme list.
+    /// `with-exception-handler` conses onto it for the extent of its thunk;
+    /// `raise` calls the head with the tail installed. Continuations capture
+    /// and restore it along with the dynamic-wind stack. Rooted for the GC.
+    pub handlers: GcRef,
 }
 
 pub struct RunTime<'a> {
@@ -44,6 +50,7 @@ pub struct RunTime<'a> {
     pub trace: &'a mut TraceType,
     pub depth: &'a mut i32,
     pub arg_stack: &'a mut Vec<GcRef>,
+    pub handlers: &'a mut GcRef,
 }
 
 impl<'a> RunTime<'a> {
@@ -58,6 +65,7 @@ impl<'a> RunTime<'a> {
             trace: &mut eval.trace,
             depth: &mut eval.depth,
             arg_stack: &mut eval.arg_stack,
+            handlers: &mut eval.handlers,
         }
     }
 }
@@ -91,6 +99,7 @@ impl RunTimeStruct {
         let stdin_port = new_port(&mut heap, PortKind::Stdin);
         port_vec.push(stdin_port);
         let stdout_port = new_port(&mut heap, PortKind::Stdout);
+        let handlers = heap.nil_s();
         Self {
             heap,
             port_stack: port_vec,
@@ -101,6 +110,7 @@ impl RunTimeStruct {
             trace: TraceType::Reset,
             depth: 0,
             arg_stack: Vec::new(),
+            handlers,
         }
     }
 }
@@ -123,6 +133,7 @@ pub fn initialize_scheme_globals(rt: &mut RunTime, env: EnvRef) -> Result<(), St
     crate::builtin::register_builtins(rt.heap, env.clone());
     crate::special_forms::register_special_forms(rt.heap, env.clone());
     crate::sys_builtins::register_sys_builtins(rt, env.clone());
+    exceptions::register_exception_builtins(rt, env.clone());
     Ok(())
 }
 

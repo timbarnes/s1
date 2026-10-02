@@ -209,6 +209,7 @@ fn garbage_collect_sp(
         ec.port_stack,
         ec.dynamic_wind,
         ec.arg_stack,
+        *ec.handlers,
     );
     let elapsed_time = timer.elapsed().as_secs_f64();
     let time = new_float(&mut ec.heap, elapsed_time);
@@ -308,6 +309,7 @@ fn call_cc_sp(
         Rc::clone(&next),
         ec.dynamic_wind.clone(),
         ec.arg_stack.clone(),
+        *ec.handlers,
     );
     // Build the escape procedure `(lambda vals (<escape-values> k vals))`.
     // It is variadic so that `(k)` and `(k 1 2)` deliver zero or several
@@ -390,6 +392,7 @@ fn escape_to(
                 Rc::clone(&k.kont),
                 k.dw_stack.clone(),
                 k.arg_stack.clone(),
+                k.handlers,
             );
             Ok(())
         }
@@ -532,21 +535,26 @@ fn open_input_file_sp(
             let mut content = String::new();
             let mut reader = std::io::BufReader::new(file);
             if let Err(e) = reader.read_to_string(&mut content) {
-                return Err(format!(
-                    "open-input-file: could not read file '{}': {}",
-                    filename, e
-                ));
+                let msg = format!("open-input-file: could not read file: {}", e);
+                return raise_file_error(ec, state, &msg, args[0]);
             }
             let port = new_port(ec.heap, crate::io::new_string_port_input(&content));
             state.control = Control::Value(port);
             state.kont = next;
             Ok(())
         }
-        Err(e) => Err(format!(
-            "open-input-file: could not open file '{}': {}",
-            filename, e
-        )),
+        Err(e) => {
+            let msg = format!("open-input-file: could not open file: {}", e);
+            raise_file_error(ec, state, &msg, args[0])
+        }
     }
+}
+
+/// Raise a `file-error?` error object naming the file as its irritant.
+fn raise_file_error(ec: &mut RunTime, state: &mut CEKState, msg: &str, filename: GcRef) -> Result<(), String> {
+    let irritants = crate::gc::list_from_slice(&[filename], ec.heap);
+    crate::eval::exceptions::raise_error(state, ec, crate::gc::ErrorKind::File, msg, irritants);
+    Ok(())
 }
 
 /// (open-output-file filename) -> port
@@ -580,10 +588,10 @@ fn open_output_file_sp(
             state.kont = next;
             Ok(())
         }
-        Err(e) => Err(format!(
-            "open-output-file: could not open file '{}': {}",
-            filename, e
-        )),
+        Err(e) => {
+            let msg = format!("open-output-file: could not open file: {}", e);
+            raise_file_error(ec, state, &msg, args[0])
+        }
     }
 }
 
@@ -693,7 +701,12 @@ fn read_sp(
                 state.kont = next;
                 Ok(())
             }
-            ParseError::Syntax(err) => Err(format!("read: syntax error:{}", err)),
+            ParseError::Syntax(err) => {
+                let msg = format!("read: syntax error: {}", err);
+                let nil = ec.heap.nil_s();
+                crate::eval::exceptions::raise_error(state, ec, crate::gc::ErrorKind::Read, &msg, nil);
+                Ok(())
+            }
         },
     }
 }

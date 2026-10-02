@@ -16,9 +16,9 @@ Returns the void value.
 
 ## `error`
 
-`(error reason ...)`
+`(error message irritant ...)`
 
-Signals an error. The `reason` and subsequent arguments are displayed in an error message.
+Raises an error object with the given message and irritants. See [Exceptions](./exceptions.md).
 
 ## `closure?`
 

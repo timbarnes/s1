@@ -25,12 +25,12 @@ baseline stays in step with the code. `S1_BIN` selects a prebuilt binary and
 
 - **pass / fail**: the test ran and its result did or did not match. Inexact
   numbers match to a relative 1e-5, as in `(chibi test)`.
-- **error**: the test started but never reported back, because an error
-  aborted its top-level form. Until s1 can catch errors (plan phase 4),
-  `test-error` cannot pass: a correctly signalled error lands here.
+- **error**: the test's expression raised an exception. The shim catches it
+  with `guard`, so the next test runs normally; the `ERROR:` line in the log
+  shows what was raised. (For `test-error`, raising is a pass.)
 - **unrch** (unreached): tests in the section that never started, usually
-  because an earlier error aborted an enclosing `let` or `define-syntax`, or the
-  reader lost sync. It is `~total - attempted`.
+  because something outside any test failed first (a `define-syntax`, or a
+  definition in an enclosing `let`). It is `~total - attempted`.
 - **~total**: a static count of test forms per section. It is an estimate
   (helpers defined inside `define-syntax` templates are counted too), so trust
   `pass` as the metric to drive up.
@@ -38,12 +38,12 @@ baseline stays in step with the code. `S1_BIN` selects a prebuilt binary and
 Each section runs in its own process, so a reader desync or crash in one
 section cannot swallow the next ones.
 
-## Known blockers (497 passing after phase 3)
+## Known blockers (524 passing after phase 4)
 
 - **Read syntax, Numeric syntax, 6.13 Input and output**: these need string
   ports (phase 8); Numeric syntax also needs `syntax-rules` (phase 5).
 - **4.3 Macros**: needs `define-syntax` / `syntax-rules` (phase 5).
-- **6.11 Exceptions** and every `test-error`: these need `guard` / `raise` (phase 4).
+- **6.11 Exceptions**: the remaining tests use string ports (phase 8).
 - **Complex numbers** are reported as parse errors ("not supported"), as are
   bytevector literals ("not supported yet") until phase 7. The unreached tests
   in 6.2 Numbers are all complex-number tests.

@@ -90,6 +90,23 @@ pub enum Kont {
         start: Instant,
         next: KontRef,
     },
+    /// Below a `with-exception-handler` thunk: when the thunk returns,
+    /// reinstate the handler list that was current before the handler was
+    /// installed.
+    RestoreHandlers {
+        handlers: GcRef,
+        next: KontRef,
+    },
+    /// Below a call to an exception handler. If the handler returns from a
+    /// `raise-continuable`, reinstate `saved` (the handler list current at
+    /// the raise) and deliver the value to `next`. Returning from a plain
+    /// `raise` is itself an error (R7RS 6.11).
+    RaiseReturn {
+        payload: GcRef,
+        saved: GcRef,
+        continuable: bool,
+        next: KontRef,
+    },
     EvalArg {
         /// Whether the operator has been evaluated yet. Once it has, it sits
         /// at `arg_stack[args_base]` (rooted there like the arguments),
@@ -156,6 +173,8 @@ impl Kont {
             Kont::ExpandArg { next, .. } => Some(next),
             Kont::EvalSeq { next, .. } => Some(next),
             Kont::Timer { next, .. } => Some(next),
+            Kont::RestoreHandlers { next, .. } => Some(next),
+            Kont::RaiseReturn { next, .. } => Some(next),
             Kont::RestoreEnv { next, .. } => Some(next),
             Kont::Seq { next, .. } => Some(next),
         }
@@ -344,6 +363,21 @@ impl std::fmt::Debug for Kont {
             Kont::Timer { next, .. } => {
                 write!(f, "Timer {{ next: {:?} }}", next)
             }
+            Kont::RestoreHandlers { next, .. } => {
+                write!(f, "RestoreHandlers {{ next: {:?} }}", next)
+            }
+            Kont::RaiseReturn {
+                payload,
+                continuable,
+                next,
+                ..
+            } => write!(
+                f,
+                "RaiseReturn {{ payload: {}, continuable: {}, next: {:?} }}",
+                print_value(payload),
+                continuable,
+                next
+            ),
             Kont::Eval {
                 expr, phase, next, ..
             } => {
@@ -405,6 +439,8 @@ pub struct EscapePayload {
     pub new_dw_stack: Vec<DynamicWind>,
     /// The continuation's `arg_stack` snapshot (see `ContinuationData`).
     pub new_arg_stack: Vec<GcRef>,
+    /// The continuation's exception handler list.
+    pub new_handlers: GcRef,
 }
 
 /// `eval-string`'s pending forms (tail first) and results collected so far.
@@ -532,8 +568,10 @@ impl crate::gc::Mark for KontRef {
                         thunks,
                         new_dw_stack,
                         new_arg_stack,
+                        new_handlers,
                     } = &**payload;
                     visit(*result);
+                    visit(*new_handlers);
                     for arg in new_arg_stack {
                         visit(*arg);
                     }
@@ -616,6 +654,20 @@ impl crate::gc::Mark for KontRef {
                     worklist.push(Rc::clone(next));
                 }
                 Kont::Timer { next, .. } => {
+                    worklist.push(Rc::clone(next));
+                }
+                Kont::RestoreHandlers { handlers, next } => {
+                    visit(*handlers);
+                    worklist.push(Rc::clone(next));
+                }
+                Kont::RaiseReturn {
+                    payload,
+                    saved,
+                    next,
+                    ..
+                } => {
+                    visit(*payload);
+                    visit(*saved);
                     worklist.push(Rc::clone(next));
                 }
             }
@@ -786,6 +838,7 @@ pub fn insert_escape(
     new_kont: KontRef,
     new_dw_stack: Vec<DynamicWind>,
     new_arg_stack: Vec<GcRef>,
+    new_handlers: GcRef,
 ) {
     state.kont = Rc::new(Kont::Escape {
         payload: Box::new(EscapePayload {
@@ -793,6 +846,7 @@ pub fn insert_escape(
             thunks,
             new_dw_stack,
             new_arg_stack,
+            new_handlers,
         }),
         new_kont,
     });

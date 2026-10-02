@@ -10,6 +10,7 @@ use crate::gc::SchemeValue::*;
 use crate::gc::{Callable, GcRef, cons, is_false, list_to_vec, new_float};
 use crate::gc_value;
 use crate::printer::print_value;
+use crate::eval::exceptions;
 use crate::utilities::{debugger, post_error};
 use std::rc::Rc;
 use std::time::Instant;
@@ -24,6 +25,13 @@ pub fn eval_main(
     state.control = Control::Expr(expr);
     state.kont = Rc::clone(&state.halt);
     state.tail = true;
+    // Each top-level form starts outside any dynamic-wind extent or
+    // exception handler, with no pending arguments. (An uncaught error
+    // already leaves them so; this also covers anything else that halted
+    // mid-form.) Continuations re-entered later restore their own.
+    ec.dynamic_wind.clear();
+    ec.arg_stack.clear();
+    *ec.handlers = ec.heap.nil_s();
     run_cek(state, ec)
 }
 
@@ -35,8 +43,11 @@ fn run_cek(mut state: &mut CEKState, rt: &mut RunTime) -> Result<Vec<GcRef>, Str
     loop {
         // Step the CEK machine; mutates state in place
         //eprintln!("Pre-step {}", frame_debug_short(&state.kont));
+        // Errors the machine itself reports (applying a non-procedure, a
+        // wrong argument count) are raised like any other, so handlers see
+        // them too.
         if let Err(err) = step(&mut state, rt) {
-            return Err(err);
+            post_error(&mut state, rt, &err);
         }
         match &state.control {
             Control::Value(val) => match *state.kont {
@@ -88,7 +99,7 @@ pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
     match &gc_value!(expr) {
         // Self-evaluating values are returned unchanged
         Int(_) | Rational(_) | Float(_) | Str(_) | Bool(_) | Vector(_) | Char(_) | Nil | Callable(_)
-        | Continuation(_) | Void | Undefined => {
+        | Continuation(_) | ErrorObject(_) | Void | Undefined => {
             state.control = Control::Value(expr);
         }
         // Symbols are looked up in the environment
@@ -276,6 +287,15 @@ fn dispatch_kont(state: &mut CEKState, ec: &mut RunTime, val: GcRef) -> Result<(
         Kont::ExpandArg { env, next } => handle_expand_arg(state, ec, env, next),
         Kont::EvalSeq { forms, next } => handle_eval_seq(state, ec, forms, next),
         Kont::Timer { start, next } => handle_timer(state, ec, start, next),
+        Kont::RestoreHandlers { handlers, next } => {
+            exceptions::handle_restore_handlers(state, ec, handlers, next)
+        }
+        Kont::RaiseReturn {
+            payload,
+            saved,
+            continuable,
+            next,
+        } => exceptions::handle_raise_return(state, ec, payload, saved, continuable, next),
         Kont::Halt => Ok(()),
         Kont::CallWithValues { consumer, next } => {
             // The producer has returned: apply the consumer to its values.
@@ -446,8 +466,14 @@ fn handle_cond_clause(
             if !is_false(*test_value) {
                 state.kont = skip_cond(&next)?; // drop Cond
 
-                // build (arrow_proc test_value)
-                let mut call_expr = cons(*test_value, ec.heap.nil_s(), ec.heap)?;
+                // build (arrow_proc (quote test_value)): the value is already
+                // evaluated, so it must not be evaluated again as an argument
+                // (a list value would be taken for a call).
+                let quote = ec.heap.intern_symbol("quote");
+                let nil = ec.heap.nil_s();
+                let quoted = cons(*test_value, nil, ec.heap)?;
+                let quoted = cons(quote, quoted, ec.heap)?;
+                let mut call_expr = cons(quoted, nil, ec.heap)?;
                 call_expr = cons(arrow_proc, call_expr, ec.heap)?;
                 insert_eval(state, call_expr, true);
             } else {
@@ -541,6 +567,7 @@ fn handle_escape(
         state.control = Control::Value(payload.result);
         *ec.dynamic_wind = payload.new_dw_stack;
         *ec.arg_stack = payload.new_arg_stack;
+        *ec.handlers = payload.new_handlers;
     }
     Ok(())
 }
@@ -710,6 +737,7 @@ fn handle_restore_env(
             ec.port_stack,
             ec.dynamic_wind,
             ec.arg_stack,
+            *ec.handlers,
         );
     }
 
@@ -977,6 +1005,7 @@ pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> 
                             ec.port_stack,
                             ec.dynamic_wind,
                             ec.arg_stack,
+                            *ec.handlers,
                         );
                     }
 

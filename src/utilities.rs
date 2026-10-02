@@ -7,22 +7,13 @@ use crate::gc_value;
 use crate::printer::print_value;
 use std::rc::Rc;
 
-/// Push an error into the existing CEKState.
+/// Report a failure (of a built-in procedure, special form or the machine
+/// itself) by raising an error object with `error` as its message. A handler
+/// may catch it; if none does, it is printed and the top-level form is
+/// abandoned (see `eval::exceptions`).
 pub fn post_error(state: &mut CEKState, ec: &mut RunTime, error: &str) {
-    // stdout is line-buffered; flush it so the error appears after the output
-    // that preceded it rather than ahead of a pending partial line.
-    std::io::Write::flush(&mut std::io::stdout()).ok();
-    eprintln!("Error: {}", error);
-    match ec.trace {
-        TraceType::Reset => {
-            state.control = Control::Value(ec.heap.void());
-            state.kont = Rc::new(Kont::Halt);
-        }
-        _ => {
-            *ec.trace = TraceType::Step;
-            debugger("", state, ec);
-        }
-    }
+    let nil = ec.heap.nil_s();
+    crate::eval::exceptions::raise_error(state, ec, crate::gc::ErrorKind::General, error, nil);
 }
 
 /// Trace / debug function called from within the CEK machine and on error
@@ -256,6 +247,8 @@ pub fn dbg_one_kont(loc: &str, frame: &Kont) -> String {
             .as_str(),
         ),
         Kont::Timer { .. } => result.push_str("Timer"),
+        Kont::RestoreHandlers { .. } => result.push_str("RestoreHandlers"),
+        Kont::RaiseReturn { .. } => result.push_str("RaiseReturn"),
     }
     result
 }
@@ -300,6 +293,8 @@ pub fn _dbg_short_kont(kont: &KontRef) {
         Kont::ExpandArg { .. } => print!("ExpandArg "),
         Kont::EvalSeq { .. } => print!("EvalSeq "),
         Kont::Timer { .. } => print!("Timer "),
+        Kont::RestoreHandlers { .. } => print!("RestoreHandlers "),
+        Kont::RaiseReturn { .. } => print!("RaiseReturn "),
     }
 }
 
