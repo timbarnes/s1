@@ -174,8 +174,6 @@ fn needs_bars(s: &str) -> bool {
                 || s[1..].to_ascii_lowercase().starts_with("inf")
                 || s[1..].to_ascii_lowercase().starts_with("nan")));
     s == "."
-        // `nil` reads as the empty list in s1
-        || s == "nil"
         || first == '#'
         || numeric_start
         || crate::number_syntax::parse_number(s, 10) != crate::number_syntax::NumberSyntax::NotANumber
@@ -319,7 +317,7 @@ mod tests {
             ("+NaN.0abc", "|+NaN.0abc|"),
             ("|", "|\\||"),
             ("\\123", "|\\\\123|"),
-            ("nil", "|nil|"),
+            ("nil", "nil"),
         ] {
             let sym = heap.intern_symbol(name);
             assert_eq!(print_value(&sym), written, "symbol {:?}", name);

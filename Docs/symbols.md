@@ -9,6 +9,6 @@ Symbols are case sensitive. A symbol whose name wouldn't read back as a symbol i
 * `(symbol->string sym)`: a new string holding the name.
 * `(string->symbol s)`: the symbol with that name.
 
-s1 reads a bare `nil` as the empty list, an extension; `|nil|` is the symbol.
+`nil` is an ordinary symbol. s1's core library also defines a variable `nil` bound to the empty list, so `nil` used as a value means `()`; `'nil` is the symbol.
 
 [Home](s1-docs.md)

@@ -273,7 +273,7 @@
 
 ;; Macro call: one level of expansion
 (define when4 (macro (p . body) `(if ,p (begin ,@body) nil)))
-(test-equal '(if #t (begin 42 43) ()) (expand '(when4 #t 42 43)) "expand on macro call")
+(test-equal '(if #t (begin 42 43) nil) (expand '(when4 #t 42 43)) "expand on macro call")
 
 ;; Recursive macro: one level only
 (test-equal '(if 1 (my-and 2 3) #f) (expand '(my-and 1 2 3)) "expand shows one level for recursive macro")

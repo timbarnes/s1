@@ -1,5 +1,9 @@
 ;; s1-core.scm: Scheme-level core predicates and utilities
 
+;; nil is an ordinary symbol, as R7RS requires; as a variable it is bound to
+;; the empty list, so code that uses nil as a value keeps working.
+(define nil '())
+
 ;; Type predicates using type-of function
 (define float? (lambda (x)
     "(float? x) returns #t if x is a float, otherwise #f"

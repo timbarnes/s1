@@ -40,7 +40,6 @@ section cannot swallow the next ones.
 
 ## Known blockers (811 passing after phase 7)
 
-- **6.5 Symbols**: `(symbol? 'nil)`: s1 reads a bare `nil` as the empty list.
 
 - **Read syntax, Numeric syntax, 6.13 Input and output**: these need string
   ports (phase 8). Their helper macros now define correctly.

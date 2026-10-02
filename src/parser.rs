@@ -90,9 +90,6 @@ impl Reader<'_, '_> {
             Token::String(s) => new_string(self.heap, &s),
             Token::Boolean(b) => new_bool(self.heap, b),
             Token::Character(c) => new_char(self.heap, c),
-            // `nil` reads as the empty list: an s1 extension, used widely in
-            // its own Scheme code. `|nil|` is the plain symbol.
-            Token::Symbol(s) if s == "nil" => self.heap.nil_s(),
             Token::Symbol(s) | Token::BarSymbol(s) => get_symbol(self.heap, &s),
             Token::LeftParen => self.list(Token::RightParen)?,
             Token::LeftBracket => {
@@ -290,15 +287,15 @@ mod tests {
     }
 
     #[test]
-    fn parse_nil() {
+    fn parse_empty_list() {
         use crate::printer::print_value;
         let mut ev = crate::eval::RunTimeStruct::new();
         let ec = crate::eval::RunTime::from_eval(&mut ev);
-        let mut port = crate::io::new_string_port_input("nil");
+        let mut port = crate::io::new_string_port_input("()");
         let expr = parse(ec.heap, &mut port).unwrap();
         match &ec.heap.get_value(expr) {
             crate::gc::SchemeValue::Nil => (),
-            _ => panic!("Expected nil, got {}", print_value(&expr)),
+            _ => panic!("Expected (), got {}", print_value(&expr)),
         }
     }
 
@@ -551,9 +548,10 @@ mod tests {
 
     #[test]
     fn parse_nil_and_bar_symbols() {
+        // nil is an ordinary symbol (s1-core.scm binds it to '() as a variable).
         assert_eq!(read_all("nil |nil| |a b|"), vec![
-            Ok("()".to_string()),
-            Ok("|nil|".to_string()),
+            Ok("nil".to_string()),
+            Ok("nil".to_string()),
             Ok("|a b|".to_string()),
         ]);
     }
