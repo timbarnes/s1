@@ -138,6 +138,10 @@ pub enum Callable {
 #[derive(Debug)]
 pub enum SchemeValue {
     Int(BigInt),
+    /// An exact non-integer rational, always in lowest terms with a
+    /// denominator above 1: arithmetic hands back `Int` whenever the result
+    /// is a whole number. Boxed because `BigRational` is two `BigInt`s.
+    Rational(Box<num_rational::BigRational>),
     Float(f64),
     Symbol(String),
     Pair(GcRef, GcRef),

@@ -333,7 +333,7 @@
                (if (= y 0)
                    (error 'division-by-zero)
                    (/ x y))))))
-(test-equal 5.0 (safe-divide 10 2) "call/cc error simulation normal")
+(test-equal 5 (safe-divide 10 2) "call/cc error simulation normal")
 (test-equal 'division-by-zero (safe-divide 10 0) "call/cc error simulation escape")
 
 (display "          === Testing dyamic-wind ===")

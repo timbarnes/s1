@@ -7,19 +7,9 @@ pub fn register_predicate_builtins(heap: &mut crate::gc::GcHeap, env: EnvRef) {
     register_builtin_family!(heap, env,
         "type-of" => (type_of, "(type-of <value>) Returns a symbol representing the type of the value"),
         "equal?" => (equal_q, "(equal? <value1> <value2>) Returns true if the values are equal"),
-        "number?" => (number_q, "(number? <value>) Returns true if the value is a number"),
         "eq?" => (eq_q, "(eq? <value1> <value2>) Returns true if the values are the same object"),
         "eqv?" => (eqv_q, "(eqv? <value1> <value2>) Returns true if the values are the same object, or numbers of the same exactness and value, or equal characters"),
     );
-}
-
-pub fn number_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    let arg = args.get(0).ok_or("number?: expected 1 argument")?;
-    let is_number = match &gc_value!(*arg) {
-        SchemeValue::Int(_) | SchemeValue::Float(_) => true,
-        _ => false,
-    };
-    Ok(new_bool(heap, is_number))
 }
 
 pub fn equal_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
@@ -53,6 +43,7 @@ pub fn type_of(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     let arg = args.get(0).ok_or("type-of: expected 1 argument")?;
     let type_name = match &gc_value!(*arg) {
         SchemeValue::Int(_) => "integer",
+        SchemeValue::Rational(_) => "rational",
         SchemeValue::Float(_) => "float",
         SchemeValue::Symbol(_) => "symbol",
         SchemeValue::Pair(_, _) => "pair",
@@ -77,6 +68,7 @@ pub fn type_of(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtin::number::number_q;
 
     #[test]
     fn test_number_q() {
@@ -113,7 +105,7 @@ mod tests {
         // Test error case: no arguments
         let result = number_q(&mut ec.heap, &[]);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("expected 1 argument"));
+        assert!(result.unwrap_err().contains("expects 1 argument"));
     }
 
     #[test]

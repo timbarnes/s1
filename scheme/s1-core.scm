@@ -4,12 +4,6 @@
     "(error msg ...) displays msg and any additional arguments followed by a newline; used to report a condition since there is no error/condition system"
     (apply displayln msg)))
 ;; Type predicates using type-of function
-(define number? (lambda (x)
-    "(number? x) returns #t if x is an integer or float, otherwise #f"
-    (or (eq? (type-of x) 'integer) (eq? (type-of x) 'float))))
-(define integer? (lambda (x)
-    "(integer? x) returns #t if x is an integer, otherwise #f"
-    (eq? (type-of x) 'integer)))
 (define float? (lambda (x)
     "(float? x) returns #t if x is a float, otherwise #f"
     (eq? (type-of x) 'float)))
@@ -137,14 +131,6 @@
               ((eq? key (caar alist)) (car alist))
               (else (assq key (cdr alist))))))
 
-(define exact? (lambda (n)
-    "(exact? n) returns #t if n is an integer, otherwise #f"
-    (integer? n)))
-
-(define inexact? (lambda (n)
-    "(inexact? n) returns #t if n is not an integer, otherwise #f"
-    (not (integer? n))))
-
 ;; List accessor functions (compositions of car and cdr)
 ;; These provide convenient access to nested list elements
 
@@ -215,55 +201,6 @@
 (define not (lambda (v)
     "(not v) returns #t if v is #f, otherwise #f"
     (if v #f #t)))
-(define abs (lambda (n)
-    "(abs n) returns the absolute value of n"
-    (if (< n 0) (- n) n)))
-(define <= (lambda (m n)
-    "(<= m n) returns #t if m is less than or equal to n, otherwise #f"
-    (not (> m n))))
-(define >= (lambda (m n)
-    "(>= m n) returns #t if m is greater than or equal to n, otherwise #f"
-    (not (< m n))))
-(define zero? (lambda (n)
-    "(zero? n) returns #t if n is 0, otherwise #f"
-    (= n 0)))
-(define positive? (lambda (n)
-    "(positive? n) returns #t if n is greater than or equal to 0, otherwise #f"
-    (>= n 0)))
-(define negative? (lambda (n)
-    "(negative? n) returns #t if n is less than 0, otherwise #f"
-    (< n 0)))
-(define even? (lambda (n)
-    "(even? n) returns #t if n is evenly divisible by 2, otherwise #f"
-    (zero? (modulo n 2))))
-(define odd? (lambda (n)
-    "(odd? n) returns #t if n is not evenly divisible by 2, otherwise #f"
-    (not (even? n))))
-
-(define max (lambda x
-    "(max n1 n2 ...) returns the largest of its arguments"
-    (define _max (lambda (acc l)
-        (if (null? l) acc
-            (if (> (car l) acc)
-                (_max (car l) (cdr l))
-                (_max acc (cdr l))))))
-    (_max (car x) (cdr x))))
-
-(define min (lambda x
-    "(min n1 n2 ...) returns the smallest of its arguments"
-    (define _min (lambda (acc l)
-        (if (null? l) acc
-            (if (< (car l) acc)
-                (_min (car l) (cdr l))
-                (_min acc (cdr l))))))
-    (_min (car x) (cdr x))))
-
-(define (string->number str)
-    "(string->number str) parses str as a number and returns the number"
-    (if (string? str)
-        (car (eval-string str))
-        (error "string>number: not a string")))
-
 ;; Stack support
 (define empty? (lambda (s)
     "(empty? s) returns #t if the stack/list s is empty, otherwise #f"

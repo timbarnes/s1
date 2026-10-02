@@ -1,18 +1,30 @@
 //! R7RS numeric literal syntax (R7RS section 7.1.1), shared by the reader and
 //! by `string->number`.
 //!
-//! s1's numbers are exact integers (`BigInt`) and flonums. Text that is valid
-//! number syntax for another type, an exact non-integer rational such as `1/2`
-//! or a complex number such as `1+2i`, is recognised as a number but reported
-//! as unsupported rather than being read as a symbol.
+//! s1's numbers are exact integers (`BigInt`), exact rationals and flonums.
+//! Complex number syntax such as `1+2i` is recognised as a number but
+//! reported as unsupported rather than being read as a symbol.
 
 use num_bigint::BigInt;
+use num_rational::BigRational;
 use num_traits::{ToPrimitive, Zero};
 
 #[derive(Debug, PartialEq)]
 pub enum Number {
     Int(BigInt),
+    /// A non-integer, in lowest terms
+    Rational(BigRational),
     Float(f64),
+}
+
+/// The exact number `n/d` (`d` non-zero): an `Int` when it is whole.
+pub fn exact_ratio(n: BigInt, d: BigInt) -> Number {
+    let r = BigRational::new(n, d);
+    if r.is_integer() {
+        Number::Int(r.to_integer())
+    } else {
+        Number::Rational(r)
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -85,11 +97,7 @@ fn apply_exactness(real: Real, exact: Option<bool>, text: &str) -> NumberSyntax 
             if d.is_zero() {
                 return NumberSyntax::Error(format!("division by zero in {}", text));
             }
-            if (&n % &d).is_zero() {
-                Number::Int(n / d)
-            } else {
-                return rationals_unsupported(text);
-            }
+            exact_ratio(n, d)
         }
         (Real::Decimal { digits, exp10, .. }, Some(true)) => {
             if exp10 >= 0 {
@@ -99,14 +107,9 @@ fn apply_exactness(real: Real, exact: Option<bool>, text: &str) -> NumberSyntax 
                 Number::Int(digits * BigInt::from(10).pow(exp10 as u32))
             } else {
                 if -exp10 > MAX_EXACT_EXPONENT {
-                    return rationals_unsupported(text);
+                    return NumberSyntax::Error(format!("exponent too large: {}", text));
                 }
-                let scale = BigInt::from(10).pow((-exp10) as u32);
-                if (&digits % &scale).is_zero() {
-                    Number::Int(digits / scale)
-                } else {
-                    return rationals_unsupported(text);
-                }
+                exact_ratio(digits, BigInt::from(10).pow((-exp10) as u32))
             }
         }
         (Real::Decimal { text: t, .. }, _) => match t.parse::<f64>() {
@@ -124,10 +127,6 @@ fn apply_exactness(real: Real, exact: Option<bool>, text: &str) -> NumberSyntax 
         (Real::NaN, _) => Number::Float(f64::NAN),
     };
     NumberSyntax::Value(value)
-}
-
-fn rationals_unsupported(text: &str) -> NumberSyntax {
-    NumberSyntax::Error(format!("rational numbers are not supported yet: {}", text))
 }
 
 /// A signed real in `radix`, or `None` if `s` isn't one.
@@ -254,6 +253,9 @@ mod tests {
     fn float(f: f64) -> NumberSyntax {
         NumberSyntax::Value(Number::Float(f))
     }
+    fn ratio(n: i64, d: i64) -> NumberSyntax {
+        NumberSyntax::Value(Number::Rational(BigRational::new(n.into(), d.into())))
+    }
     fn is_error(s: &str) -> bool {
         matches!(parse_number(s, 10), NumberSyntax::Error(_))
     }
@@ -287,8 +289,11 @@ mod tests {
         assert_eq!(parse_number("#e1e3", 10), int(1000));
         assert_eq!(parse_number("#i1/2", 10), float(0.5));
         assert_eq!(parse_number("4/2", 10), int(2));
-        assert!(is_error("1/2"));
-        assert!(is_error("#e1.5"));
+        assert_eq!(parse_number("1/2", 10), ratio(1, 2));
+        assert_eq!(parse_number("-6/4", 10), ratio(-3, 2));
+        assert_eq!(parse_number("#e1.5", 10), ratio(3, 2));
+        assert_eq!(parse_number("#e-0.125", 10), ratio(-1, 8));
+        assert_eq!(parse_number("#x1/A", 10), ratio(1, 10));
         assert!(is_error("1/0"));
     }
 

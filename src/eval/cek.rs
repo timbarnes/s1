@@ -87,7 +87,7 @@ pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
     //dump_cek("   eval_cek", &state);
     match &gc_value!(expr) {
         // Self-evaluating values are returned unchanged
-        Int(_) | Float(_) | Str(_) | Bool(_) | Vector(_) | Char(_) | Nil | Callable(_)
+        Int(_) | Rational(_) | Float(_) | Str(_) | Bool(_) | Vector(_) | Char(_) | Nil | Callable(_)
         | Continuation(_) | Void | Undefined => {
             state.control = Control::Value(expr);
         }

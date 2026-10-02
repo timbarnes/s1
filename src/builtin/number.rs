@@ -1,565 +1,1020 @@
+//! Numbers: R7RS section 6.2.
+//!
+//! s1 has three representations: exact integers (`SchemeValue::Int`, a
+//! `BigInt`), exact non-integer rationals (`SchemeValue::Rational`) and
+//! inexact flonums (`SchemeValue::Float`). Exact arithmetic stays exact
+//! (`(/ 1 2)` is `1/2`) and whole results come back as integers; any inexact
+//! operand makes the result inexact.
+
 use crate::env::{EnvOps, EnvRef};
-use crate::gc::{GcHeap, GcRef, SchemeValue, new_bool, new_float, new_int};
+use crate::gc::{
+    GcHeap, GcRef, SchemeValue, new_bool, new_float, new_int, new_rational, new_string, new_values,
+};
 use crate::gc_value;
+use crate::number_syntax::{Number, NumberSyntax, parse_number};
 use crate::register_builtin_family;
 use num_bigint::BigInt;
-use num_traits::{One, ToPrimitive, Zero};
+use num_integer::Integer;
+use num_rational::BigRational;
+use num_traits::{One, Signed, ToPrimitive, Zero};
+use std::cmp::Ordering;
 
 pub fn register_number_builtins(heap: &mut GcHeap, env: EnvRef) {
     register_builtin_family!(heap, env,
-        "+" => (plus_b, "(+ [n ..]) Returns the sum of all arguments"),
-        "-" => (minus_b, "(- [n ..]) Returns the difference of all arguments"),
-        "*" => (times_b, "(* [n ..]) Returns the product of all arguments"),
-        "/" => (div_b, "(/ [n ..]) Returns the quotient of all arguments"),
-        "modulo" => (mod_b, "(modulo n m) Returns the remainder of n divided by m"),
-        "remainder" => (remainder_b, "(remainder n m) Returns the remainder of n divided by m"),
-        "=" => (eq_b, "(= [n ..]) Returns true if all arguments are equal"),
-        "<" => (lt_b, "(< [n ..]) Returns true if all arguments are in ascending order"),
-        ">" => (gt_b, "(> [n ..]) Returns true if all arguments are in descending order"),
-        "quotient" => (quotient_b, "(quotient n m) Returns the integer quotient of n divided by m"),
-        "remainder" => (remainder_b, "(remainder n m) Returns the remainder of n divided by m"),
-        "numerator" => (numerator_b, "(numerator n) Returns the numerator of n"),
-        "denominator" => (denominator_b, "(denominator n) Returns the denominator of n"),
-        "floor" => (floor_b, "(floor n) Returns the largest integer less than or equal to n"),
-        "ceiling" => (ceiling_b, "(ceiling n) Returns the smallest integer greater than or equal to n"),
-        "truncate" => (truncate_b, "(truncate n) Returns the integer part of n"),
-        "round" => (round_b, "(round n) Returns the nearest integer to n"),
-        "sqrt" => (sqrt_b, "(sqrt n) Returns the square root of n"),
-        "expt" => (expt_b, "(expt n m) Returns n raised to the power of m"),
-        "exp" => (exp_b, "(exp n) Returns e raised to the power of n"),
-        "log" => (log_b, "(log n) Returns the natural logarithm of n"),
-        "sin" => (sin_b, "(sin n) Returns the sine of n"),
-        "cos" => (cos_b, "(cos n) Returns the cosine of n"),
-        "tan" => (tan_b, "(tan n) Returns the tangent of n"),
-        "asin" => (asin_b, "(asin n) Returns the arcsine of n"),
-        "acos" => (acos_b, "(acos n) Returns the arccosine of n"),
-        "atan" => (atan_b, "(atan n) Returns the arctangent of n"),
-        "number->string" => (number_to_string_b, "(number->string n [radix]) Returns the external representation of n in radix 2, 8, 10 (the default) or 16"),
+        "+" => (plus_b, "(+ z ...) Returns the sum of its arguments"),
+        "-" => (minus_b, "(- z1 z2 ...) Returns z1 minus the rest, or the negation of a single argument"),
+        "*" => (times_b, "(* z ...) Returns the product of its arguments"),
+        "/" => (div_b, "(/ z1 z2 ...) Returns z1 divided by the rest, or the reciprocal of a single argument; exact division gives an exact rational"),
+        "=" => (eq_b, "(= z1 z2 ...) Returns #t if all arguments are numerically equal"),
+        "<" => (lt_b, "(< x1 x2 ...) Returns #t if the arguments are strictly increasing"),
+        ">" => (gt_b, "(> x1 x2 ...) Returns #t if the arguments are strictly decreasing"),
+        "<=" => (le_b, "(<= x1 x2 ...) Returns #t if the arguments are non-decreasing"),
+        ">=" => (ge_b, "(>= x1 x2 ...) Returns #t if the arguments are non-increasing"),
+        "number?" => (number_q, "(number? obj) Returns #t if obj is a number"),
+        "complex?" => (number_q, "(complex? obj) Returns #t if obj is a number (every s1 number is real)"),
+        "real?" => (number_q, "(real? obj) Returns #t if obj is a real number"),
+        "rational?" => (rational_q, "(rational? obj) Returns #t if obj is an exact number or a finite flonum"),
+        "integer?" => (integer_q, "(integer? obj) Returns #t if obj is an integer, exact or inexact (2.0 is an integer)"),
+        "exact?" => (exact_q, "(exact? z) Returns #t if z is exact"),
+        "inexact?" => (inexact_q, "(inexact? z) Returns #t if z is inexact"),
+        "exact-integer?" => (exact_integer_q, "(exact-integer? obj) Returns #t if obj is an exact integer"),
+        "nan?" => (nan_q, "(nan? z) Returns #t if z is a NaN"),
+        "infinite?" => (infinite_q, "(infinite? z) Returns #t if z is +inf.0 or -inf.0"),
+        "finite?" => (finite_q, "(finite? z) Returns #t if z is neither infinite nor a NaN"),
+        "zero?" => (zero_q, "(zero? z) Returns #t if z is zero"),
+        "positive?" => (positive_q, "(positive? x) Returns #t if x is greater than zero"),
+        "negative?" => (negative_q, "(negative? x) Returns #t if x is less than zero"),
+        "odd?" => (odd_q, "(odd? n) Returns #t if the integer n is odd"),
+        "even?" => (even_q, "(even? n) Returns #t if the integer n is even"),
+        "max" => (max_b, "(max x1 x2 ...) Returns the largest argument; inexact if any argument is"),
+        "min" => (min_b, "(min x1 x2 ...) Returns the smallest argument; inexact if any argument is"),
+        "abs" => (abs_b, "(abs x) Returns the absolute value of x"),
+        "quotient" => (truncate_quotient_b, "(quotient n1 n2) Integer division rounding toward zero"),
+        "remainder" => (truncate_remainder_b, "(remainder n1 n2) Remainder of (quotient n1 n2); has the sign of n1"),
+        "modulo" => (floor_remainder_b, "(modulo n1 n2) Remainder of floor division; has the sign of n2"),
+        "floor/" => (floor_div_b, "(floor/ n1 n2) Returns two values: the floor quotient and remainder"),
+        "floor-quotient" => (floor_quotient_b, "(floor-quotient n1 n2) Integer division rounding toward negative infinity"),
+        "floor-remainder" => (floor_remainder_b, "(floor-remainder n1 n2) Remainder of floor division; has the sign of n2"),
+        "truncate/" => (truncate_div_b, "(truncate/ n1 n2) Returns two values: the truncated quotient and remainder"),
+        "truncate-quotient" => (truncate_quotient_b, "(truncate-quotient n1 n2) Integer division rounding toward zero"),
+        "truncate-remainder" => (truncate_remainder_b, "(truncate-remainder n1 n2) Remainder of truncated division; has the sign of n1"),
+        "gcd" => (gcd_b, "(gcd n ...) Returns the greatest common divisor of its arguments (0 for none)"),
+        "lcm" => (lcm_b, "(lcm n ...) Returns the least common multiple of its arguments (1 for none)"),
+        "numerator" => (numerator_b, "(numerator q) Returns the numerator of q in lowest terms"),
+        "denominator" => (denominator_b, "(denominator q) Returns the denominator of q in lowest terms"),
+        "floor" => (floor_b, "(floor x) Returns the largest integer not greater than x"),
+        "ceiling" => (ceiling_b, "(ceiling x) Returns the smallest integer not less than x"),
+        "truncate" => (truncate_b, "(truncate x) Returns the integer nearest x whose magnitude is not larger"),
+        "round" => (round_b, "(round x) Returns the integer nearest x, rounding halves to even"),
+        "rationalize" => (rationalize_b, "(rationalize x y) Returns the simplest rational differing from x by no more than y"),
+        "exp" => (exp_b, "(exp z) Returns e raised to the power z"),
+        "log" => (log_b, "(log z [base]) Returns the natural logarithm of z, or its logarithm in base"),
+        "sin" => (sin_b, "(sin z) Returns the sine of z"),
+        "cos" => (cos_b, "(cos z) Returns the cosine of z"),
+        "tan" => (tan_b, "(tan z) Returns the tangent of z"),
+        "asin" => (asin_b, "(asin z) Returns the arcsine of z"),
+        "acos" => (acos_b, "(acos z) Returns the arccosine of z"),
+        "atan" => (atan_b, "(atan z) or (atan y x) Returns the arctangent of z, or of y/x using the signs of both"),
+        "square" => (square_b, "(square z) Returns z times z"),
+        "sqrt" => (sqrt_b, "(sqrt z) Returns the square root of z; exact when z is an exact perfect square"),
+        "exact-integer-sqrt" => (exact_integer_sqrt_b, "(exact-integer-sqrt k) Returns two values s and r with k = s*s + r"),
+        "expt" => (expt_b, "(expt z1 z2) Returns z1 raised to the power z2; exact for an exact base and integer exponent"),
+        "exact" => (exact_b, "(exact z) Returns the exact number closest to z"),
+        "inexact" => (inexact_b, "(inexact z) Returns the inexact number closest to z"),
+        "exact->inexact" => (inexact_b, "(exact->inexact z) Same as inexact"),
+        "inexact->exact" => (exact_b, "(inexact->exact z) Same as exact"),
+        "number->string" => (number_to_string_b, "(number->string z [radix]) Returns the external representation of z in radix 2, 8, 10 (the default) or 16"),
+        "string->number" => (string_to_number_b, "(string->number string [radix]) Returns the number string represents, or #f"),
     );
 }
 
-macro_rules! unary_op {
-    ($heap:expr, $args:expr, $func:ident, $op:tt) => {
-        if $args.len() != 1 {
-            Err(format!("{}: expects exactly 1 argument", stringify!($func)))
+// ---------------------------------------------------------------------------
+// The working representation
+// ---------------------------------------------------------------------------
+
+/// A number taken out of the heap for computation.
+#[derive(Clone, Debug, PartialEq)]
+enum Num {
+    Int(BigInt),
+    /// Always a non-integer: see `Num::from_ratio`.
+    Rat(BigRational),
+    Float(f64),
+}
+
+impl Num {
+    /// The number `v` holds, or an error naming `who`.
+    fn of(v: GcRef, who: &str) -> Result<Num, String> {
+        match gc_value!(v) {
+            SchemeValue::Int(i) => Ok(Num::Int(i.clone())),
+            SchemeValue::Rational(r) => Ok(Num::Rat((**r).clone())),
+            SchemeValue::Float(f) => Ok(Num::Float(*f)),
+            _ => Err(format!(
+                "{}: expected a number, got {}",
+                who,
+                crate::printer::print_value(&v)
+            )),
+        }
+    }
+
+    /// The exact number `r`, as an `Int` when it is whole.
+    fn from_ratio(r: BigRational) -> Num {
+        if r.is_integer() {
+            Num::Int(r.to_integer())
         } else {
-            let num = match &gc_value!($args[0]) {
-                SchemeValue::Int(i) => i.to_f64().unwrap(),
-                SchemeValue::Float(f) => *f,
-                _ => return Err(format!("{}: argument must be a number", stringify!($func))),
-            };
-            Ok(new_float($heap, num.$op()))
+            Num::Rat(r)
         }
-    };
-}
-
-/// (number->string n [radix])
-pub fn number_to_string_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.is_empty() || args.len() > 2 {
-        return Err("number->string: expects 1 or 2 arguments".to_string());
     }
-    let radix = match args.get(1).map(|r| gc_value!(*r)) {
-        None => 10,
-        Some(SchemeValue::Int(r)) => match r.to_u32() {
-            Some(r @ (2 | 8 | 10 | 16)) => r,
-            _ => return Err("number->string: radix must be 2, 8, 10 or 16".to_string()),
-        },
-        Some(_) => return Err("number->string: radix must be an integer".to_string()),
-    };
-    let s = match gc_value!(args[0]) {
-        SchemeValue::Int(i) => i.to_str_radix(radix),
-        SchemeValue::Float(f) if radix == 10 => crate::printer::format_float(*f),
-        SchemeValue::Float(_) => {
-            return Err("number->string: inexact numbers support only radix 10".to_string());
+
+    fn alloc(self, heap: &mut GcHeap) -> GcRef {
+        match self {
+            Num::Int(i) => new_int(heap, i),
+            Num::Rat(r) => new_rational(heap, r),
+            Num::Float(f) => new_float(heap, f),
         }
-        _ => return Err("number->string: argument must be a number".to_string()),
-    };
-    Ok(crate::gc::new_string(heap, &s))
+    }
+
+    fn is_exact(&self) -> bool {
+        !matches!(self, Num::Float(_))
+    }
+
+    fn to_f64(&self) -> f64 {
+        match self {
+            Num::Int(i) => int_to_f64(i),
+            Num::Rat(r) => r.to_f64().unwrap_or(f64::NAN),
+            Num::Float(f) => *f,
+        }
+    }
+
+    /// The exact value of an exact number. Flonums go through
+    /// `float_to_exact`; this is only for operands already known exact.
+    fn to_ratio(&self) -> BigRational {
+        match self {
+            Num::Int(i) => BigRational::from_integer(i.clone()),
+            Num::Rat(r) => r.clone(),
+            Num::Float(f) => BigRational::from_float(*f).unwrap_or_else(BigRational::zero),
+        }
+    }
+
+    fn to_inexact(self) -> Num {
+        match self {
+            Num::Float(_) => self,
+            n => Num::Float(n.to_f64()),
+        }
+    }
+
+    fn to_exact(self, who: &str) -> Result<Num, String> {
+        match self {
+            Num::Float(f) => float_to_exact(f, who),
+            n => Ok(n),
+        }
+    }
+
+    fn sign(&self) -> Ordering {
+        match self {
+            Num::Int(i) => i.sign().cmp(&num_bigint::Sign::NoSign),
+            Num::Rat(r) => r.numer().sign().cmp(&num_bigint::Sign::NoSign),
+            Num::Float(f) => f.partial_cmp(&0.0).unwrap_or(Ordering::Equal),
+        }
+    }
+
+    /// The integer this number is, exact or inexact, if it is one.
+    fn as_integer(&self) -> Option<BigInt> {
+        match self {
+            Num::Int(i) => Some(i.clone()),
+            Num::Float(f) if f.is_finite() && f.fract() == 0.0 => float_to_bigint(*f),
+            _ => None,
+        }
+    }
 }
 
-pub fn exp_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    unary_op!(heap, args, exp, exp)
-}
-
-pub fn log_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    unary_op!(heap, args, log, ln)
-}
-
-pub fn sin_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    unary_op!(heap, args, sin, sin)
-}
-
-pub fn cos_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    unary_op!(heap, args, cos, cos)
-}
-
-pub fn tan_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    unary_op!(heap, args, tan, tan)
-}
-
-pub fn asin_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    unary_op!(heap, args, asin, asin)
-}
-
-pub fn acos_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    unary_op!(heap, args, acos, acos)
-}
-
-pub fn atan_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() == 1 {
-        let num = match &gc_value!(args[0]) {
-            SchemeValue::Int(i) => i.to_f64().unwrap(),
-            SchemeValue::Float(f) => *f,
-            _ => return Err("atan: argument must be a number".to_string()),
-        };
-        Ok(new_float(heap, num.atan()))
-    } else if args.len() == 2 {
-        let y = match &gc_value!(args[0]) {
-            SchemeValue::Int(i) => i.to_f64().unwrap(),
-            SchemeValue::Float(f) => *f,
-            _ => return Err("atan: arguments must be numbers".to_string()),
-        };
-        let x = match &gc_value!(args[1]) {
-            SchemeValue::Int(i) => i.to_f64().unwrap(),
-            SchemeValue::Float(f) => *f,
-            _ => return Err("atan: arguments must be numbers".to_string()),
-        };
-        Ok(new_float(heap, y.atan2(x)))
+fn int_to_f64(i: &BigInt) -> f64 {
+    i.to_f64().unwrap_or(if i.is_negative() {
+        f64::NEG_INFINITY
     } else {
-        Err("atan: expects 1 or 2 arguments".to_string())
+        f64::INFINITY
+    })
+}
+
+fn float_to_bigint(f: f64) -> Option<BigInt> {
+    BigRational::from_float(f).map(|r| r.to_integer())
+}
+
+/// The exact value of a flonum (`(exact 0.5)` is `1/2`).
+fn float_to_exact(f: f64, who: &str) -> Result<Num, String> {
+    BigRational::from_float(f)
+        .map(Num::from_ratio)
+        .ok_or_else(|| format!("{}: {} has no exact representation", who, crate::printer::format_float(f)))
+}
+
+fn nums(args: &[GcRef], who: &str) -> Result<Vec<Num>, String> {
+    args.iter().map(|a| Num::of(*a, who)).collect()
+}
+
+fn arity(args: &[GcRef], n: usize, who: &str) -> Result<(), String> {
+    if args.len() == n {
+        Ok(())
+    } else {
+        Err(format!(
+            "{}: expects {} argument{}, got {}",
+            who,
+            n,
+            if n == 1 { "" } else { "s" },
+            args.len()
+        ))
     }
+}
+
+// ---------------------------------------------------------------------------
+// Arithmetic
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy)]
+enum Op {
+    Add,
+    Sub,
+    Mul,
+}
+
+/// `acc op x`, staying exact when both are exact. The integer case, by far
+/// the most common, works in place on the accumulator.
+fn combine(acc: Num, x: &SchemeValue, op: Op) -> Num {
+    match (acc, x) {
+        (Num::Int(mut a), SchemeValue::Int(b)) => {
+            match op {
+                Op::Add => a += b,
+                Op::Sub => a -= b,
+                Op::Mul => a *= b,
+            }
+            Num::Int(a)
+        }
+        (Num::Float(a), x) => Num::Float(float_op(a, value_to_f64(x), op)),
+        (acc, SchemeValue::Float(b)) => Num::Float(float_op(acc.to_f64(), *b, op)),
+        (acc, x) => {
+            let a = acc.to_ratio();
+            let b = match x {
+                SchemeValue::Int(i) => BigRational::from_integer(i.clone()),
+                SchemeValue::Rational(r) => (**r).clone(),
+                _ => unreachable!("combine: checked number"),
+            };
+            Num::from_ratio(match op {
+                Op::Add => a + b,
+                Op::Sub => a - b,
+                Op::Mul => a * b,
+            })
+        }
+    }
+}
+
+fn float_op(a: f64, b: f64, op: Op) -> f64 {
+    match op {
+        Op::Add => a + b,
+        Op::Sub => a - b,
+        Op::Mul => a * b,
+    }
+}
+
+fn value_to_f64(v: &SchemeValue) -> f64 {
+    match v {
+        SchemeValue::Int(i) => int_to_f64(i),
+        SchemeValue::Rational(r) => r.to_f64().unwrap_or(f64::NAN),
+        SchemeValue::Float(f) => *f,
+        _ => f64::NAN,
+    }
+}
+
+fn check_numbers(args: &[GcRef], who: &str) -> Result<(), String> {
+    for a in args {
+        if !matches!(
+            gc_value!(*a),
+            SchemeValue::Int(_) | SchemeValue::Rational(_) | SchemeValue::Float(_)
+        ) {
+            return Err(format!(
+                "{}: expected a number, got {}",
+                who,
+                crate::printer::print_value(a)
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn fold(heap: &mut GcHeap, args: &[GcRef], init: Num, op: Op, who: &str) -> Result<GcRef, String> {
+    check_numbers(args, who)?;
+    let mut acc = init;
+    for a in args {
+        acc = combine(acc, gc_value!(*a), op);
+    }
+    Ok(acc.alloc(heap))
 }
 
 pub fn plus_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    match args.len() {
-        0 => return Ok(new_int(heap, BigInt::from(0))),
-        1 => return Ok(args[0]),
-        _ => {}
-    }
-    let mut is_float = false;
-    let mut sum_int = BigInt::from(0);
-    let mut sum_float = 0.0;
-    for arg in args {
-        match &gc_value!(*arg) {
-            SchemeValue::Int(i) => {
-                if is_float {
-                    sum_float += i.to_f64().unwrap();
-                } else {
-                    sum_int += i;
-                }
-            }
-            SchemeValue::Float(f) => {
-                if !is_float {
-                    sum_float = sum_int.to_f64().unwrap();
-                    is_float = true;
-                }
-                sum_float += f;
-            }
-            _ => return Err("+: all arguments must be numbers".to_string()),
-        }
-    }
-    if is_float {
-        Ok(new_float(heap, sum_float))
-    } else {
-        Ok(new_int(heap, sum_int))
-    }
-}
-
-pub fn minus_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() < 1 {
-        return Err("-: expects at least 1 argument".to_string());
-    }
-    let mut is_float = false;
-    let mut result_int;
-    let mut result_float;
-    let mut iter = args.iter();
-    match &gc_value!(*iter.next().unwrap()) {
-        SchemeValue::Int(i) => {
-            result_int = i.clone();
-            result_float = i.to_f64().unwrap();
-        }
-        SchemeValue::Float(f) => {
-            is_float = true;
-            result_int = BigInt::zero();
-            result_float = *f;
-        }
-        _ => return Err("-: all arguments must be numbers".to_string()),
-    }
     if args.len() == 1 {
-        // Unary minus
-        if is_float {
-            return Ok(new_float(heap, -result_float));
-        } else {
-            return Ok(new_int(heap, -result_int));
-        }
+        check_numbers(args, "+")?;
+        return Ok(args[0]);
     }
-    for arg in iter {
-        match &gc_value!(*arg) {
-            SchemeValue::Int(i) => {
-                if is_float {
-                    result_float -= i.to_f64().unwrap();
-                } else {
-                    result_int -= i;
-                }
-            }
-            SchemeValue::Float(f) => {
-                if !is_float {
-                    result_float = result_int.to_f64().unwrap();
-                    is_float = true;
-                }
-                result_float -= f;
-            }
-            _ => return Err("-: all arguments must be numbers".to_string()),
-        }
-    }
-    if is_float {
-        Ok(new_float(heap, result_float))
-    } else {
-        Ok(new_int(heap, result_int))
-    }
+    fold(heap, args, Num::Int(BigInt::zero()), Op::Add, "+")
 }
 
 pub fn times_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    match args.len() {
-        0 => return Ok(new_int(heap, BigInt::from(1))),
-        1 => return Ok(args[0]),
-        _ => {}
+    if args.len() == 1 {
+        check_numbers(args, "*")?;
+        return Ok(args[0]);
     }
-    let mut is_float = false;
-    let mut prod_int = BigInt::one();
-    let mut prod_float = 1.0;
-    for arg in args {
-        match &gc_value!(*arg) {
-            SchemeValue::Int(i) => {
-                if is_float {
-                    prod_float *= i.to_f64().unwrap();
-                } else {
-                    prod_int *= i;
-                }
-            }
-            SchemeValue::Float(f) => {
-                if !is_float {
-                    prod_float = prod_int.to_f64().unwrap();
-                    is_float = true;
-                }
-                prod_float *= f;
-            }
-            _ => return Err("*: all arguments must be numbers".to_string()),
+    fold(heap, args, Num::Int(BigInt::one()), Op::Mul, "*")
+}
+
+pub fn minus_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    match args {
+        [] => Err("-: expects at least 1 argument".to_string()),
+        [x] => Ok(match Num::of(*x, "-")? {
+            Num::Int(i) => Num::Int(-i),
+            Num::Rat(r) => Num::Rat(-r),
+            Num::Float(f) => Num::Float(-f),
+        }
+        .alloc(heap)),
+        [first, rest @ ..] => {
+            let init = Num::of(*first, "-")?;
+            fold(heap, rest, init, Op::Sub, "-")
         }
     }
-    if is_float {
-        Ok(new_float(heap, prod_float))
+}
+
+/// `a / b`. Exact division by exact zero is an error; inexact division
+/// follows IEEE (`(/ 1.0 0)` is `+inf.0`).
+fn divide(a: Num, b: Num) -> Result<Num, String> {
+    if a.is_exact() && b.is_exact() {
+        if b.sign() == Ordering::Equal {
+            return Err("/: division by zero".to_string());
+        }
+        if let (Num::Int(x), Num::Int(y)) = (&a, &b) {
+            if (x % y).is_zero() {
+                return Ok(Num::Int(x / y));
+            }
+        }
+        Ok(Num::from_ratio(a.to_ratio() / b.to_ratio()))
     } else {
-        Ok(new_int(heap, prod_int))
+        Ok(Num::Float(a.to_f64() / b.to_f64()))
     }
 }
 
 pub fn div_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() < 1 {
-        return Err("/: expects at least 1 argument".to_string());
+    let ns = nums(args, "/")?;
+    let mut iter = ns.into_iter();
+    let first = iter.next().ok_or("/: expects at least 1 argument")?;
+    let mut acc = if args.len() == 1 {
+        divide(Num::Int(BigInt::one()), first)?
+    } else {
+        first
+    };
+    for n in iter {
+        acc = divide(acc, n)?;
     }
-    match args.len() {
-        0 => return Err("/: expects at least 1 argument".to_string()),
-        1 => {
-            return match gc_value!(args[0]) {
-                SchemeValue::Int(i) => Ok(new_float(heap, 1.0 / i.to_f64().unwrap())),
-                SchemeValue::Float(f) => Ok(new_float(heap, 1.0 / f)),
-                _ => Err("/: all arguments must be numbers".to_string()),
-            };
-        }
-        _ => {}
-    }
-    let mut result_float;
-    let mut iter = args.iter();
-    match &gc_value!(*iter.next().unwrap()) {
-        SchemeValue::Int(i) => {
-            result_float = i.to_f64().unwrap();
-        }
-        SchemeValue::Float(f) => {
-            result_float = *f;
-        }
-        _ => return Err("/: all arguments must be numbers".to_string()),
-    }
-    for arg in iter {
-        match &gc_value!(*arg) {
-            SchemeValue::Int(i) => {
-                result_float /= i.to_f64().unwrap();
-            }
-            SchemeValue::Float(f) => {
-                result_float /= f;
-            }
-            _ => return Err("/: all arguments must be numbers".to_string()),
-        }
-    }
-    Ok(new_float(heap, result_float))
+    Ok(acc.alloc(heap))
 }
 
-pub fn mod_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() != 2 {
-        return Err("mod: expects exactly 2 arguments".to_string());
-    }
-    let a = match &gc_value!(args[0]) {
-        SchemeValue::Int(i) => i,
-        _ => return Err("mod: arguments must be integers".to_string()),
-    };
-    let b = match &gc_value!(args[1]) {
-        SchemeValue::Int(i) => i,
-        _ => return Err("mod: arguments must be integers".to_string()),
-    };
-    if b.is_zero() {
-        return Err("mod: division by zero".to_string());
-    }
-    Ok(new_int(heap, a % b))
+pub fn abs_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 1, "abs")?;
+    Ok(match Num::of(args[0], "abs")? {
+        Num::Int(i) if i.is_negative() => Num::Int(-i).alloc(heap),
+        Num::Rat(r) if r.is_negative() => Num::Rat(-r).alloc(heap),
+        Num::Float(f) => new_float(heap, f.abs()),
+        _ => args[0],
+    })
 }
 
-/// Compare two Scheme numbers.
-///
-/// Integer/integer pairs are compared exactly. Previously every comparison went
-/// through `f64`, which silently loses precision above 2^53 — `(< 9223372036854775807
-/// 9223372036854775808)` returned #f because both round to the same double.
-/// A mix of exact and inexact still goes through `f64`; that is lossy for huge
-/// magnitudes but is the usual approximation and keeps `(= 5 5.0)` true.
-///
-/// Returns `None` for unordered pairs (NaN), which callers treat as false.
-fn num_cmp(a: &SchemeValue, b: &SchemeValue) -> Option<std::cmp::Ordering> {
-    use SchemeValue::{Float, Int};
+pub fn square_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 1, "square")?;
+    let n = Num::of(args[0], "square")?;
+    Ok(combine(n, gc_value!(args[0]), Op::Mul).alloc(heap))
+}
+
+// ---------------------------------------------------------------------------
+// Comparison
+// ---------------------------------------------------------------------------
+
+/// Compare two numbers exactly. A finite flonum is compared by its exact
+/// value, so the comparison is transitive even across magnitudes where
+/// converting the exact side to `f64` would round (`(< 9007199254740993
+/// 9007199254740992.0)` is `#f`). Returns `None` when a NaN is involved.
+fn num_cmp(a: &SchemeValue, b: &SchemeValue) -> Option<Ordering> {
+    use SchemeValue::{Float, Int, Rational};
     match (a, b) {
         (Int(x), Int(y)) => Some(x.cmp(y)),
-        (Int(x), Float(y)) => x.to_f64()?.partial_cmp(y),
-        (Float(x), Int(y)) => x.partial_cmp(&y.to_f64()?),
         (Float(x), Float(y)) => x.partial_cmp(y),
+        (Int(x), Float(y)) if x.bits() <= 53 => int_to_f64(x).partial_cmp(y),
+        (Float(x), Int(y)) if y.bits() <= 53 => x.partial_cmp(&int_to_f64(y)),
+        (Float(x), _) => exact_vs_float(b, *x).map(Ordering::reverse),
+        (_, Float(y)) => exact_vs_float(a, *y),
+        (Rational(x), Rational(y)) => Some(x.cmp(y)),
+        (Int(x), Rational(y)) => Some(BigRational::from_integer(x.clone()).cmp(y)),
+        (Rational(x), Int(y)) => Some((**x).cmp(&BigRational::from_integer(y.clone()))),
         _ => None,
     }
 }
 
-/// Shared implementation of the chained numeric comparisons (`=`, `<`, `>`).
+/// Order an exact number against a flonum.
+fn exact_vs_float(exact: &SchemeValue, f: f64) -> Option<Ordering> {
+    if f.is_nan() {
+        return None;
+    }
+    if f.is_infinite() {
+        return Some(if f > 0.0 { Ordering::Less } else { Ordering::Greater });
+    }
+    let fr = BigRational::from_float(f)?;
+    Some(match exact {
+        SchemeValue::Int(i) => BigRational::from_integer(i.clone()).cmp(&fr),
+        SchemeValue::Rational(r) => (**r).cmp(&fr),
+        _ => return None,
+    })
+}
+
 fn compare_chain(
     heap: &mut GcHeap,
     args: &[GcRef],
     name: &str,
-    want: std::cmp::Ordering,
+    ok: fn(Ordering) -> bool,
 ) -> Result<GcRef, String> {
     if args.len() < 2 {
         return Err(format!("{}: expects at least 2 arguments", name));
     }
-    for arg in args {
-        match gc_value!(*arg) {
-            SchemeValue::Int(_) | SchemeValue::Float(_) => {}
-            _ => return Err(format!("{}: all arguments must be numbers", name)),
-        }
-    }
-    for pair in args.windows(2) {
-        let ord = num_cmp(gc_value!(pair[0]), gc_value!(pair[1]));
-        if ord != Some(want) {
-            return Ok(new_bool(heap, false));
-        }
-    }
-    Ok(new_bool(heap, true))
+    check_numbers(args, name)?;
+    let result = args
+        .windows(2)
+        .all(|pair| num_cmp(gc_value!(pair[0]), gc_value!(pair[1])).is_some_and(ok));
+    Ok(new_bool(heap, result))
 }
 
 pub fn eq_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    compare_chain(heap, args, "=", std::cmp::Ordering::Equal)
+    compare_chain(heap, args, "=", Ordering::is_eq)
 }
 
 pub fn lt_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    compare_chain(heap, args, "<", std::cmp::Ordering::Less)
+    compare_chain(heap, args, "<", Ordering::is_lt)
 }
 
 pub fn gt_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    compare_chain(heap, args, ">", std::cmp::Ordering::Greater)
+    compare_chain(heap, args, ">", Ordering::is_gt)
 }
 
-/// (quotient n1 n2)
-/// Returns the integer quotient of dividing n1 by n2
-pub fn quotient_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() != 2 {
-        return Err("quotient: expects exactly 2 arguments".to_string());
-    }
-    let a = match &gc_value!(args[0]) {
-        SchemeValue::Int(i) => i,
-        _ => return Err("quotient: arguments must be integers".to_string()),
-    };
-    let b = match &gc_value!(args[1]) {
-        SchemeValue::Int(i) => i,
-        _ => return Err("quotient: arguments must be integers".to_string()),
-    };
-    if b.is_zero() {
-        return Err("quotient: division by zero".to_string());
-    }
-    Ok(new_int(heap, a / b))
+pub fn le_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    compare_chain(heap, args, "<=", Ordering::is_le)
 }
 
-/// (remainder n1 n2)
-/// Returns the remainder of dividing n1 by n2
-pub fn remainder_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() != 2 {
-        return Err("remainder: expects exactly 2 arguments".to_string());
-    }
-    let a = match &gc_value!(args[0]) {
-        SchemeValue::Int(i) => i,
-        _ => return Err("remainder: arguments must be integers".to_string()),
-    };
-    let b = match &gc_value!(args[1]) {
-        SchemeValue::Int(i) => i,
-        _ => return Err("remainder: arguments must be integers".to_string()),
-    };
-    if b.is_zero() {
-        return Err("remainder: division by zero".to_string());
-    }
-    Ok(new_int(heap, a % b))
+pub fn ge_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    compare_chain(heap, args, ">=", Ordering::is_ge)
 }
 
-/// (numerator q)
-/// Returns the numerator of rational q (for integers, returns the integer itself)
-pub fn numerator_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() != 1 {
-        return Err("numerator: expects exactly 1 argument".to_string());
+/// `max` / `min`: the extreme argument, made inexact if any argument is.
+fn extreme(heap: &mut GcHeap, args: &[GcRef], who: &str, want: Ordering) -> Result<GcRef, String> {
+    if args.is_empty() {
+        return Err(format!("{}: expects at least 1 argument", who));
     }
-    match &gc_value!(args[0]) {
-        SchemeValue::Int(_) => Ok(args[0]), // For integers, numerator is the integer itself
-        SchemeValue::Float(f) => {
-            // Convert float to rational representation (simplified)
-            if f.fract() == 0.0 {
-                Ok(new_int(heap, BigInt::from(*f as i64)))
-            } else {
-                // For simplicity, return the float as an integer part
-                Ok(new_int(heap, BigInt::from(f.trunc() as i64)))
+    check_numbers(args, who)?;
+    let mut best = args[0];
+    let mut inexact = false;
+    for a in args {
+        match gc_value!(*a) {
+            SchemeValue::Float(f) => {
+                inexact = true;
+                if f.is_nan() {
+                    return Ok(*a);
+                }
             }
+            _ => {}
         }
-        _ => return Err("numerator: argument must be a number".to_string()),
-    }
-}
-
-/// (denominator q)
-/// Returns the denominator of rational q (for integers, returns 1)
-pub fn denominator_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() != 1 {
-        return Err("denominator: expects exactly 1 argument".to_string());
-    }
-    match &gc_value!(args[0]) {
-        SchemeValue::Int(_) => Ok(new_int(heap, BigInt::one())), // For integers, denominator is 1
-        SchemeValue::Float(f) => {
-            if f.fract() == 0.0 {
-                Ok(new_int(heap, BigInt::one()))
-            } else {
-                // For simplicity, assume denominator is some power of 10
-                Ok(new_int(heap, BigInt::from(1000))) // Simplified implementation
-            }
-        }
-        _ => return Err("denominator: argument must be a number".to_string()),
-    }
-}
-
-/// (floor n)
-/// Returns the largest integer not greater than n
-pub fn floor_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() != 1 {
-        return Err("floor: expects exactly 1 argument".to_string());
-    }
-    match &gc_value!(args[0]) {
-        SchemeValue::Int(_) => Ok(args[0]), // Integers are unchanged
-        SchemeValue::Float(f) => Ok(new_int(heap, BigInt::from(f.floor() as i64))),
-        _ => return Err("floor: argument must be a number".to_string()),
-    }
-}
-
-/// (ceiling n)
-/// Returns the smallest integer not less than n
-pub fn ceiling_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() != 1 {
-        return Err("ceiling: expects exactly 1 argument".to_string());
-    }
-    match &gc_value!(args[0]) {
-        SchemeValue::Int(_) => Ok(args[0]), // Integers are unchanged
-        SchemeValue::Float(f) => Ok(new_int(heap, BigInt::from(f.ceil() as i64))),
-        _ => return Err("ceiling: argument must be a number".to_string()),
-    }
-}
-
-/// (truncate n)
-/// Returns the integer closest to n whose absolute value is not larger than n
-pub fn truncate_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() != 1 {
-        return Err("truncate: expects exactly 1 argument".to_string());
-    }
-    match &gc_value!(args[0]) {
-        SchemeValue::Int(_) => Ok(args[0]), // Integers are unchanged
-        SchemeValue::Float(f) => Ok(new_int(heap, BigInt::from(f.trunc() as i64))),
-        _ => return Err("truncate: argument must be a number".to_string()),
-    }
-}
-
-/// (round n)
-/// Returns the closest integer to n, rounding to even when halfway between integers
-pub fn round_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() != 1 {
-        return Err("round: expects exactly 1 argument".to_string());
-    }
-    match &gc_value!(args[0]) {
-        SchemeValue::Int(_) => Ok(args[0]), // Integers are unchanged
-        SchemeValue::Float(f) => Ok(new_int(heap, BigInt::from(f.round() as i64))),
-        _ => return Err("round: argument must be a number".to_string()),
-    }
-}
-
-/// (sqrt n)
-/// Returns the principal square root of n
-pub fn sqrt_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() != 1 {
-        return Err("sqrt: expects exactly 1 argument".to_string());
-    }
-    let num = match &gc_value!(args[0]) {
-        SchemeValue::Int(i) => i.to_f64().unwrap(),
-        SchemeValue::Float(f) => *f,
-        _ => return Err("sqrt: argument must be a number".to_string()),
-    };
-    if num < 0.0 {
-        return Err("sqrt: argument must be non-negative".to_string());
-    }
-    Ok(new_float(heap, num.sqrt()))
-}
-
-/// (expt n1 n2)
-/// Returns n1 raised to the power n2
-pub fn expt_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() != 2 {
-        return Err("expt: expects exactly 2 arguments".to_string());
-    }
-    // Exact path: integer base raised to a non-negative integer exponent. The
-    // f64 path below is wrong for anything past 2^53 — (expt 2 63) came back as
-    // 9223372036854776000 rather than 9223372036854775808.
-    if let (SchemeValue::Int(b), SchemeValue::Int(e)) = (gc_value!(args[0]), gc_value!(args[1])) {
-        if let Some(e) = e.to_u32() {
-            return Ok(new_int(heap, b.pow(e)));
+        if num_cmp(gc_value!(*a), gc_value!(best)) == Some(want) {
+            best = *a;
         }
     }
-
-    let base = match &gc_value!(args[0]) {
-        SchemeValue::Int(i) => i.to_f64().unwrap(),
-        SchemeValue::Float(f) => *f,
-        _ => return Err("expt: arguments must be numbers".to_string()),
-    };
-    let exp = match &gc_value!(args[1]) {
-        SchemeValue::Int(i) => i.to_f64().unwrap(),
-        SchemeValue::Float(f) => *f,
-        _ => return Err("expt: arguments must be numbers".to_string()),
-    };
-
-    // Handle special cases
-    if base == 0.0 && exp < 0.0 {
-        return Err("expt: division by zero".to_string());
-    }
-
-    let result = base.powf(exp);
-
-    // Check if result can be represented as integer
-    if result.fract() == 0.0 && result.is_finite() && result.abs() < (i64::MAX as f64) {
-        Ok(new_int(heap, BigInt::from(result as i64)))
+    if inexact && !matches!(gc_value!(best), SchemeValue::Float(_)) {
+        Ok(new_float(heap, value_to_f64(gc_value!(best))))
     } else {
-        Ok(new_float(heap, result))
+        Ok(best)
     }
 }
 
+pub fn max_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    extreme(heap, args, "max", Ordering::Greater)
+}
+
+pub fn min_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    extreme(heap, args, "min", Ordering::Less)
+}
+
+// ---------------------------------------------------------------------------
+// Predicates
+// ---------------------------------------------------------------------------
+
+fn bool_of(heap: &mut GcHeap, args: &[GcRef], who: &str, test: fn(&SchemeValue) -> bool) -> Result<GcRef, String> {
+    arity(args, 1, who)?;
+    let result = test(gc_value!(args[0]));
+    Ok(new_bool(heap, result))
+}
+
+/// Like `bool_of`, for predicates whose argument must be a number.
+fn num_pred(heap: &mut GcHeap, args: &[GcRef], who: &str, test: fn(&Num) -> bool) -> Result<GcRef, String> {
+    arity(args, 1, who)?;
+    let n = Num::of(args[0], who)?;
+    Ok(new_bool(heap, test(&n)))
+}
+
+pub fn number_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    bool_of(heap, args, "number?", |v| {
+        matches!(v, SchemeValue::Int(_) | SchemeValue::Rational(_) | SchemeValue::Float(_))
+    })
+}
+
+pub fn rational_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    bool_of(heap, args, "rational?", |v| match v {
+        SchemeValue::Int(_) | SchemeValue::Rational(_) => true,
+        SchemeValue::Float(f) => f.is_finite(),
+        _ => false,
+    })
+}
+
+pub fn integer_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    bool_of(heap, args, "integer?", |v| match v {
+        SchemeValue::Int(_) => true,
+        SchemeValue::Float(f) => f.is_finite() && f.fract() == 0.0,
+        _ => false,
+    })
+}
+
+pub fn exact_integer_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    bool_of(heap, args, "exact-integer?", |v| matches!(v, SchemeValue::Int(_)))
+}
+
+pub fn exact_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    num_pred(heap, args, "exact?", Num::is_exact)
+}
+
+pub fn inexact_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    num_pred(heap, args, "inexact?", |n| !n.is_exact())
+}
+
+pub fn nan_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    num_pred(heap, args, "nan?", |n| matches!(n, Num::Float(f) if f.is_nan()))
+}
+
+pub fn infinite_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    num_pred(heap, args, "infinite?", |n| matches!(n, Num::Float(f) if f.is_infinite()))
+}
+
+pub fn finite_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    num_pred(heap, args, "finite?", |n| match n {
+        Num::Float(f) => f.is_finite(),
+        _ => true,
+    })
+}
+
+pub fn zero_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    num_pred(heap, args, "zero?", |n| match n {
+        Num::Float(f) => *f == 0.0,
+        n => n.sign() == Ordering::Equal,
+    })
+}
+
+pub fn positive_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    num_pred(heap, args, "positive?", |n| match n {
+        Num::Float(f) => *f > 0.0,
+        n => n.sign() == Ordering::Greater,
+    })
+}
+
+pub fn negative_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    num_pred(heap, args, "negative?", |n| match n {
+        Num::Float(f) => *f < 0.0,
+        n => n.sign() == Ordering::Less,
+    })
+}
+
+fn parity(heap: &mut GcHeap, args: &[GcRef], who: &str, want_even: bool) -> Result<GcRef, String> {
+    arity(args, 1, who)?;
+    let n = Num::of(args[0], who)?
+        .as_integer()
+        .ok_or_else(|| format!("{}: expected an integer", who))?;
+    Ok(new_bool(heap, n.is_even() == want_even))
+}
+
+pub fn odd_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    parity(heap, args, "odd?", false)
+}
+
+pub fn even_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    parity(heap, args, "even?", true)
+}
+
+// ---------------------------------------------------------------------------
+// Integer division
+// ---------------------------------------------------------------------------
+
+/// The two integer operands of a division procedure, and whether the result
+/// must be inexact (an operand was an integral flonum).
+fn int_pair(args: &[GcRef], who: &str) -> Result<(BigInt, BigInt, bool), String> {
+    arity(args, 2, who)?;
+    let a = Num::of(args[0], who)?;
+    let b = Num::of(args[1], who)?;
+    let inexact = !a.is_exact() || !b.is_exact();
+    let to_int = |n: &Num| n.as_integer().ok_or_else(|| format!("{}: expected integers", who));
+    let (x, y) = (to_int(&a)?, to_int(&b)?);
+    if y.is_zero() {
+        return Err(format!("{}: division by zero", who));
+    }
+    Ok((x, y, inexact))
+}
+
+fn int_result(heap: &mut GcHeap, n: BigInt, inexact: bool) -> GcRef {
+    if inexact {
+        new_float(heap, int_to_f64(&n))
+    } else {
+        new_int(heap, n)
+    }
+}
+
+pub fn floor_quotient_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    let (a, b, inexact) = int_pair(args, "floor-quotient")?;
+    Ok(int_result(heap, a.div_floor(&b), inexact))
+}
+
+pub fn floor_remainder_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    let (a, b, inexact) = int_pair(args, "floor-remainder")?;
+    Ok(int_result(heap, a.mod_floor(&b), inexact))
+}
+
+pub fn floor_div_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    let (a, b, inexact) = int_pair(args, "floor/")?;
+    let (q, r) = a.div_mod_floor(&b);
+    let vals = vec![int_result(heap, q, inexact), int_result(heap, r, inexact)];
+    Ok(new_values(heap, vals))
+}
+
+pub fn truncate_quotient_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    let (a, b, inexact) = int_pair(args, "truncate-quotient")?;
+    Ok(int_result(heap, a / b, inexact))
+}
+
+pub fn truncate_remainder_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    let (a, b, inexact) = int_pair(args, "truncate-remainder")?;
+    Ok(int_result(heap, a % b, inexact))
+}
+
+pub fn truncate_div_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    let (a, b, inexact) = int_pair(args, "truncate/")?;
+    let (q, r) = a.div_rem(&b);
+    let vals = vec![int_result(heap, q, inexact), int_result(heap, r, inexact)];
+    Ok(new_values(heap, vals))
+}
+
+fn gcd_lcm(heap: &mut GcHeap, args: &[GcRef], who: &str, lcm: bool) -> Result<GcRef, String> {
+    let mut acc = if lcm { BigInt::one() } else { BigInt::zero() };
+    let mut inexact = false;
+    for a in args {
+        let n = Num::of(*a, who)?;
+        inexact |= !n.is_exact();
+        let i = n.as_integer().ok_or_else(|| format!("{}: expected integers", who))?;
+        acc = if lcm { acc.lcm(&i) } else { acc.gcd(&i) };
+    }
+    Ok(int_result(heap, acc.abs(), inexact))
+}
+
+pub fn gcd_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    gcd_lcm(heap, args, "gcd", false)
+}
+
+pub fn lcm_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    gcd_lcm(heap, args, "lcm", true)
+}
+
+// ---------------------------------------------------------------------------
+// Rationals and rounding
+// ---------------------------------------------------------------------------
+
+/// `numerator` / `denominator`. For a flonum these are of its exact value,
+/// returned inexact: `(denominator 0.5)` is `2.0`.
+fn ratio_part(heap: &mut GcHeap, args: &[GcRef], who: &str, numer: bool) -> Result<GcRef, String> {
+    arity(args, 1, who)?;
+    let n = Num::of(args[0], who)?;
+    let inexact = !n.is_exact();
+    let r = n.to_exact(who)?.to_ratio();
+    let part = if numer { r.numer().clone() } else { r.denom().clone() };
+    Ok(int_result(heap, part, inexact))
+}
+
+pub fn numerator_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    ratio_part(heap, args, "numerator", true)
+}
+
+pub fn denominator_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    ratio_part(heap, args, "denominator", false)
+}
+
+/// Round an exact rational to an integer, halves to even.
+fn round_half_even(r: &BigRational) -> BigInt {
+    let floor = r.floor();
+    let diff = r - &floor;
+    let half = BigRational::new(BigInt::one(), BigInt::from(2));
+    let floor = floor.to_integer();
+    match diff.cmp(&half) {
+        Ordering::Less => floor,
+        Ordering::Greater => floor + 1,
+        Ordering::Equal if floor.is_even() => floor,
+        Ordering::Equal => floor + 1,
+    }
+}
+
+/// Shared shape of `floor`, `ceiling`, `truncate` and `round`: integers are
+/// returned as they are, rationals become exact integers, flonums stay
+/// flonums.
+fn rounding(
+    heap: &mut GcHeap,
+    args: &[GcRef],
+    who: &str,
+    exact: fn(&BigRational) -> BigInt,
+    inexact: fn(f64) -> f64,
+) -> Result<GcRef, String> {
+    arity(args, 1, who)?;
+    Ok(match Num::of(args[0], who)? {
+        Num::Int(_) => args[0],
+        Num::Rat(r) => new_int(heap, exact(&r)),
+        Num::Float(f) => new_float(heap, inexact(f)),
+    })
+}
+
+pub fn floor_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    rounding(heap, args, "floor", |r| r.floor().to_integer(), f64::floor)
+}
+
+pub fn ceiling_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    rounding(heap, args, "ceiling", |r| r.ceil().to_integer(), f64::ceil)
+}
+
+pub fn truncate_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    rounding(heap, args, "truncate", |r| r.trunc().to_integer(), f64::trunc)
+}
+
+pub fn round_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    rounding(heap, args, "round", round_half_even, f64::round_ties_even)
+}
+
+/// The simplest rational in the closed interval [lo, hi] (lo <= hi): the
+/// one with the smallest denominator, and among those the smallest
+/// numerator.
+fn simplest_between(lo: &BigRational, hi: &BigRational) -> BigRational {
+    if !lo.is_positive() && !hi.is_negative() {
+        BigRational::zero()
+    } else if hi.is_negative() {
+        -simplest_between(&-hi, &-lo)
+    } else {
+        simplest_positive(lo, hi)
+    }
+}
+
+/// `simplest_between` for 0 < lo <= hi.
+fn simplest_positive(lo: &BigRational, hi: &BigRational) -> BigRational {
+    let fl = lo.floor();
+    if &fl == lo {
+        return fl;
+    }
+    let next = &fl + BigRational::one();
+    if &next <= hi {
+        return next;
+    }
+    // lo and hi lie strictly inside (fl, fl + 1): recurse on the
+    // reciprocals of their fractional parts.
+    let inner = simplest_positive(&(hi - &fl).recip(), &(lo - &fl).recip());
+    fl + inner.recip()
+}
+
+pub fn rationalize_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 2, "rationalize")?;
+    let x = Num::of(args[0], "rationalize")?;
+    let y = Num::of(args[1], "rationalize")?;
+    let inexact = !x.is_exact() || !y.is_exact();
+    let (xf, yf) = (x.to_f64(), y.to_f64());
+    if inexact && (!xf.is_finite() || !yf.is_finite()) {
+        let result = if xf.is_nan() || yf.is_nan() || (xf.is_infinite() && yf.is_infinite()) {
+            f64::NAN
+        } else if yf.is_infinite() {
+            0.0
+        } else {
+            xf
+        };
+        return Ok(new_float(heap, result));
+    }
+    let x = x.to_exact("rationalize")?.to_ratio();
+    let y = y.to_exact("rationalize")?.to_ratio().abs();
+    let r = Num::from_ratio(simplest_between(&(&x - &y), &(&x + &y)));
+    Ok(if inexact { r.to_inexact() } else { r }.alloc(heap))
+}
+
+// ---------------------------------------------------------------------------
+// Transcendental functions, roots and powers
+// ---------------------------------------------------------------------------
+
+fn float_fn(heap: &mut GcHeap, args: &[GcRef], who: &str, f: fn(f64) -> f64) -> Result<GcRef, String> {
+    arity(args, 1, who)?;
+    let x = Num::of(args[0], who)?.to_f64();
+    Ok(new_float(heap, f(x)))
+}
+
+pub fn exp_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    float_fn(heap, args, "exp", f64::exp)
+}
+
+pub fn sin_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    float_fn(heap, args, "sin", f64::sin)
+}
+
+pub fn cos_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    float_fn(heap, args, "cos", f64::cos)
+}
+
+pub fn tan_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    float_fn(heap, args, "tan", f64::tan)
+}
+
+pub fn asin_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    float_fn(heap, args, "asin", f64::asin)
+}
+
+pub fn acos_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    float_fn(heap, args, "acos", f64::acos)
+}
+
+pub fn log_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    match args.len() {
+        1 => float_fn(heap, args, "log", f64::ln),
+        2 => {
+            let z = Num::of(args[0], "log")?.to_f64();
+            let base = Num::of(args[1], "log")?.to_f64();
+            Ok(new_float(heap, z.ln() / base.ln()))
+        }
+        n => Err(format!("log: expects 1 or 2 arguments, got {}", n)),
+    }
+}
+
+pub fn atan_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    match args.len() {
+        1 => float_fn(heap, args, "atan", f64::atan),
+        2 => {
+            let y = Num::of(args[0], "atan")?.to_f64();
+            let x = Num::of(args[1], "atan")?.to_f64();
+            Ok(new_float(heap, y.atan2(x)))
+        }
+        n => Err(format!("atan: expects 1 or 2 arguments, got {}", n)),
+    }
+}
+
+/// The exact square root of a non-negative integer, if it has one.
+fn exact_root(n: &BigInt) -> Option<BigInt> {
+    let s = n.sqrt();
+    (&s * &s == *n).then_some(s)
+}
+
+pub fn sqrt_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 1, "sqrt")?;
+    let n = Num::of(args[0], "sqrt")?;
+    if n.sign() == Ordering::Less {
+        return Err("sqrt: complex results are not supported".to_string());
+    }
+    let exact = match &n {
+        Num::Int(i) => exact_root(i).map(Num::Int),
+        Num::Rat(r) => match (exact_root(r.numer()), exact_root(r.denom())) {
+            (Some(a), Some(b)) => Some(Num::from_ratio(BigRational::new(a, b))),
+            _ => None,
+        },
+        Num::Float(_) => None,
+    };
+    Ok(exact.unwrap_or_else(|| Num::Float(n.to_f64().sqrt())).alloc(heap))
+}
+
+pub fn exact_integer_sqrt_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 1, "exact-integer-sqrt")?;
+    match gc_value!(args[0]) {
+        SchemeValue::Int(k) if !k.is_negative() => {
+            let s = k.sqrt();
+            let r = k - &s * &s;
+            let vals = vec![new_int(heap, s), new_int(heap, r)];
+            Ok(new_values(heap, vals))
+        }
+        _ => Err("exact-integer-sqrt: expected a non-negative exact integer".to_string()),
+    }
+}
+
+/// Exponents above this are refused for exact powers, which would otherwise
+/// try to build an astronomically large integer.
+const MAX_EXACT_POWER: u32 = 1 << 24;
+
+pub fn expt_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 2, "expt")?;
+    let base = Num::of(args[0], "expt")?;
+    let exp = Num::of(args[1], "expt")?;
+    if let Num::Int(e) = &exp {
+        if base.is_exact() {
+            return Ok(exact_power(base, e)?.alloc(heap));
+        }
+        if let Some(e) = e.to_i32() {
+            return Ok(new_float(heap, base.to_f64().powi(e)));
+        }
+    }
+    let (b, e) = (base.to_f64(), exp.to_f64());
+    let result = b.powf(e);
+    if result.is_nan() && !b.is_nan() && !e.is_nan() {
+        return Err("expt: complex results are not supported".to_string());
+    }
+    Ok(new_float(heap, result))
+}
+
+fn exact_power(base: Num, e: &BigInt) -> Result<Num, String> {
+    let r = base.to_ratio();
+    // 0, 1 and -1 stay small whatever the exponent.
+    if r.is_zero() {
+        return match e.sign() {
+            num_bigint::Sign::Minus => Err("expt: division by zero".to_string()),
+            num_bigint::Sign::NoSign => Ok(Num::Int(BigInt::one())),
+            num_bigint::Sign::Plus => Ok(Num::Int(BigInt::zero())),
+        };
+    }
+    if r.abs().is_one() {
+        let odd = e.is_odd();
+        return Ok(Num::Int(if r.is_negative() && odd { -BigInt::one() } else { BigInt::one() }));
+    }
+    let mag = e
+        .abs()
+        .to_u32()
+        .filter(|m| *m <= MAX_EXACT_POWER)
+        .ok_or("expt: exponent too large")?;
+    let p = num_traits::pow(r, mag as usize);
+    Ok(Num::from_ratio(if e.is_negative() { p.recip() } else { p }))
+}
+
+pub fn exact_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 1, "exact")?;
+    match Num::of(args[0], "exact")? {
+        Num::Float(f) => Ok(float_to_exact(f, "exact")?.alloc(heap)),
+        _ => Ok(args[0]),
+    }
+}
+
+pub fn inexact_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 1, "inexact")?;
+    match Num::of(args[0], "inexact")? {
+        Num::Float(_) => Ok(args[0]),
+        n => Ok(n.to_inexact().alloc(heap)),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Conversion to and from strings
+// ---------------------------------------------------------------------------
+
+fn radix_arg(args: &[GcRef], index: usize, who: &str) -> Result<u32, String> {
+    match args.get(index).map(|r| gc_value!(*r)) {
+        None => Ok(10),
+        Some(SchemeValue::Int(r)) => match r.to_u32() {
+            Some(r @ (2 | 8 | 10 | 16)) => Ok(r),
+            _ => Err(format!("{}: radix must be 2, 8, 10 or 16", who)),
+        },
+        Some(_) => Err(format!("{}: radix must be an integer", who)),
+    }
+}
+
+/// (number->string z [radix])
+pub fn number_to_string_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.is_empty() || args.len() > 2 {
+        return Err("number->string: expects 1 or 2 arguments".to_string());
+    }
+    let radix = radix_arg(args, 1, "number->string")?;
+    let s = match Num::of(args[0], "number->string")? {
+        Num::Int(i) => i.to_str_radix(radix),
+        Num::Rat(r) => format!("{}/{}", r.numer().to_str_radix(radix), r.denom().to_str_radix(radix)),
+        Num::Float(f) if radix == 10 => crate::printer::format_float(f),
+        Num::Float(_) => {
+            return Err("number->string: inexact numbers support only radix 10".to_string());
+        }
+    };
+    Ok(new_string(heap, &s))
+}
+
+/// (string->number string [radix])
+pub fn string_to_number_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.is_empty() || args.len() > 2 {
+        return Err("string->number: expects 1 or 2 arguments".to_string());
+    }
+    let radix = radix_arg(args, 1, "string->number")?;
+    let text = match gc_value!(args[0]) {
+        SchemeValue::Str(s) => s.clone(),
+        _ => return Err("string->number: expected a string".to_string()),
+    };
+    Ok(match parse_number(&text, radix) {
+        NumberSyntax::Value(Number::Int(i)) => new_int(heap, i),
+        NumberSyntax::Value(Number::Rational(r)) => new_rational(heap, r),
+        NumberSyntax::Value(Number::Float(f)) => new_float(heap, f),
+        NumberSyntax::NotANumber | NumberSyntax::Error(_) => new_bool(heap, false),
+    })
+}
+
+#[cfg(test)]
 mod tests {
     #[allow(unused_imports)]
     use super::*;
@@ -620,9 +1075,10 @@ mod tests {
             new_int(ec.heap, BigInt::from(2)),
         ];
         let result = div_b(&mut ec.heap, &args).unwrap();
+        // Exact division stays exact.
         match &gc_value!(result) {
-            SchemeValue::Float(f) => assert_eq!(*f, 5.0),
-            _ => panic!("Expected float"),
+            SchemeValue::Int(i) => assert_eq!(i.to_string(), "5"),
+            _ => panic!("Expected integer"),
         }
     }
 
@@ -634,7 +1090,7 @@ mod tests {
             new_int(ec.heap, BigInt::from(7)),
             new_int(ec.heap, BigInt::from(3)),
         ];
-        let result = mod_b(&mut ec.heap, &args).unwrap();
+        let result = floor_remainder_b(&mut ec.heap, &args).unwrap();
         match &gc_value!(result) {
             SchemeValue::Int(i) => assert_eq!(i.to_string(), "1"),
             _ => panic!("Expected integer"),

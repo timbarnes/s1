@@ -13,7 +13,7 @@ A comprehensive Scheme interpreter written in Rust that aims to closely follow t
 - **CEK Evaluator**: Basis for call/cc, exceptions, and continuations
 
 ### Data Types
-- **Numbers**: Arbitrary precision integers (BigInt) and IEEE 754 floating-point
+- **Numbers**: Arbitrary precision integers (BigInt), exact rationals, and IEEE 754 floating-point
 - **Symbols**: Interned identifiers for efficient comparison
 - **Strings**: UTF-8 string literals with proper escaping
 - **Characters**: Individual character values
@@ -38,9 +38,10 @@ A comprehensive Scheme interpreter written in Rust that aims to closely follow t
 ### Built-in Functions
 
 #### Arithmetic Operations
-- `+`, `-`, `*`, `/` - Basic arithmetic with mixed integer/float support
-- `mod` - Integer modulo operation
-- `=`, `<`, `>` - Numeric comparison operators
+- `+`, `-`, `*`, `/` - Arithmetic; exact operands give exact results (`(/ 1 2)` is `1/2`)
+- `quotient`, `remainder`, `modulo`, `floor/`, `truncate/` - Integer division
+- `=`, `<`, `>`, `<=`, `>=` - Numeric comparison operators
+- See [Docs/numbers.md](Docs/numbers.md) for the full numeric library
 
 #### List Operations
 - `car`, `cdr` - List accessors
@@ -237,7 +238,7 @@ The `scheme/s1-core.scm` file provides additional Scheme functions:
 - 📋 Additional standard library functions
 - 📋 Improved error reporting with source locations
 - 📋 Module system
-- 📋 Additional numeric types (rationals, complex)
+- 📋 Complex numbers (not planned)
 
 ### Known Limitations
 - No tail call optimization (currently being implemented)

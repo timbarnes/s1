@@ -32,6 +32,7 @@ pub fn eq(heap: &GcHeap, a: GcRef, b: GcRef) -> bool {
     } else {
         match (heap.get_value(a), heap.get_value(b)) {
             (SchemeValue::Int(a), SchemeValue::Int(b)) => a == b,
+            (SchemeValue::Rational(a), SchemeValue::Rational(b)) => a == b,
             (SchemeValue::Float(a), SchemeValue::Float(b)) => a == b,
             (SchemeValue::Symbol(a), SchemeValue::Symbol(b)) => a == b,
             (SchemeValue::Bool(a), SchemeValue::Bool(b)) => a == b,
@@ -149,6 +150,7 @@ impl Hash for SchemeValue {
         match self {
             SchemeValue::Symbol(s) => s.hash(state),
             SchemeValue::Int(i) => i.hash(state),
+            SchemeValue::Rational(r) => r.hash(state),
             SchemeValue::Float(f) => f.to_bits().hash(state),
             SchemeValue::Str(s) => s.hash(state),
             SchemeValue::Bool(b) => b.hash(state),
@@ -283,6 +285,15 @@ pub fn new_pair(heap: &mut GcHeap, car: GcRef, cdr: GcRef) -> GcRef {
         marked: 0,
     };
     heap.alloc(obj)
+}
+
+/// Create a new exact rational. Callers pass a non-integer in lowest terms
+/// (see `SchemeValue::Rational`); whole numbers belong in `new_int`.
+pub fn new_rational(heap: &mut GcHeap, val: num_rational::BigRational) -> GcRef {
+    heap.alloc(GcObject {
+        value: SchemeValue::Rational(Box::new(val)),
+        marked: 0,
+    })
 }
 
 /// Create a new vector.

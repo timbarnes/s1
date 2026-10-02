@@ -15,7 +15,7 @@
 
 use crate::gc::{
     GcHeap, GcRef, SchemeValue, get_symbol, new_bool, new_char, new_float, new_int, new_pair,
-    new_string, new_vector,
+    new_rational, new_string, new_vector,
 };
 use crate::gc_value_mut;
 use crate::io::PortKind;
@@ -82,6 +82,7 @@ impl Reader<'_, '_> {
             Token::Number(s) => match parse_number(&s, 10) {
                 NumberSyntax::Value(Number::Int(i)) => new_int(self.heap, i),
                 NumberSyntax::Value(Number::Float(f)) => new_float(self.heap, f),
+                NumberSyntax::Value(Number::Rational(r)) => new_rational(self.heap, r),
                 NumberSyntax::Error(msg) => self.defer(msg),
                 NumberSyntax::NotANumber => self.defer(format!("invalid number {}", s)),
             },
@@ -515,7 +516,7 @@ mod tests {
     fn parse_unsupported_values_keep_reader_in_sync() {
         // Each error is reported after its whole datum, so the next datum
         // reads normally.
-        let results = read_all("(1 1/2 3) ok1 #u8(1 2) ok2 (#\\bogus x) ok3 1+2i ok4");
+        let results = read_all("(1 1/0 3) ok1 #u8(1 2) ok2 (#\\bogus x) ok3 1+2i ok4");
         let msgs: Vec<String> = results
             .iter()
             .map(|r| match r {
@@ -525,7 +526,7 @@ mod tests {
             })
             .collect();
         assert_eq!(msgs.len(), 8, "{:?}", msgs);
-        assert!(msgs[0].contains("rational numbers are not supported yet"));
+        assert!(msgs[0].contains("division by zero"));
         assert_eq!(msgs[1], "ok1");
         assert!(msgs[2].contains("bytevectors are not supported yet"));
         assert_eq!(msgs[3], "ok2");

@@ -55,6 +55,7 @@ fn print_into(out: &mut String, obj: GcRef, write: bool) {
         Symbol(s) if write => write_symbol(out, s),
         Symbol(s) => out.push_str(s),
         Int(i) => out.push_str(&i.to_string()),
+        Rational(r) => out.push_str(&format!("{}/{}", r.numer(), r.denom())),
         Float(f) => out.push_str(&format_float(*f)),
         Str(s) if write => write_string(out, s),
         Str(s) => out.push_str(s),

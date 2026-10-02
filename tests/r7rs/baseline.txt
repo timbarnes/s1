@@ -1,19 +1,19 @@
 # R7RS conformance baseline for s1 -- regenerate with tests/r7rs/run.sh --update
 # Columns: section, pass, fail, error, attempted, ~total (static estimate), note
 4.1 Primitive expression types	27	0	0	27	27	
-4.2 Derived expression types	28	0	39	67	73	
+4.2 Derived expression types	29	0	38	67	73	
 4.3 Macros	0	0	17	17	27	
 5 Program structure	3	0	12	15	15	
 6.1 Equivalence Predicates	25	0	0	25	25	
-6.2 Numbers	112	14	53	179	219	
+6.2 Numbers	194	0	0	194	219	
 6.3 Booleans	13	0	5	18	18	
-6.4 Lists	39	1	15	55	65	
+6.4 Lists	40	1	14	55	65	
 6.5 Symbols	7	1	9	17	17	
 6.6 Characters	43	7	29	79	79	
 6.7 Strings	78	0	52	130	130	
 6.8 Vectors	13	0	30	43	43	
 6.9 Bytevectors	0	0	11	11	39	
-6.10 Control Features	19	0	15	34	34	
+6.10 Control Features	20	0	14	34	34	
 6.11 Exceptions	2	2	16	20	30	
 6.12 Environments and evaluation	0	0	4	4	4	
 6.13 Input and output	3	0	38	41	63	
