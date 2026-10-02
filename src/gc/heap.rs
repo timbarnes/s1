@@ -38,6 +38,22 @@ pub struct GcHeap {
     // in printed output instead of silent corruption or a use-after-free.
     // See Docs/nested-evaluation.md's "Tooling worth keeping".
     poison_sweep: bool,
+    /// Identifiers renamed by `syntax-rules` expansion (see
+    /// Docs/hygiene-design.md). Each key is an uninterned symbol; its entry
+    /// says which identifier it renames and in which environment that
+    /// identifier is resolved when the alias isn't bound locally. An entry
+    /// keeps `original` and `env` alive only while the alias itself is
+    /// reachable (an ephemeron), and is dropped when the alias is collected.
+    aliases: HashMap<GcRef, Alias>,
+}
+
+/// An alias's renaming record; see `GcHeap::aliases`.
+pub struct Alias {
+    pub original: GcRef,
+    pub env: crate::env::EnvRef,
+    /// The GC epoch in which this entry's `original` and `env` were last
+    /// marked, so each live entry is traced once per collection.
+    traced: std::cell::Cell<u64>,
 }
 
 impl GcHeap {
@@ -68,6 +84,7 @@ impl GcHeap {
             threshold: gc_threshold,
             current_epoch: 0,
             poison_sweep: std::env::var("S1_GC_POISON").is_ok(),
+            aliases: HashMap::default(),
         };
 
         // Pre-allocate singleton objects
@@ -229,6 +246,40 @@ impl GcHeap {
         })
     }
 
+    /// A new alias renaming `original`, to be resolved in `env`: an uninterned
+    /// symbol with the same name, recorded in the alias table.
+    pub fn make_alias(&mut self, original: GcRef, env: crate::env::EnvRef) -> GcRef {
+        let name = match self.get_value(original) {
+            SchemeValue::Symbol(name) => name.clone(),
+            _ => panic!("make_alias: original must be a symbol"),
+        };
+        let alias = self.fresh_symbol(&name);
+        self.aliases.insert(
+            alias,
+            Alias {
+                original,
+                env,
+                traced: std::cell::Cell::new(0),
+            },
+        );
+        alias
+    }
+
+    /// The renaming record for `id`, if it is an alias.
+    pub fn alias(&self, id: GcRef) -> Option<&Alias> {
+        self.aliases.get(&id)
+    }
+
+    /// The number of live alias-table entries (for tests and diagnostics).
+    pub fn alias_count(&self) -> usize {
+        self.aliases.len()
+    }
+
+    #[cfg(test)]
+    pub fn set_poison_sweep(&mut self, on: bool) {
+        self.poison_sweep = on;
+    }
+
     /// Get statistics about the symbol table.
     pub fn symbol_table_stats(&self) -> usize {
         self.symbol_table.len()
@@ -330,11 +381,36 @@ impl GcHeap {
         for &sym in self.symbol_table.values() {
             mark_reachable(sym, epoch, &mut self.worklist);
         }
+
+        // Alias table, as ephemerons: a reachable alias keeps its original
+        // and environment alive. Marking an environment can reach more
+        // aliases, so repeat until a pass traces nothing new.
+        let worklist = &mut self.worklist;
+        loop {
+            let mut traced_any = false;
+            for (&alias, entry) in self.aliases.iter() {
+                if *crate::gc_marked!(alias) != epoch || entry.traced.get() == epoch {
+                    continue;
+                }
+                entry.traced.set(epoch);
+                traced_any = true;
+                mark_reachable(entry.original, epoch, worklist);
+                entry
+                    .env
+                    .mark(&mut |gcref| mark_reachable(gcref, epoch, worklist));
+            }
+            if !traced_any {
+                break;
+            }
+        }
     }
 
     fn sweep(&mut self) {
         let poison = self.poison_sweep;
         let epoch = self.current_epoch;
+        // Forget aliases that are about to be freed.
+        self.aliases
+            .retain(|&alias, _| unsafe { (*alias).marked } == epoch);
         self.objects.retain(|obj| {
             let marked = unsafe { (**obj).marked } == epoch;
             if !marked {
