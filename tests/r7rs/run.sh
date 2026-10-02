@@ -60,6 +60,9 @@ awk -v dir="$work" '
 # is an estimate, used only to show how much of a section was never reached.
 expected_tests() {
     awk '
+        # Skip #| ... |# block comments (the suite has commented-out tests).
+        /^[ \t]*#\|/ { in_block = 1 }
+        in_block { if ($0 ~ /\|#/) in_block = 0; next }
         /^[ \t]*;/ { next }
         /^[ \t]*\(test-numeric-syntax[ \t]/ { n += 2; next }
         /^[ \t]*\(test(-assert|-values|-error|-write-syntax|-precision|-read-error)?[ \t)]/ { n++ }

@@ -49,6 +49,11 @@
 ;; rooted handler list; run their suite with a collection at every chance.
 (load "scheme/exception_tests.scm")
 
+;; syntax-rules adds the alias table (ephemerons) and transformer objects
+;; that hold environments; expand and evaluate under constant collection.
+(define **syntax-loop-n** 200)
+(load "scheme/syntax_rules_tests.scm")
+
 ;; Defect 2 (quasiquote_sf's unrooted saved_kont, and defect 3, the
 ;; macro-expander's own Rust-local intermediates): deeply recursive calls
 ;; inside nested unquotes, repeated enough times to force many collections

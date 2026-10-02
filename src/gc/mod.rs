@@ -120,6 +120,8 @@ pub enum Callable {
         // Extracted from a leading string literal in the lambda/define body, if present.
         doc: Option<String>,
     },
+    // A hygienic `syntax-rules` transformer (src/syntax_rules.rs)
+    SyntaxRules(Box<crate::syntax_rules::SyntaxRules>),
     // Scheme-implemented macros
     Macro {
         params: Vec<GcRef>,

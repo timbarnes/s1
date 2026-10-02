@@ -72,6 +72,7 @@ fn print_into(out: &mut String, obj: GcRef, write: bool) {
             Callable::SpecialForm { doc, .. } => format!("SpecialForm {} ", doc),
             Callable::Closure { params, body, .. } => print_callable("Closure", params, *body),
             Callable::Macro { params, body, .. } => print_callable("Macro", params, *body),
+            Callable::SyntaxRules(_) => "#<syntax-rules>".to_string(),
             Callable::SysBuiltin { func: _, doc } => format!("SysBuiltin {}", doc),
         }),
         Port(port) => out.push_str(&format!("Port<{:?}>", port)),

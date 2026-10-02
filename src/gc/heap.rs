@@ -473,6 +473,9 @@ fn mark_reachable(start: GcRef, epoch: u64, worklist: &mut Vec<GcRef>) {
                     push_if_unmarked(*body, epoch, worklist);
                     env.mark(&mut |gcref| push_if_unmarked(gcref, epoch, worklist));
                 }
+                Callable::SyntaxRules(sr) => {
+                    sr.mark(&mut |gcref| push_if_unmarked(gcref, epoch, worklist));
+                }
                 _ => {}
             },
             SchemeValue::Continuation(k) => {

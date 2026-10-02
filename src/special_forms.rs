@@ -57,6 +57,10 @@ pub fn register_special_forms(heap: &mut GcHeap, env: EnvRef) {
         "unquote-splicing" => unquote_splicing_sf,
         "with-timer" => with_timer_sf,
         "guard" => guard_sf,
+        "syntax-rules" => syntax_rules_sf,
+        "define-syntax" => define_sf,
+        "let-syntax" => let_syntax_sf,
+        "letrec-syntax" => letrec_syntax_sf,
     );
 }
 
@@ -265,9 +269,11 @@ pub fn set_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(),
     let args = expect_n_args(&ec.heap, expr, 3)?;
     //let sym = expect_symbol(&ec.heap, &args[1])?;
 
-    match &state.env.lookup_with_frame(args[1]) {
-        Some((_val, binding_env)) => {
-            insert_bind(state, args[1], binding_env.clone(), false);
+    // Resolve through aliases: a macro's (set! counter ...) assigns the
+    // `counter` its definition environment sees, under the key bound there.
+    match crate::eval::identifiers::resolve(ec.heap, args[1], &state.env) {
+        Some(r) => {
+            insert_bind(state, r.key, r.frame, false);
             insert_eval(state, args[2], false);
             Ok(())
         }
@@ -300,6 +306,13 @@ pub fn cond_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<()
     args = args.into_iter().skip(1).collect();
     args.reverse();
 
+    // `else` and `=>` are keywords only where they aren't bound as
+    // variables (R7RS compares them by binding): in
+    // (let ((=> #f)) (cond (#t => 'ok))) the `=>` is an ordinary expression.
+    let env = state.env.clone();
+    let keyword = |id: GcRef, name: &str, heap: &GcHeap| {
+        matches_sym(id, name) && crate::eval::identifiers::lookup(heap, id, &env).is_none()
+    };
     let mut clauses = Vec::new();
     for clause in args.iter() {
         let parts = list_to_vec(ec.heap, *clause)?;
@@ -307,7 +320,7 @@ pub fn cond_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<()
             return Err("cond: clause cannot be empty".to_string());
         }
 
-        if matches_sym(parts[0], "else") {
+        if keyword(parts[0], "else", ec.heap) {
             let body = if parts.len() == 1 {
                 None
             } else {
@@ -317,7 +330,7 @@ pub fn cond_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<()
                 test: ec.heap.true_s(),
                 body,
             });
-        } else if parts.len() >= 2 && matches_sym(parts[1], "=>") {
+        } else if parts.len() >= 2 && keyword(parts[1], "=>", ec.heap) {
             clauses.push(CondClause::Arrow {
                 test: parts[0],
                 arrow_proc: parts[2],
@@ -832,6 +845,60 @@ fn guard_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), S
     Ok(())
 }
 
+/// (syntax-rules [ellipsis] (literal ...) (pattern template) ...)
+///
+/// Evaluates to a hygienic transformer closed over the current environment
+/// (see src/syntax_rules.rs and Docs/hygiene-design.md). `define-syntax`
+/// is `define` (it binds whatever its expression evaluates to), and
+/// `let-syntax` / `letrec-syntax` are `let` / `letrec`: transformers are
+/// ordinary values in the environment, applied when the evaluator meets a
+/// form whose operator is bound to one.
+fn syntax_rules_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
+    let sr = crate::syntax_rules::parse(ec.heap, expr, state.env.clone())?;
+    let transformer = ec.heap.alloc(crate::gc::GcObject {
+        value: SchemeValue::Callable(Box::new(crate::gc::Callable::SyntaxRules(Box::new(sr)))),
+        marked: 0,
+    });
+    insert_value(state, transformer);
+    Ok(())
+}
+
+/// (let-syntax ((keyword transformer) ...) body ...): `let` over the
+/// transformers, so they are evaluated in the enclosing environment and the
+/// body (including any definitions in it) runs in a new frame.
+fn let_syntax_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
+    rewrite_head(expr, "let", ec, state)
+}
+
+/// (letrec-syntax ((keyword transformer) ...) body ...): as `let-syntax`, but
+/// the transformers are evaluated in the new frame and can refer to each other.
+fn letrec_syntax_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
+    rewrite_head(expr, "letrec", ec, state)
+}
+
+/// Evaluate `expr` with its keyword replaced by the core form `name`.
+fn rewrite_head(expr: GcRef, name: &str, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
+    let rest = cdr(expr)?;
+    let head = core_identifier(name, ec, &state.env);
+    let form = cons(head, rest, ec.heap)?;
+    insert_eval(state, form, state.tail);
+    Ok(())
+}
+
+/// An identifier for the core form or procedure `name` that resolves in the
+/// global environment whatever the local bindings: an alias of the interned
+/// symbol, resolved at the root of `env`. Used by forms that rewrite
+/// themselves into other forms, so a user's local `let` or `lambda` can't
+/// change what the rewrite means.
+pub fn core_identifier(name: &str, ec: &mut RunTime, env: &EnvRef) -> GcRef {
+    let mut global = env.clone();
+    while let Some(parent) = global.parent() {
+        global = parent;
+    }
+    let sym = ec.heap.intern_symbol(name);
+    ec.heap.make_alias(sym, global)
+}
+
 /// (unquote x) at the top level is an error: it must appear inside a quasiquote.
 fn unquote_sf(_expr: GcRef, _ec: &mut RunTime, _state: &mut CEKState) -> Result<(), String> {
     Err("unquote: not inside a quasiquote".to_string())
@@ -998,7 +1065,7 @@ fn transform_internal_defines(body_exprs: &[GcRef], heap: &mut GcHeap) -> Result
     for expr in body_exprs {
         if let SchemeValue::Pair(car, _) = heap.get_value(*expr) {
             if let SchemeValue::Symbol(sym) = heap.get_value(*car) {
-                if sym == "define" {
+                if sym == "define" || sym == "define-syntax" {
                     if defines_done {
                         return Err("define: must be at the beginning of the body".to_string());
                     }

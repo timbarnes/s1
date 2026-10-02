@@ -56,6 +56,7 @@ pub fn type_of(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
             Callable::SpecialForm { .. } => "special-form",
             Callable::Closure { .. } => "closure",
             Callable::Macro { .. } => "macro",
+            Callable::SyntaxRules(_) => "syntax-rules",
             Callable::SysBuiltin { .. } => "sys-builtin",
         },
         SchemeValue::Nil => "null",

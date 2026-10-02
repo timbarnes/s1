@@ -10,7 +10,7 @@ use crate::gc::SchemeValue::*;
 use crate::gc::{Callable, GcRef, cons, is_false, list_to_vec, new_float};
 use crate::gc_value;
 use crate::printer::print_value;
-use crate::eval::exceptions;
+use crate::eval::{exceptions, identifiers};
 use crate::utilities::{debugger, post_error};
 use std::rc::Rc;
 use std::time::Instant;
@@ -104,7 +104,7 @@ pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
         }
         // Symbols are looked up in the environment
         Symbol(name) => {
-            if let Some(val) = state.env.lookup(expr) {
+            if let Some(val) = identifiers::lookup(rt.heap, expr, &state.env) {
                 state.control = Control::Value(val);
             } else {
                 post_error(state, rt, &format!("Unbound variable: {}", name));
@@ -118,25 +118,32 @@ pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
             // phase — that redundant second lookup used to happen on every
             // non-special-form application.
             let op_val = if let Symbol(_) = &gc_value!(*car) {
-                state.env.lookup(*car)
+                identifiers::lookup(rt.heap, *car, &state.env)
             } else {
                 None
             };
 
-            // Quick path: is this a special form?
+            // Quick path: is this a special form, or a syntax-rules macro?
             if let Some(op) = op_val {
-                if matches!(
-                    gc_value!(op).as_callable(),
-                    Some(Callable::SpecialForm { .. })
-                ) {
-                    // Call the special-form handler in-place.
-                    state.control = Control::Expr(*car); // or set Value/Expr as your handler expects
-                    let result = apply_special_direct(expr, rt, state);
-                    match result {
-                        Ok(_) => {}
-                        Err(err) => post_error(state, rt, &err),
+                match gc_value!(op).as_callable() {
+                    Some(Callable::SpecialForm { func, .. }) => {
+                        // Call the special-form handler in-place.
+                        state.control = Control::Expr(*car);
+                        if let Err(err) = func(expr, rt, state) {
+                            post_error(state, rt, &err);
+                        }
+                        return; // let run_cek loop continue
                     }
-                    return; // let run_cek loop continue
+                    Some(Callable::SyntaxRules(sr)) => {
+                        // Replace the use by its expansion, in the same
+                        // environment and continuation, keeping tail position.
+                        match sr.expand(rt.heap, expr, &state.env) {
+                            Ok(expansion) => insert_eval(state, expansion, state.tail),
+                            Err(err) => post_error(state, rt, &err),
+                        }
+                        return;
+                    }
+                    _ => {}
                 }
             }
 
@@ -641,8 +648,9 @@ fn handle_eval_arg(
 
     if !have_proc {
         // Evaluating operator (car of the call)
-        if let Some(Callable::SpecialForm { .. } | Callable::Macro { .. }) =
-            gc_value!(val).as_callable()
+        if let Some(
+            Callable::SpecialForm { .. } | Callable::Macro { .. } | Callable::SyntaxRules(_),
+        ) = gc_value!(val).as_callable()
         {
             state.kont = Rc::new(Kont::ApplySpecial {
                 proc: val,
@@ -818,7 +826,14 @@ fn handle_expand_arg(
         }
     };
     if let Symbol(_) = gc_value!(head) {
-        if let Some(callable) = state.env.lookup(head) {
+        if let Some(callable) = identifiers::lookup(ec.heap, head, &state.env) {
+            if let Some(Callable::SyntaxRules(sr)) = gc_value!(callable).as_callable() {
+                // (expand form): one level of syntax-rules expansion
+                let expansion = sr.expand(ec.heap, form, &state.env)?;
+                state.control = Control::Value(expansion);
+                state.kont = next;
+                return Ok(());
+            }
             if let Some(Callable::Macro {
                 params, body, env, ..
             }) = gc_value!(callable).as_callable()
@@ -888,17 +903,6 @@ fn handle_timer(
     }
 }
 
-fn apply_special_direct(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
-    let op_sym = crate::gc::car(expr)?;
-    let op_val = state.env.lookup(op_sym).ok_or("unbound special form")?;
-    //println!("op_val: {}", print_scheme_value(&op_val));
-    if let Some(Callable::SpecialForm { func, .. }) = gc_value!(op_val).as_callable() {
-        func(expr, ec, state) // handler mutates state; returns Ok(()) immediately
-    } else {
-        Err("early-dispatch promised a SpecialForm".to_string())
-    }
-}
-
 /// Process applications that do not require argument evaluation: macros, special forms, and call-with-values.
 ///
 fn apply_unevaluated(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> {
@@ -938,6 +942,18 @@ fn apply_unevaluated(state: &mut CEKState, ec: &mut RunTime) -> Result<(), Strin
             state.env = macro_env;
             state.control = Control::Expr(body);
             state.tail = false;
+            Ok(())
+        }
+        Some(Callable::SyntaxRules(sr)) => {
+            // An operator expression that evaluated to a transformer (the
+            // identifier case is handled directly in eval_cek).
+            match sr.expand(ec.heap, *original_call, &state.env) {
+                Ok(expansion) => {
+                    state.kont = next;
+                    insert_eval(state, expansion, false);
+                }
+                Err(err) => post_error(state, ec, &err),
+            }
             Ok(())
         }
         _ => Err("ApplySpecial: not a special form or macro".to_string()),
