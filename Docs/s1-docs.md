@@ -14,6 +14,7 @@ The documentation is organized into the following sections, following the R5RS s
 * [Vectors](./vectors.md)
 * [Control Features](./control-features.md)
 * [Exceptions](./exceptions.md)
+* [Macros](./macros.md)
 * [Input and Output](./input-and-output.md)
 * [System Interface](./system-interface.md)
 * [Miscellaneous](./miscellaneous.md)

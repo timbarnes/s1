@@ -8,7 +8,7 @@ A comprehensive Scheme interpreter written in Rust that aims to closely follow t
 - **R7RS Compliance**: Implements core Scheme language features following the R7RS specification (incomplete)
 - **Lexical Scoping**: Full lexical scoping with proper closure capture
 - **Garbage Collection**: Mark-and-sweep garbage collector with cycle detection
-- **Macro System**: Scheme-style macros with proper expansion
+- **Macro System**: Hygienic `syntax-rules` macros (`define-syntax`, `let-syntax`, `letrec-syntax`), plus s1's procedural `macro` form
 - **Interactive REPL**: Full read-eval-print loop with command history
 - **CEK Evaluator**: Basis for call/cc, exceptions, and continuations
 
@@ -26,7 +26,8 @@ A comprehensive Scheme interpreter written in Rust that aims to closely follow t
 ### Special Forms
 - `quote` - Prevent evaluation
 - `lambda` - Function definition
-- `macro` - Macro definition
+- `define-syntax`, `let-syntax`, `letrec-syntax`, `syntax-rules` - Hygienic macros
+- `macro` - Procedural (non-hygienic) macro definition, an s1 extension
 - `define` - Variable and function binding
 - `set!` - Variable assignment
 - `if` - Conditional evaluation
@@ -97,7 +98,7 @@ Extensible I/O system supporting:
 - Port stack management for nested file loading
 
 #### Macro Expansion
-Full macro system allowing definition of new syntactic forms. Macros receive unevaluated arguments and can perform arbitrary computation to generate code.
+R7RS `syntax-rules` macros are hygienic: identifiers a macro introduces can't capture, or be captured by, the user's. s1's own `macro` form instead runs Scheme code on the unevaluated arguments to compute the expansion. See [Docs/macros.md](Docs/macros.md).
 
 #### Debug Support
 - `trace` function for debugging evaluation

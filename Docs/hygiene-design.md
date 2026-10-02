@@ -1,7 +1,10 @@
 # Phase 5: Hygienic Macros (`syntax-rules`)
 
-Designed 2026-10-02, not yet implemented. Written before touching code, per
-this project's practice (see kont-flat-stack-design.md, nested-evaluation.md).
+Designed 2026-10-02 and implemented the same day (commits 3e1ffa0 to the
+phase 5f docs commit). Written before touching code, per this project's
+practice (see kont-flat-stack-design.md, nested-evaluation.md). The
+"Implementation notes" section at the end records where the build differed
+from the design. User documentation: macros.md.
 
 ## Goal
 
@@ -297,3 +300,34 @@ at the use site (`resolve` finds nothing), which is what makes
   caught by `guard`, and coexistence with `macro`.
 * **The conformance suite**: all 27 tests in 4.3 Macros use only what this
   phase provides, so all 27 should pass.
+
+## Implementation notes
+
+What changed between the design and the build:
+
+* **Section 4 count.** The suite's 4.3 section has 25 live tests, not 27: two
+  are inside a `#| |#` comment. All 25 pass. The runner's static test count
+  now skips block comments.
+* **Section 8 used two mechanisms, not one.** Creating a fresh alias in every
+  rewrite would have grown the alias table on hot paths (internal
+  definitions are rewritten at each closure creation), and even cached
+  aliases cost about 15% on rewrite-heavy code, because each use of a
+  core-form alias in operator position does a failed local lookup before
+  resolving globally. So rewrites use `GcHeap::core_form`, the special-form
+  object itself, which `eval_cek` dispatches from operator position with no
+  lookup at all, for `begin`, `if`, `letrec`, `let*`, `set!`, `quote` and
+  `cond`. They use `GcHeap::core_id`, one cached global alias per name, only
+  for `lambda`, `let` and `else`, whose handlers check names. Both caches are
+  GC roots. The result is within noise of the pre-phase build.
+* **A capture bug in `do`** surfaced while doing section 8: it named its loop
+  procedure with the interned symbol `loop`, so a user variable `loop` in the
+  body saw the procedure (and with a local `if`, `do` looped forever). It now
+  uses a fresh symbol.
+* **Section 7 cache kept.** Measured (medians, without -> with): a
+  200,000-iteration loop using `inc!`/`unless` macros 1.55s -> 0.38s, against
+  0.28s hand-written; 100,000 tail calls through a recursive `my-or` 1.47s ->
+  0.39s; code without macros unchanged within noise. The expansion cache and
+  the alias table share one ephemeron fixpoint loop in `mark_from`.
+* **Test sizing.** Under `gc-threshold 1` (a collection per allocation) the
+  long macro loops take minutes, so `gc_stress_tests.scm` reloads the macro
+  suite with 200 iterations, the same way the older stress tests size loops.

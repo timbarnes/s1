@@ -45,6 +45,10 @@ Controls step and tracing options.
 
 Runs the quoted `form` `count` times and returns the average execution time.
 
+## `macro` and `expand`
+
+`(macro params body ...)` creates a non-hygienic macro whose body computes its expansion; `(expand form)` shows one level of a macro use's expansion. See [Macros](./macros.md).
+
 ## `def`, `def-fn`, `def-var`
 
 These are macros that provide a more convenient way to create definitions. `def` is a general purpose macro that dispatches to `def-fn` or `def-var` based on the form of the first argument.

@@ -38,11 +38,10 @@ baseline stays in step with the code. `S1_BIN` selects a prebuilt binary and
 Each section runs in its own process, so a reader desync or crash in one
 section cannot swallow the next ones.
 
-## Known blockers (524 passing after phase 4)
+## Known blockers (550 passing after phase 5)
 
 - **Read syntax, Numeric syntax, 6.13 Input and output**: these need string
-  ports (phase 8); Numeric syntax also needs `syntax-rules` (phase 5).
-- **4.3 Macros**: needs `define-syntax` / `syntax-rules` (phase 5).
+  ports (phase 8). Their helper macros now define correctly.
 - **6.11 Exceptions**: the remaining tests use string ports (phase 8).
 - **Complex numbers** are reported as parse errors ("not supported"), as are
   bytevector literals ("not supported yet") until phase 7. The unreached tests

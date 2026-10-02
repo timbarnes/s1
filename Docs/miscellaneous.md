@@ -30,7 +30,7 @@ Returns `#t` if `obj` is a closure, and `#f` otherwise. Implemented via `type-of
 
 `(macro? obj)`
 
-Returns `#t` if `obj` is a macro, and `#f` otherwise. Implemented via `type-of`.
+Returns `#t` if `obj` is a macro made with s1's `macro` form, and `#f` otherwise (including for `syntax-rules` transformers, whose `type-of` is `syntax-rules`). Implemented via `type-of`. See [Macros](./macros.md).
 
 ## `procedure?`
 
