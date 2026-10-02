@@ -955,11 +955,15 @@ pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> 
     match gc_value!(*proc) {
         Callable(callable) => match &**callable {
             Callable::Builtin { func, .. } => {
+                // On error, post_error has already halted the machine; setting
+                // `next` here as well would resume the caller with a void value.
                 match func(ec.heap, &evaluated_args) {
                     Err(err) => post_error(state, ec, &err),
-                    Ok(result) => state.control = Control::Value(result),
+                    Ok(result) => {
+                        state.control = Control::Value(result);
+                        state.kont = next;
+                    }
                 }
-                state.kont = next;
                 Ok(())
             }
             Callable::SysBuiltin { func, .. } => {

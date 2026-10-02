@@ -9,6 +9,9 @@ use std::rc::Rc;
 
 /// Push an error into the existing CEKState.
 pub fn post_error(state: &mut CEKState, ec: &mut RunTime, error: &str) {
+    // stdout is line-buffered; flush it so the error appears after the output
+    // that preceded it rather than ahead of a pending partial line.
+    std::io::Write::flush(&mut std::io::stdout()).ok();
     eprintln!("Error: {}", error);
     match ec.trace {
         TraceType::Reset => {

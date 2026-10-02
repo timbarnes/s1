@@ -149,15 +149,17 @@ fn apply_sp(
             Callable::Builtin { func, .. } => {
                 let args = list_to_vec(ec.heap, arglist)?;
                 let result = func(ec.heap, &args);
+                // As in cek::apply_proc: post_error halts the machine, so only
+                // a successful call continues to `nxt`.
                 match &result {
                     Err(err) => {
                         post_error(state, ec, &err);
                     }
                     Ok(value) => {
                         state.control = Control::Value(*value);
+                        state.kont = nxt;
                     }
                 }
-                state.kont = nxt;
                 return Ok(());
             }
             Callable::SysBuiltin { func, .. } => {
