@@ -58,47 +58,7 @@
     (if (memq (type-of x) '(builtin closure sys-builtin case-lambda))
         #t #f))
 
-;; Character comparisons and predicates
-(define char<=?
-  (lambda (c1 c2 . rest)
-    "(char<=? c1 c2 c3 ...) returns #t if each character is less than or equal to the next, otherwise #f"
-    (and (or (char<? c1 c2) (char=? c1 c2))
-         (or (null? rest) (apply char<=? c2 rest)))))
-
-(define char>=?
-  (lambda (c1 c2 . rest)
-    "(char>=? c1 c2 c3 ...) returns #t if each character is greater than or equal to the next, otherwise #f"
-    (and (or (char>? c1 c2) (char=? c1 c2))
-         (or (null? rest) (apply char>=? c2 rest)))))
-
-(define char-alphabetic?
-  (lambda (c)
-    "(char-alphabetic? c) returns #t if c is an ASCII letter (a-z or A-Z), otherwise #f"
-    (or (and (char>=? c #\a) (char<=? c #\z))
-        (and (char>=? c #\A) (char<=? c #\Z)))))
-
-(define char-numeric?
-  (lambda (c)
-    "(char-numeric? c) returns #t if c is an ASCII digit (0-9), otherwise #f"
-    (and (char>=? c #\0) (char<=? c #\9))))
-
-(define char-whitespace?
-  (lambda (c)
-    "(char-whitespace? c) returns #t if c is a space, newline, or tab, otherwise #f"
-    (or (char=? c #\space)
-        (char=? c #\newline)
-        (char=? c #\tab))))
-
-(define char-upper-case?
-  (lambda (c)
-    "(char-upper-case? c) returns #t if c is an ASCII uppercase letter (A-Z), otherwise #f"
-    (and (char>=? c #\A) (char<=? c #\Z))))
-
-(define char-lower-case?
-  (lambda (c)
-    "(char-lower-case? c) returns #t if c is an ASCII lowercase letter (a-z), otherwise #f"
-    (and (char>=? c #\a) (char<=? c #\z))))
-
+;; Character procedures are built in (src/builtin/char.rs).
 (define null? (lambda (x)
     "(null? x) returns #t if x is the empty list, otherwise #f"
     (eq? x '())))

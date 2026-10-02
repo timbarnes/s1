@@ -6,8 +6,11 @@ use crate::gc::{
     GcHeap, GcRef, SchemeValue, get_integer, get_string, new_bool, new_char, new_int, new_pair,
     new_string,
 };
-use crate::printer::display_value;
-use crate::register_builtin_family;
+use super::char::fold_string;
+use super::range_args;
+use crate::printer::{display_value, print_value};
+use crate::{gc_value, gc_value_mut, register_builtin_family};
+use std::cmp::Ordering;
 use num_bigint::BigInt;
 
 /// (string char1 [char2 ..])
@@ -30,16 +33,26 @@ pub fn register_string_builtins(heap: &mut GcHeap, env: EnvRef) {
         "string-append" => (string_append, "(string-append <string1> <string2> ..) Concatenate the provided strings"),
         "string-length" => (string_length, "(string-length <string>) Return the length of the given string"),
         "string-ref" => (string_ref, "(string-ref <string> <index>) Return the character at the given index"),
-        "string=?"=>(string_equal, "(string=? <string1> <string2>) Compare two strings for equality"),
-        "string>?"=>(string_greater_than, "(string>? <string1> <string2>) Compare two strings lexicographically"),
-        "string<?"=>(string_less_than, "(string<? <string1> <string2>) Compare two strings lexicographically"),
         "make-string" => (make_string, "(make-string <length> [<fill-char>]) Create a string of the given length"),
         "string-set!" => (string_set, "(string-set! <string> <index> <char>) Set the character at the given index"),
-        "string->list" => (string_to_list, "(string->list <string>) Convert a string to a list of characters"),
         "string" => (string, "(string <char1> [<char2> ..]) Create a string from the provided characters"),
-        "string<=?" => (string_less_than_equal, "(string<=? <string1> <string2>) Compare two strings lexicographically"),
+        "string=?" => (string_eq, "(string=? s1 s2 s3 ...) Returns #t if all the strings are the same"),
+        "string<?" => (string_lt, "(string<? s1 s2 s3 ...) Returns #t if the strings are in increasing lexicographic order"),
+        "string>?" => (string_gt, "(string>? s1 s2 s3 ...) Returns #t if the strings are in decreasing lexicographic order"),
+        "string<=?" => (string_le, "(string<=? s1 s2 s3 ...) Returns #t if the strings are in non-decreasing order"),
+        "string>=?" => (string_ge, "(string>=? s1 s2 s3 ...) Returns #t if the strings are in non-increasing order"),
+        "string-ci=?" => (string_ci_eq, "(string-ci=? s1 s2 s3 ...) string=? after case folding"),
+        "string-ci<?" => (string_ci_lt, "(string-ci<? s1 s2 s3 ...) string<? after case folding"),
+        "string-ci>?" => (string_ci_gt, "(string-ci>? s1 s2 s3 ...) string>? after case folding"),
+        "string-ci<=?" => (string_ci_le, "(string-ci<=? s1 s2 s3 ...) string<=? after case folding"),
+        "string-ci>=?" => (string_ci_ge, "(string-ci>=? s1 s2 s3 ...) string>=? after case folding"),
+        "string-foldcase" => (string_foldcase, "(string-foldcase string) Returns string with full Unicode case folding applied"),
+        "string->list" => (string_to_list, "(string->list string [start [end]]) Returns a list of the characters of string from start to end"),
+        "string-fill!" => (string_fill, "(string-fill! string char [start [end]]) Stores char in the elements of string from start to end"),
+        "string-copy!" => (string_copy_to, "(string-copy! to at from [start [end]]) Copies the characters start to end of from into to, starting at index at"),
+        "string->vector" => (string_to_vector, "(string->vector string [start [end]]) Returns a vector of the characters of string from start to end"),
+        "vector->string" => (vector_to_string, "(vector->string vector [start [end]]) Returns a string of the characters in vector from start to end"),
         "list->string" => (list_to_string, "(list->string <list>) Convert a list of characters to a string"),
-        "string-fill!" => (string_fill, "(string-fill! <string> <char>) Fill the string with the given character"),
     );
 }
 
@@ -52,18 +65,6 @@ fn string(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
         s.push(c);
     }
     Ok(new_string(heap, &s))
-}
-
-/// (string<=? s1 s2)
-fn string_less_than_equal(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() == 2 {
-        let s1 = get_string(heap, args[0])?;
-        let s2 = get_string(heap, args[1])?;
-        let result = new_bool(heap, s1 <= s2);
-        Ok(result)
-    } else {
-        Err("string<=? expects exactly two arguments".to_string())
-    }
 }
 
 /// (list->string list)
@@ -85,26 +86,6 @@ fn list_to_string(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
         Ok(new_string(heap, &s))
     } else {
         Err("list->string expects exactly one argument".to_string())
-    }
-}
-
-/// (string-fill! string char)
-/// Stores char in every element of string and returns an unspecified value.
-fn string_fill(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() == 2 {
-        let str_ref = args[0];
-        let c = get_char(heap, args[1])?;
-        match heap.get_value_mut(str_ref) {
-            SchemeValue::Str(s) => {
-                let len = s.chars().count();
-                let new_s: String = std::iter::repeat(c).take(len).collect();
-                *s = new_s;
-                Ok(heap.unspecified())
-            }
-            _ => Err("string-fill!: not a string".to_string()),
-        }
-    } else {
-        Err("string-fill! expects two arguments".to_string())
     }
 }
 
@@ -235,42 +216,6 @@ fn string_ref(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     }
 }
 
-/// (string<? s1 s2)
-fn string_less_than(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() == 2 {
-        let s1 = get_string(heap, args[0]).unwrap();
-        let s2 = get_string(heap, args[1]).unwrap();
-        let result = new_bool(heap, s1 < s2);
-        Ok(result)
-    } else {
-        Err("string<? expects exactly two arguments".to_string())
-    }
-}
-
-/// (string<? s1 s2)
-fn string_greater_than(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() == 2 {
-        let s1 = get_string(heap, args[0]).unwrap();
-        let s2 = get_string(heap, args[1]).unwrap();
-        let result = new_bool(heap, s1 > s2);
-        Ok(result)
-    } else {
-        Err("string>? expects exactly two arguments".to_string())
-    }
-}
-
-/// (string=? s1 s2)
-fn string_equal(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() == 2 {
-        let s1 = get_string(heap, args[0]).unwrap();
-        let s2 = get_string(heap, args[1]).unwrap();
-        let result = new_bool(heap, s1 == s2);
-        Ok(result)
-    } else {
-        Err("string=? expects two string arguments".to_string())
-    }
-}
-
 fn get_char(heap: &mut GcHeap, val: GcRef) -> Result<char, String> {
     match heap.get_value(val) {
         SchemeValue::Char(val) => Ok(*val),
@@ -321,18 +266,155 @@ fn string_set(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     }
 }
 
-/// (string->list string)
-/// Returns a newly allocated list of the characters that make up the given string.
-fn string_to_list(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() == 1 {
-        let s = get_string(heap, args[0])?;
-        let mut list = heap.nil_s();
-        for c in s.chars().rev() {
-            let char_ref = new_char(heap, c);
-            list = new_pair(heap, char_ref, list);
-        }
-        Ok(list)
-    } else {
-        Err("string->list expects exactly one argument".to_string())
+
+// ---------------------------------------------------------------------------
+// R7RS 6.7 procedures over whole strings and ranges
+// ---------------------------------------------------------------------------
+
+fn str_of(v: GcRef, who: &str) -> Result<&'static String, String> {
+    match gc_value!(v) {
+        SchemeValue::Str(s) => Ok(s),
+        _ => Err(format!("{}: expected a string, got {}", who, print_value(&v))),
     }
+}
+
+fn str_mut(v: GcRef, who: &str) -> Result<&'static mut String, String> {
+    match gc_value_mut!(v) {
+        SchemeValue::Str(s) => Ok(s),
+        _ => Err(format!("{}: expected a string, got {}", who, print_value(&v))),
+    }
+}
+
+/// A chained comparison of strings (code point order, which is UTF-8 byte
+/// order), optionally after case folding.
+fn compare(heap: &mut GcHeap, args: &[GcRef], who: &str, fold: bool, ok: fn(Ordering) -> bool) -> Result<GcRef, String> {
+    if args.len() < 2 {
+        return Err(format!("{}: expects at least 2 arguments", who));
+    }
+    let strs = args
+        .iter()
+        .map(|a| str_of(*a, who).map(|s| if fold { fold_string(s) } else { s.clone() }))
+        .collect::<Result<Vec<String>, String>>()?;
+    let result = strs.windows(2).all(|w| ok(w[0].cmp(&w[1])));
+    Ok(new_bool(heap, result))
+}
+
+fn string_eq(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    compare(heap, args, "string=?", false, Ordering::is_eq)
+}
+fn string_lt(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    compare(heap, args, "string<?", false, Ordering::is_lt)
+}
+fn string_gt(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    compare(heap, args, "string>?", false, Ordering::is_gt)
+}
+fn string_le(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    compare(heap, args, "string<=?", false, Ordering::is_le)
+}
+fn string_ge(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    compare(heap, args, "string>=?", false, Ordering::is_ge)
+}
+fn string_ci_eq(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    compare(heap, args, "string-ci=?", true, Ordering::is_eq)
+}
+fn string_ci_lt(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    compare(heap, args, "string-ci<?", true, Ordering::is_lt)
+}
+fn string_ci_gt(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    compare(heap, args, "string-ci>?", true, Ordering::is_gt)
+}
+fn string_ci_le(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    compare(heap, args, "string-ci<=?", true, Ordering::is_le)
+}
+fn string_ci_ge(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    compare(heap, args, "string-ci>=?", true, Ordering::is_ge)
+}
+
+fn string_foldcase(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    match args {
+        [s] => {
+            let folded = fold_string(str_of(*s, "string-foldcase")?);
+            Ok(new_string(heap, &folded))
+        }
+        _ => Err("string-foldcase: expects 1 argument".to_string()),
+    }
+}
+
+fn arity(args: &[GcRef], min: usize, max: usize, who: &str) -> Result<(), String> {
+    if args.len() < min || args.len() > max {
+        Err(format!("{}: wrong number of arguments ({})", who, args.len()))
+    } else {
+        Ok(())
+    }
+}
+
+/// The characters of string `args[0]` between the range at `args[at..]`.
+fn char_range(args: &[GcRef], at: usize, who: &str) -> Result<Vec<char>, String> {
+    let chars: Vec<char> = str_of(args[0], who)?.chars().collect();
+    let (start, end) = range_args(args, at, chars.len(), who)?;
+    Ok(chars[start..end].to_vec())
+}
+
+fn string_to_list(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 1, 3, "string->list")?;
+    let chars = char_range(args, 1, "string->list")?;
+    let mut list = heap.nil_s();
+    for c in chars.into_iter().rev() {
+        let ch = new_char(heap, c);
+        list = new_pair(heap, ch, list);
+    }
+    Ok(list)
+}
+
+fn string_to_vector(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 1, 3, "string->vector")?;
+    let chars = char_range(args, 1, "string->vector")?;
+    let items = chars.into_iter().map(|c| new_char(heap, c)).collect();
+    Ok(crate::gc::new_vector(heap, items))
+}
+
+fn vector_to_string(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 1, 3, "vector->string")?;
+    let items = match gc_value!(args[0]) {
+        SchemeValue::Vector(v) => v,
+        _ => return Err("vector->string: expected a vector".to_string()),
+    };
+    let (start, end) = range_args(args, 1, items.len(), "vector->string")?;
+    let mut out = String::new();
+    for item in &items[start..end] {
+        match gc_value!(*item) {
+            SchemeValue::Char(c) => out.push(*c),
+            _ => return Err(format!("vector->string: not a character: {}", print_value(item))),
+        }
+    }
+    Ok(new_string(heap, &out))
+}
+
+fn string_fill(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 2, 4, "string-fill!")?;
+    let fill = get_char(heap, args[1]).map_err(|_| "string-fill!: expected a character".to_string())?;
+    let target = str_mut(args[0], "string-fill!")?;
+    let mut chars: Vec<char> = target.chars().collect();
+    let (start, end) = range_args(args, 2, chars.len(), "string-fill!")?;
+    for c in &mut chars[start..end] {
+        *c = fill;
+    }
+    *target = chars.into_iter().collect();
+    Ok(heap.unspecified())
+}
+
+fn string_copy_to(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 3, 5, "string-copy!")?;
+    // Copy the source characters out first: `to` and `from` may be the same.
+    let src = char_range(&args[2..], 1, "string-copy!")?;
+    let target = str_mut(args[0], "string-copy!")?;
+    let mut chars: Vec<char> = target.chars().collect();
+    let at = match gc_value!(args[1]) {
+        SchemeValue::Int(i) => num_traits::ToPrimitive::to_usize(i).filter(|a| a + src.len() <= chars.len()),
+        _ => None,
+    }
+    .ok_or("string-copy!: the copied characters don't fit at that index")?;
+    chars[at..at + src.len()].copy_from_slice(&src);
+    *target = chars.into_iter().collect();
+    Ok(heap.unspecified())
 }
