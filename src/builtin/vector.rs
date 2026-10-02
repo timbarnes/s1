@@ -15,9 +15,12 @@ pub fn register_vector_builtins(heap: &mut crate::gc::GcHeap, env: EnvRef) {
         "vector-length" => (vector_length, "(vector-length vector) Get the length of a vector"),
         "vector-ref" => (vector_ref, "(vector-ref vector index) Get the element at the specified index in a vector"),
         "vector-set!" => (vector_set, "(vector-set! vector index value) Set the element at the specified index in a vector"),
-        "vector->list" => (vector_to_list, "(vector->list vector) Convert a vector to a list"),
+        "vector->list" => (vector_to_list, "(vector->list vector [start [end]]) Returns a list of the elements of vector from start to end"),
+        "vector-copy" => (vector_copy, "(vector-copy vector [start [end]]) Returns a new vector of the elements of vector from start to end"),
+        "vector-copy!" => (vector_copy_to, "(vector-copy! to at from [start [end]]) Copies the elements start to end of from into to, starting at index at"),
+        "vector-append" => (vector_append, "(vector-append vector ...) Returns a new vector of the elements of each vector in turn"),
         "list->vector" => (list_to_vector, "(list->vector list) Convert a list to a vector"),
-        "vector-fill!" => (vector_fill, "(vector-fill! vector value) Fill a vector with a specified value"),
+        "vector-fill!" => (vector_fill, "(vector-fill! vector fill [start [end]]) Stores fill in the elements of vector from start to end"),
     );
 }
 
@@ -127,16 +130,65 @@ pub fn vector_set(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     Ok(heap.void())
 }
 
-/// (vector->list vector) -> list
-fn vector_to_list(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() != 1 {
-        return Err("vector->list: expects exactly 1 argument".to_string());
+fn vector_of(v: GcRef, who: &str) -> Result<&'static Vec<GcRef>, String> {
+    match gc_value!(v) {
+        SchemeValue::Vector(items) => Ok(items),
+        _ => Err(format!("{}: expected a vector, got {}", who, crate::printer::print_value(&v))),
     }
+}
 
-    match gc_value!(args[0]) {
-        SchemeValue::Vector(v) => Ok(list_from_slice(&v[..], heap)),
-        _ => Err("vector->list: argument must be a vector".to_string()),
+fn arity(args: &[GcRef], min: usize, max: usize, who: &str) -> Result<(), String> {
+    if args.len() < min || args.len() > max {
+        Err(format!("{}: wrong number of arguments ({})", who, args.len()))
+    } else {
+        Ok(())
     }
+}
+
+/// (vector->list vector [start [end]])
+fn vector_to_list(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 1, 3, "vector->list")?;
+    let v = vector_of(args[0], "vector->list")?;
+    let (start, end) = super::range_args(args, 1, v.len(), "vector->list")?;
+    Ok(list_from_slice(&v[start..end], heap))
+}
+
+/// (vector-copy vector [start [end]])
+fn vector_copy(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 1, 3, "vector-copy")?;
+    let v = vector_of(args[0], "vector-copy")?;
+    let (start, end) = super::range_args(args, 1, v.len(), "vector-copy")?;
+    let copy = v[start..end].to_vec();
+    Ok(new_vector(heap, copy))
+}
+
+/// (vector-copy! to at from [start [end]])
+fn vector_copy_to(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 3, 5, "vector-copy!")?;
+    let from = vector_of(args[2], "vector-copy!")?;
+    let (start, end) = super::range_args(args, 3, from.len(), "vector-copy!")?;
+    // Copy out first: `to` and `from` may be the same vector.
+    let src = from[start..end].to_vec();
+    let to = match gc_value_mut!(args[0]) {
+        SchemeValue::Vector(items) => items,
+        _ => return Err("vector-copy!: expected a vector".to_string()),
+    };
+    let at = match gc_value!(args[1]) {
+        SchemeValue::Int(i) => i.to_usize().filter(|a| a + src.len() <= to.len()),
+        _ => None,
+    }
+    .ok_or("vector-copy!: the copied elements don't fit at that index")?;
+    to[at..at + src.len()].copy_from_slice(&src);
+    Ok(heap.unspecified())
+}
+
+/// (vector-append vector ...)
+fn vector_append(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    let mut out = Vec::new();
+    for a in args {
+        out.extend_from_slice(vector_of(*a, "vector-append")?);
+    }
+    Ok(new_vector(heap, out))
 }
 
 /// (list->vector list) -> vector
@@ -154,22 +206,18 @@ fn list_to_vector(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     }
 }
 
-/// (vector-fill! vector fill) -> unspecified
+/// (vector-fill! vector fill [start [end]]) -> unspecified
 fn vector_fill(_heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() != 2 {
-        return Err("vector-fill!: expects a vector and a fill value".to_string());
-    }
-
+    arity(args, 2, 4, "vector-fill!")?;
     let fill_val = args[1];
-    match gc_value_mut!(args[0]) {
-        SchemeValue::Vector(v) => {
-            for elem in v.iter_mut() {
-                *elem = fill_val;
-            }
+    let len = vector_of(args[0], "vector-fill!")?.len();
+    let (start, end) = super::range_args(args, 2, len, "vector-fill!")?;
+    if let SchemeValue::Vector(v) = gc_value_mut!(args[0]) {
+        for elem in &mut v[start..end] {
+            *elem = fill_val;
         }
-        _ => return Err("vector-fill!: first argument must be a vector".to_string()),
-    };
-
+    }
+    // R7RS leaves the result unspecified; s1 has always returned the vector.
     Ok(args[0])
 }
 

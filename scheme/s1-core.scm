@@ -98,13 +98,20 @@
 ;         (cons (f (car l)) (map f (cdr l)))))
 
 ;; Simplified (single argument) version of for-each
-(define (for-each f args)
-    "(for-each f list) calls f on each element of list, in order, for effect, and returns #t"
-    (if (null? args)
-        #t
-        (begin
-            (f (car args))
-            (for-each f (cdr args)))))
+(define (%any-null? lists)
+    (cond ((null? lists) #f)
+          ((null? (car lists)) #t)
+          (else (%any-null? (cdr lists)))))
+
+(define (for-each f lst . lists)
+    "(for-each f list1 list2 ...) calls f on corresponding elements of the lists, in order, for effect, stopping at the shortest list, and returns #t"
+    (if (null? lists)
+        (let loop ((l lst))
+          (if (pair? l) (begin (f (car l)) (loop (cdr l))) #t))
+        (let loop ((ls (cons lst lists)))
+          (if (%any-null? ls)
+              #t
+              (begin (apply f (map car ls)) (loop (map cdr ls)))))))
 
 ;; Multi-element print function; needs to take an optional port
 (define (displayln . s)
@@ -412,3 +419,18 @@
   (syntax-rules () ((_ expr) (%make-promise #f (lambda () expr)))))
 (define-syntax delay
   (syntax-rules () ((_ expr) (delay-force (%make-promise #t expr)))))
+
+;; --- Mapping over strings and vectors (R7RS 6.10), via lists. Like map and
+;; for-each, they stop at the shortest argument.
+(define (string-map f s . strings)
+  "(string-map f string1 string2 ...) returns a string of the results of f on corresponding characters"
+  (list->string (apply map f (map string->list (cons s strings)))))
+(define (string-for-each f s . strings)
+  "(string-for-each f string1 string2 ...) calls f on corresponding characters, in order, for effect"
+  (apply for-each f (map string->list (cons s strings))))
+(define (vector-map f v . vectors)
+  "(vector-map f vector1 vector2 ...) returns a vector of the results of f on corresponding elements"
+  (list->vector (apply map f (map vector->list (cons v vectors)))))
+(define (vector-for-each f v . vectors)
+  "(vector-for-each f vector1 vector2 ...) calls f on corresponding elements, in order, for effect"
+  (apply for-each f (map vector->list (cons v vectors))))

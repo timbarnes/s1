@@ -11,9 +11,9 @@
 6.5 Symbols	16	1	0	17	17	
 6.6 Characters	79	0	0	79	79	
 6.7 Strings	130	0	0	130	130	
-6.8 Vectors	21	0	22	43	43	
+6.8 Vectors	43	0	0	43	43	
 6.9 Bytevectors	39	0	0	39	39	
-6.10 Control Features	24	0	10	34	34	
+6.10 Control Features	34	0	0	34	34	
 6.11 Exceptions	18	2	0	20	30	
 6.12 Environments and evaluation	0	0	4	4	4	
 6.13 Input and output	3	0	56	59	63	
