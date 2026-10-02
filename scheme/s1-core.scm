@@ -427,21 +427,41 @@
          (lambda () (parameterize (rest ...) body ...))
          (lambda () (set! new (p)) (p %param-set old)))))))
 
+(define-syntax define-record-type
+  (syntax-rules ()
+    ((_ type (constructor field ...) predicate fieldspec ...)
+     (begin
+       (define type (%make-record-type 'type '(fieldspec ...)))
+       (define (constructor field ...) (%record-make type '(field ...) (list field ...)))
+       (define (predicate obj) (%record? obj type))
+       (%define-record-field type fieldspec) ...))))
+
+;; One field spec: (field), (field accessor) or (field accessor modifier).
+(define-syntax %define-record-field
+  (syntax-rules ()
+    ((_ type (field)) 'field)
+    ((_ type (field accessor))
+     (define (accessor obj) (%record-get obj type 'field)))
+    ((_ type (field accessor modifier))
+     (begin
+       (define (accessor obj) (%record-get obj type 'field))
+       (define (modifier obj value) (%record-set! obj type 'field value))))))
+
 ;; --- Promises (R7RS 4.2.5), following the reference implementation, which
 ;; forces chains of delay-force iteratively (in constant space).
-;; A promise is a vector #(tag box) where box is (done? . value-or-thunk);
-;; promises that share a box were merged by force.
-(define %promise-tag (list 'promise))
-(define (%make-promise done? value) (vector %promise-tag (cons done? value)))
-(define (promise? obj)
-  "(promise? obj) returns #t if obj is a promise"
-  (and (vector? obj) (= (vector-length obj) 2) (eq? (vector-ref obj 0) %promise-tag)))
-(define (%promise-done? p) (car (vector-ref p 1)))
-(define (%promise-value p) (cdr (vector-ref p 1)))
+;; A promise holds a box (done? . value-or-thunk); promises that share a box
+;; were merged by force.
+(define-record-type %promise
+  (%make-promise-record box)
+  promise?
+  (box %promise-box %promise-set-box!))
+(define (%make-promise done? value) (%make-promise-record (cons done? value)))
+(define (%promise-done? p) (car (%promise-box p)))
+(define (%promise-value p) (cdr (%promise-box p)))
 (define (%promise-update! new old)
-  (set-car! (vector-ref old 1) (%promise-done? new))
-  (set-cdr! (vector-ref old 1) (%promise-value new))
-  (vector-set! new 1 (vector-ref old 1)))
+  (set-car! (%promise-box old) (%promise-done? new))
+  (set-cdr! (%promise-box old) (%promise-value new))
+  (%promise-set-box! new (%promise-box old)))
 
 (define (force promise)
   "(force promise) returns the value of promise, computing it the first time; a non-promise is returned as is"

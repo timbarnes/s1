@@ -78,6 +78,22 @@ fn print_into(out: &mut String, obj: GcRef, write: bool) {
         }),
         Port(port) => out.push_str(&format!("Port<{:?}>", port)),
         Continuation(k) => out.push_str(&format!("Continuation<{:?}>", k.kont)),
+        RecordType(t) => {
+            out.push_str("#<record-type ");
+            print_into(out, t.name, write);
+            out.push('>');
+        }
+        Record(r) => {
+            out.push_str("#<");
+            if let RecordType(t) = gc_value!(r.rtype) {
+                print_into(out, t.name, write);
+            }
+            for f in &r.fields {
+                out.push(' ');
+                print_into(out, *f, write);
+            }
+            out.push('>');
+        }
         ErrorObject(e) => {
             out.push_str("#<error ");
             print_into(out, e.message, true);

@@ -58,6 +58,7 @@
 ;; promises mutate shared boxes; run them with a collection at every chance.
 (define **derived-loop-n** 200)
 (load "scheme/derived_tests.scm")
+(load "scheme/data_tests.scm")
 
 ;; Defect 2 (quasiquote_sf's unrooted saved_kont, and defect 3, the
 ;; macro-expander's own Rust-local intermediates): deeply recursive calls

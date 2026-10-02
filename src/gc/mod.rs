@@ -169,9 +169,28 @@ pub enum SchemeValue {
     Continuation(Box<ContinuationData>),
     /// A condition made by `error`, or by a built-in procedure failing.
     ErrorObject(Box<ErrorObject>),
+    /// A record type made by `define-record-type`
+    RecordType(Box<RecordType>),
+    /// An instance of a record type
+    Record(Box<Record>),
     Eof,
     Void,
     Undefined,
+}
+
+/// A record type: its name (as written in `define-record-type`) and field
+/// names, in order.
+#[derive(Debug)]
+pub struct RecordType {
+    pub name: GcRef,
+    pub fields: Vec<GcRef>,
+}
+
+/// A record: its type and one value per field of the type.
+#[derive(Debug)]
+pub struct Record {
+    pub rtype: GcRef,
+    pub fields: Vec<GcRef>,
 }
 
 /// Which `...-error?` predicate an error object satisfies.

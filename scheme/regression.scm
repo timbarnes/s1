@@ -18,6 +18,9 @@
 (displayln "         =====Derived Syntax Tests=====")
 (load "scheme/derived_tests.scm")
 
+(displayln "         =====Data Type Tests=====")
+(load "scheme/data_tests.scm")
+
 (displayln "         =====Exception Tests=====")
 (load "scheme/exception_tests.scm")
 

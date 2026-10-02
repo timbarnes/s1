@@ -99,7 +99,7 @@ pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
     match &gc_value!(expr) {
         // Self-evaluating values are returned unchanged
         Int(_) | Rational(_) | Float(_) | Str(_) | Bool(_) | Vector(_) | Char(_) | Nil | Callable(_)
-        | Continuation(_) | ErrorObject(_) | Void | Undefined => {
+        | Continuation(_) | ErrorObject(_) | RecordType(_) | Record(_) | Void | Undefined => {
             state.control = Control::Value(expr);
         }
         // Symbols are looked up in the environment

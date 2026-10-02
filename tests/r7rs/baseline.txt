@@ -3,7 +3,7 @@
 4.1 Primitive expression types	27	0	0	27	27	
 4.2 Derived expression types	74	0	0	74	73	
 4.3 Macros	25	0	0	25	25	
-5 Program structure	10	0	5	15	15	
+5 Program structure	15	0	0	15	15	
 6.1 Equivalence Predicates	25	0	0	25	25	
 6.2 Numbers	194	0	0	194	219	
 6.3 Booleans	13	0	5	18	18	

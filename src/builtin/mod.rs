@@ -4,6 +4,7 @@ pub mod fileio;
 pub mod list;
 pub mod number;
 pub mod predicate;
+pub mod record;
 pub mod string;
 pub mod vector;
 
@@ -21,6 +22,7 @@ pub fn register_builtins(heap: &mut GcHeap, env: EnvRef) {
     fileio::register_fileio_builtins(heap, env.clone());
     number::register_number_builtins(heap, env.clone());
     predicate::register_predicate_builtins(heap, env.clone());
+    record::register_record_builtins(heap, env.clone());
     string::register_string_builtins(heap, env.clone());
     vector::register_vector_builtins(heap, env.clone());
     register_builtin_family!(heap, env.clone(),

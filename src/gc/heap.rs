@@ -616,6 +616,18 @@ fn mark_reachable(start: GcRef, epoch: u64, worklist: &mut Vec<GcRef>) {
                 }
                 push_if_unmarked(k.handlers, epoch, worklist);
             }
+            SchemeValue::RecordType(t) => {
+                push_if_unmarked(t.name, epoch, worklist);
+                for f in &t.fields {
+                    push_if_unmarked(*f, epoch, worklist);
+                }
+            }
+            SchemeValue::Record(r) => {
+                push_if_unmarked(r.rtype, epoch, worklist);
+                for f in &r.fields {
+                    push_if_unmarked(*f, epoch, worklist);
+                }
+            }
             SchemeValue::ErrorObject(e) => {
                 push_if_unmarked(e.message, epoch, worklist);
                 push_if_unmarked(e.irritants, epoch, worklist);
