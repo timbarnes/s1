@@ -1,34 +1,21 @@
 [Home](s1-docs.md)
 
-# R5RS Functions To Implement
+# Not Yet Implemented
 
-This document lists R5RS (Revised^5 Report on the Algorithmic Language Scheme) functions that are not yet implemented in the S1 Scheme interpreter.
-
-## Core Syntax/Forms
-
-*   `define-record-type` (phase 7)
-
-## Equivalence Predicates
-
+Standard features s1 doesn't provide yet, and known issues. The R7RS conformance suite (`tests/r7rs/`) tracks progress section by section.
 
 ## Numbers
 
 *   Complex numbers (`make-rectangular`, `make-polar`, `real-part`, `imag-part`, `magnitude`, `angle`): not planned
 
-## Characters
-
-
-## Strings
-
-*   `string>=?`
-
 ## Input and Output
 
-*   `transcript-on`, `transcript-off`
+*   String ports and the rest of R7RS 6.13 (phase 8).
+*   `transcript-on`, `transcript-off` (R5RS only; removed in R7RS).
 
 ## Known issues, scheduled in the R7RS plan
 
 *   `(read port)` with an explicit port reads from a copy of the port, so repeated reads return the same datum (phase 8, ports get identity).
-*   `write` loops forever on cyclic data, which datum labels can now create (phase 8, `write` with datum labels).
+*   `write` loops forever on cyclic data, which datum labels can now create (phase 8, `write` with datum labels). (`equal?`, `length` and `list?` handle cycles since phase 7.)
 
 [Home](s1-docs.md)

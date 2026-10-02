@@ -12,6 +12,8 @@ The documentation is organized into the following sections, following the R5RS s
 * [Characters](./characters.md)
 * [Strings](./strings.md)
 * [Vectors](./vectors.md)
+* [Bytevectors](./bytevectors.md)
+* [Records](./records.md)
 * [Derived Expression Types](./derived-expressions.md)
 * [Control Features](./control-features.md)
 * [Exceptions](./exceptions.md)

@@ -1,0 +1,24 @@
+[Home](s1-docs.md)
+
+# Records
+
+`(define-record-type type (constructor field ...) predicate (field accessor [modifier]) ...)`
+
+Defines a new record type (R7RS 5.5). `type` is bound to the record type, `constructor` to a procedure that makes a record from the named fields (others start unspecified), `predicate` to a test for records of this type, and each `accessor` and `modifier` to procedures that read and set a field. Accessors and modifiers raise an error when given anything but a record of their type.
+
+```scheme
+(define-record-type <pare>
+  (kons x y)
+  pare?
+  (x kar set-kar!)
+  (y kdr))
+
+(kar (kons 1 2))          ; => 1
+(pare? (cons 1 2))        ; => #f
+```
+
+`define-record-type` works at top level and in bodies. Each use creates a distinct type, even with the same name. A record prints as `#<<pare> 1 2>`, its type name followed by its field values.
+
+`define-record-type` is a `syntax-rules` macro in `scheme/s1-core.scm` over internal primitives (`%make-record-type`, `%record-make`, `%record?`, `%record-get`, `%record-set!`). Promises are implemented as a record type.
+
+[Home](s1-docs.md)

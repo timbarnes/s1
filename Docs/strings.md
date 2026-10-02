@@ -2,98 +2,33 @@
 
 # Strings
 
-## `string?`
+Strings hold Unicode characters; indexes count characters, not bytes. String literals support the escapes `\a \b \t \n \r \" \\ \|`, `\x3BB;` and a backslash at the end of a line (the line break and surrounding spaces are skipped). Procedures that take an optional `start` and `end` work on the characters from index `start` (default 0) up to, not including, `end` (default the length). All are built in.
 
-`(string? obj)`
+## Construction and access
 
-Returns `#t` if `obj` is a string, and `#f` otherwise. Implemented via `type-of`.
+* `(string? obj)`, `(make-string k [char])`, `(string char ...)`, `(string-length s)`.
+* `(string-ref s k)`, `(string-set! s k char)`.
+* `(string-append s ...)`, `(substring s start end)`, `(string-copy s [start [end]])`.
+* `(string-copy! to at from [start [end]])`: copies characters into `to` starting at index `at`; correct even when `to` and `from` are the same string.
+* `(string-fill! s char [start [end]])`.
 
-## `make-string`
+## Comparison
 
-`(make-string k [char])`
+`(string=? s1 s2 s3 ...)`, `(string<? ...)`, `(string>? ...)`, `(string<=? ...)`, `(string>=? ...)` compare lexicographically by Unicode scalar value and take two or more arguments. `(string-ci=? ...)` and the other `-ci` forms compare after `string-foldcase`.
 
-Returns a newly allocated string of length `k`. If `char` is given, then all elements of the string are initialized to `char`, otherwise the contents of the string are unspecified.
+## Case
 
-## `string`
+`(string-upcase s)`, `(string-downcase s)` use full Unicode case mapping (`(string-upcase "ßa")` is `"SSA"`, and a final capital sigma downcases to `ς`). `(string-foldcase s)` applies full case folding (`(string-foldcase "Maß")` is `"mass"`).
 
-`(string char ...)`
+## Conversion
 
-Returns a newly allocated string composed of the arguments.
+* `(string->list s [start [end]])`, `(list->string list)`.
+* `(string->vector s [start [end]])`, `(vector->string vector [start [end]])`.
+* `(string->symbol s)`, `(symbol->string sym)`; `(string->number s [radix])`, `(number->string z [radix])`.
+* `(string->utf8 s [start [end]])`, `(utf8->string bytevector [start [end]])`: see [Bytevectors](./bytevectors.md).
 
-## `string-length`
+## Iteration
 
-`(string-length string)`
-
-Returns the number of characters in `string`.
-
-## `string-ref`
-
-`(string-ref string k)`
-
-Returns the `k`th character of `string`.
-
-## `string-set!`
-
-`(string-set! string k char)`
-
-Stores `char` in element `k` of `string`.
-
-## `string=?`
-
-`(string=? string1 string2)`
-
-## `string<?`
-
-`(string<? string1 string2)`
-
-## `string>?`
-
-`(string>? string1 string2)`
-
-## `string<=?`
-
-`(string<=? string1 string2)`
-
-## `string>=?`
-
-`(string>=? string1 string2)`
-
-These procedures compare strings in a lexicographical fashion. `string>=?` is **not implemented**.
-
-## `substring`
-
-`(substring string start end)`
-
-Returns a newly allocated string formed from the characters of `string` beginning with index `start` (inclusive) and ending with index `end` (exclusive).
-
-## `string-append`
-
-`(string-append string ...)`
-
-Returns a newly allocated string whose characters form the concatenation of the given strings.
-
-## `string->list`
-
-`(string->list string)`
-
-Returns a newly allocated list of the characters that make up the given string.
-
-## `list->string`
-
-`(list->string list)`
-
-Returns a newly allocated string formed from the characters in `list`.
-
-## `string-copy`
-
-`(string-copy string [start [end]])`
-
-Returns a newly allocated copy of the given `string`, or of its characters from index `start` (inclusive, default 0) to `end` (exclusive, default the length).
-
-## `string-fill!`
-
-`(string-fill! string char)`
-
-Stores `char` in every element of `string`.
+`(string-map proc s1 s2 ...)` returns a string of `proc`'s results on corresponding characters; `(string-for-each proc s1 s2 ...)` calls `proc` for effect. Both stop at the shortest string.
 
 [Home](s1-docs.md)

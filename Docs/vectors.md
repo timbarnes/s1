@@ -2,58 +2,14 @@
 
 # Vectors
 
-## `vector?`
+Vectors are written `#(a b c)`. Procedures with optional `start` and `end` work on the elements from index `start` (default 0) up to, not including, `end` (default the length). s1 also reads `[a b c]` as a vector (an extension).
 
-`(vector? obj)`
-
-Returns `#t` if `obj` is a vector, and `#f` otherwise. Implemented via `type-of`.
-
-## `make-vector`
-
-`(make-vector k [fill])`
-
-Returns a newly allocated vector of `k` elements. If a second argument is given, then each element is initialized to `fill`.
-
-## `vector`
-
-`(vector obj ...)`
-
-Returns a newly allocated vector whose elements are the given arguments.
-
-## `vector-length`
-
-`(vector-length vector)`
-
-Returns the number of elements in `vector` as an exact integer.
-
-## `vector-ref`
-
-`(vector-ref vector k)`
-
-Returns the `k`th element of `vector`.
-
-## `vector-set!`
-
-`(vector-set! vector k obj)`
-
-Stores `obj` in element `k` of `vector`.
-
-## `vector->list`
-
-`(vector->list vector)`
-
-Returns a newly allocated list of the objects contained in the elements of `vector`.
-
-## `list->vector`
-
-`(list->vector list)`
-
-Returns a newly created vector initialized to the elements of `list`.
-
-## `vector-fill!`
-
-`(vector-fill! vector fill)`
-
-Stores `fill` in every element of `vector`.
+* `(vector? obj)`, `(make-vector k [fill])`, `(vector obj ...)`, `(vector-length v)`.
+* `(vector-ref v k)`, `(vector-set! v k obj)`.
+* `(vector-copy v [start [end]])`, `(vector-append v ...)`.
+* `(vector-copy! to at from [start [end]])`: copies elements into `to` starting at index `at`; correct even when `to` and `from` are the same vector.
+* `(vector-fill! v fill [start [end]])`: returns the vector (R7RS leaves the result unspecified).
+* `(vector->list v [start [end]])`, `(list->vector list)`, `(vector->string v [start [end]])`, `(string->vector s [start [end]])`.
+* `(vector-map proc v1 v2 ...)` returns a vector of `proc`'s results on corresponding elements; `(vector-for-each proc v1 v2 ...)` calls `proc` for effect. Both stop at the shortest vector.
 
 [Home](s1-docs.md)

@@ -48,7 +48,11 @@ Returns `#t` if `obj` is the empty list, and `#f` otherwise. Implemented in `s1-
 
 `(list? obj)`
 
-Returns `#t` if `obj` is a proper list, and `#f` otherwise. Implemented via `type-of`.
+Returns `#t` if `obj` is a proper list (finite and ending in the empty list), and `#f` otherwise, including for a circular list. Built in. `length` likewise reports an error for an improper or circular list instead of looping.
+
+## `make-list`, `list-copy`, `list-set!`
+
+`(make-list k [fill])` returns a list of `k` elements, each `fill`. `(list-copy obj)` returns a copy of the pairs of a list (proper or not); a non-list is returned as is. `(list-set! list k obj)` stores `obj` in element `k`. Built in.
 
 ## `list`
 
@@ -98,7 +102,7 @@ Returns the `k`th element of `list`.
 
 `(member obj list)`
 
-These procedures return the first sublist of `list` whose car is `obj`, where the sublists of `list` are the non-empty lists returned by `(list-tail list k)` for `k` from 0 to `(- (length list) 1)`. If `obj` does not occur in `list`, then `#f` is returned. `memq` uses `eq?` to compare `obj` with the elements of `list`, while `memv` uses `eqv?` and `member` uses `equal?`. Implemented in `s1-core.scm`.
+These procedures return the first sublist of `list` whose car is `obj`, where the sublists of `list` are the non-empty lists returned by `(list-tail list k)` for `k` from 0 to `(- (length list) 1)`. If `obj` does not occur in `list`, then `#f` is returned. `memq` uses `eq?` to compare `obj` with the elements of `list`, while `memv` uses `eqv?` and `member` uses `equal?`, or the procedure given as `(member obj list compare)`. `memq` and `memv` are built in; `member` is in `s1-core.scm`.
 
 ## `assq`
 
@@ -112,7 +116,7 @@ These procedures return the first sublist of `list` whose car is `obj`, where th
 
 `(assoc obj alist)`
 
-`alist` (for "association list") must be a list of pairs. These procedures find the first pair in `alist` whose car field is `obj`, and returns that pair. If no pair in `alist` has `obj` as its car, then `#f` is returned. `assq` uses `eq?` to compare `obj` with the car fields of the pairs in `alist`, while `assv` uses `eqv?` and `assoc` uses `equal?`. Implemented in `s1-core.scm`.
+`alist` (for "association list") must be a list of pairs. These procedures find the first pair in `alist` whose car field is `obj`, and returns that pair. If no pair in `alist` has `obj` as its car, then `#f` is returned. `assq` uses `eq?` to compare `obj` with the car fields of the pairs in `alist`, while `assv` uses `eqv?` and `assoc` uses `equal?`, or the procedure given as `(assoc obj alist compare)`. `assq` and `assv` are built in; `assoc` is in `s1-core.scm`.
 
 ## List Accessors
 
@@ -172,6 +176,12 @@ Returns a list of lists, where the i-th list contains the i-th elements of the i
 
 `(map proc list ...)`
 
-Applies `proc` to the elements of the `list`s and returns a list of the results. Implemented in `s1-core.scm`.
+Applies `proc` to the elements of the `list`s and returns a list of the results, stopping at the shortest list. Implemented in `s1-core.scm`.
+
+## `for-each`
+
+`(for-each proc list1 list2 ...)`
+
+Calls `proc` on corresponding elements of the lists, in order, for effect, stopping at the shortest list (so a circular list paired with a finite one terminates). Implemented in `s1-core.scm`.
 
 [Home](s1-docs.md)

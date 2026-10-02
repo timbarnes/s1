@@ -20,6 +20,8 @@ A comprehensive Scheme interpreter written in Rust that aims to closely follow t
 - **Booleans**: `#t` and `#f` values
 - **Lists**: Proper and improper lists built from cons cells
 - **Vectors**: Fixed-size heterogeneous arrays
+- **Bytevectors**: Byte arrays, written `#u8(...)`
+- **Records**: `define-record-type`
 - **Closures**: First-class functions with lexical environment capture
 - **Ports**: I/O abstraction supporting files, strings, and standard streams
 

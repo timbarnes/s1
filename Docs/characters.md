@@ -2,76 +2,24 @@
 
 # Characters
 
-## `char?`
+Characters are Unicode scalar values. Literals: `#\a`, `#\λ`, `#\x3BB`, and the names `#\alarm`, `#\backspace`, `#\delete`, `#\escape`, `#\newline`, `#\null`, `#\return`, `#\space`, `#\tab`. All of these procedures are built in.
 
-`(char? obj)`
+## Comparison
 
-Returns `#t` if `obj` is a character, and `#f` otherwise.
+`(char=? c1 c2 c3 ...)`, `(char<? ...)`, `(char>? ...)`, `(char<=? ...)`, `(char>=? ...)` compare by Unicode scalar value and take two or more arguments.
 
-## `char=?`
+`(char-ci=? ...)`, `(char-ci<? ...)`, `(char-ci>? ...)`, `(char-ci<=? ...)`, `(char-ci>=? ...)` compare after `char-foldcase`.
 
-`(char=? char1 char2)`
+## Classification
 
-## `char<?`
+* `(char-alphabetic? c)`, `(char-upper-case? c)`, `(char-lower-case? c)`, `(char-whitespace? c)`: Unicode's Alphabetic, Uppercase, Lowercase and White_Space properties, so `(char-alphabetic? #\λ)` is `#t`.
+* `(char-numeric? c)`: `#t` for a decimal digit in any script (Unicode category Nd), such as `#\x0E50` (Thai zero).
+* `(digit-value c)`: the value 0 to 9 of such a digit, or `#f`: `(digit-value #\x0664)` is `4`.
 
-`(char<? char1 char2)`
+## Conversion
 
-## `char>?`
-
-`(char>? char1 char2)`
-
-## `char<=?`
-
-`(char<=? char1 char2)`
-
-## `char>=?`
-
-`(char>=? char1 char2)`
-
-These procedures return `#t` if the results of passing their arguments to `char->integer` are respectively equal, less than, greater than, less than or equal to, or greater than or equal to. Implemented in `s1-core.scm`.
-
-## `char-alphabetic?`
-
-`(char-alphabetic? char)`
-
-## `char-numeric?`
-
-`(char-numeric? char)`
-
-## `char-whitespace?`
-
-`(char-whitespace? char)`
-
-## `char-upper-case?`
-
-`(char-upper-case? char)`
-
-## `char-lower-case?`
-
-`(char-lower-case? char)`
-
-These character predicates return `#t` if the character is alphabetic, numeric, whitespace, upper case, or lower case, respectively. Implemented in `s1-core.scm`.
-
-## `char->integer`
-
-`(char->integer char)`
-
-Returns the integer representation of `char`.
-
-## `integer->char`
-
-`(integer->char n)`
-
-Returns the character whose integer representation is `n`.
-
-## `char-upcase`
-
-`(char-upcase char)`
-
-## `char-downcase`
-
-`(char-downcase char)`
-
-These procedures return a character `char2` such that `(char-downcase char)` returns the lower case version of `char` and `(char-upcase char)` returns the upper case version of `char`. If the argument is not a letter, it is returned unchanged.
+* `(char->integer c)`, `(integer->char n)`: between characters and Unicode scalar values.
+* `(char-upcase c)`, `(char-downcase c)`: Unicode case mapping. A character whose mapping is more than one character (`ß` upcases to `SS`) is returned unchanged.
+* `(char-foldcase c)`: simple Unicode case folding, as used by the `-ci` comparisons.
 
 [Home](s1-docs.md)

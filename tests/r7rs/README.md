@@ -38,13 +38,12 @@ baseline stays in step with the code. `S1_BIN` selects a prebuilt binary and
 Each section runs in its own process, so a reader desync or crash in one
 section cannot swallow the next ones.
 
-## Known blockers (604 passing after phase 6)
+## Known blockers (811 passing after phase 7)
 
-- **5 Program structure**: the remaining tests use `define-record-type` (phase 7).
+- **6.5 Symbols**: `(symbol? 'nil)`: s1 reads a bare `nil` as the empty list.
 
 - **Read syntax, Numeric syntax, 6.13 Input and output**: these need string
   ports (phase 8). Their helper macros now define correctly.
 - **6.11 Exceptions**: the remaining tests use string ports (phase 8).
-- **Complex numbers** are reported as parse errors ("not supported"), as are
-  bytevector literals ("not supported yet") until phase 7. The unreached tests
-  in 6.2 Numbers are all complex-number tests.
+- **Complex numbers** are reported as parse errors ("not supported"). The
+  unreached tests in 6.2 Numbers are all complex-number tests.
