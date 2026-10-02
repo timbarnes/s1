@@ -62,6 +62,7 @@ pub fn equal(heap: &GcHeap, a: GcRef, b: GcRef) -> bool {
             equal(heap, *a1, *a2) && equal(heap, *d1, *d2)
         }
         (SchemeValue::Str(a), SchemeValue::Str(b)) => a == b,
+        (SchemeValue::Bytevector(a), SchemeValue::Bytevector(b)) => a == b,
         (SchemeValue::Vector(a), SchemeValue::Vector(b)) => {
             if a.len() != b.len() {
                 return false;
@@ -309,6 +310,14 @@ pub fn new_error_object(
             message,
             irritants,
         })),
+        marked: 0,
+    })
+}
+
+/// Create a new bytevector.
+pub fn new_bytevector(heap: &mut GcHeap, bytes: Vec<u8>) -> GcRef {
+    heap.alloc(GcObject {
+        value: SchemeValue::Bytevector(bytes),
         marked: 0,
     })
 }

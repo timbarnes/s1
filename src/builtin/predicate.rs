@@ -49,6 +49,7 @@ pub fn type_of(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
         SchemeValue::Pair(_, _) => "pair",
         SchemeValue::Str(_) => "string",
         SchemeValue::Vector(_) => "vector",
+        SchemeValue::Bytevector(_) => "bytevector",
         SchemeValue::Bool(_) => "boolean",
         SchemeValue::Char(_) => "char",
         SchemeValue::Callable(c) => match &**c {

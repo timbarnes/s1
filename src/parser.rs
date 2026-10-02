@@ -14,10 +14,11 @@
 //! of the list as new top-level forms.
 
 use crate::gc::{
-    GcHeap, GcRef, SchemeValue, get_symbol, new_bool, new_char, new_float, new_int, new_pair,
-    new_rational, new_string, new_vector,
+    GcHeap, GcRef, SchemeValue, get_symbol, new_bool, new_bytevector, new_char, new_float, new_int,
+    new_pair, new_rational, new_string, new_vector,
 };
-use crate::gc_value_mut;
+use crate::{gc_value, gc_value_mut};
+use num_traits::ToPrimitive;
 use crate::io::PortKind;
 use crate::number_syntax::{Number, NumberSyntax, parse_number};
 use crate::tokenizer::{Token, Tokenizer};
@@ -103,8 +104,20 @@ impl Reader<'_, '_> {
                 new_vector(self.heap, elems)
             }
             Token::ByteVectorStart => {
-                self.sequence(Token::RightParen, "bytevector")?;
-                self.defer("bytevectors are not supported yet".to_string())
+                let elems = self.sequence(Token::RightParen, "bytevector")?;
+                let mut bytes = Vec::with_capacity(elems.len());
+                for e in elems {
+                    match gc_value!(e) {
+                        SchemeValue::Int(i) if i.to_u8().is_some() => bytes.push(i.to_u8().unwrap()),
+                        _ => {
+                            return Ok(self.defer(format!(
+                                "bytevector elements must be exact integers 0-255, not {}",
+                                crate::printer::print_value(&e)
+                            )));
+                        }
+                    }
+                }
+                new_bytevector(self.heap, bytes)
             }
             Token::Quote => self.abbreviation("quote")?,
             Token::QuasiQuote => self.abbreviation("quasiquote")?,
@@ -516,7 +529,7 @@ mod tests {
     fn parse_unsupported_values_keep_reader_in_sync() {
         // Each error is reported after its whole datum, so the next datum
         // reads normally.
-        let results = read_all("(1 1/0 3) ok1 #u8(1 2) ok2 (#\\bogus x) ok3 1+2i ok4");
+        let results = read_all("(1 1/0 3) ok1 #u8(1 256) ok2 (#\\bogus x) ok3 1+2i ok4");
         let msgs: Vec<String> = results
             .iter()
             .map(|r| match r {
@@ -528,7 +541,7 @@ mod tests {
         assert_eq!(msgs.len(), 8, "{:?}", msgs);
         assert!(msgs[0].contains("division by zero"));
         assert_eq!(msgs[1], "ok1");
-        assert!(msgs[2].contains("bytevectors are not supported yet"));
+        assert!(msgs[2].contains("bytevector elements must be"));
         assert_eq!(msgs[3], "ok2");
         assert!(msgs[4].contains("unknown character name"));
         assert_eq!(msgs[5], "ok3");

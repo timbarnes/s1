@@ -12,11 +12,11 @@
 6.6 Characters	43	7	29	79	79	
 6.7 Strings	78	0	52	130	130	
 6.8 Vectors	13	0	30	43	43	
-6.9 Bytevectors	0	0	11	11	39	
+6.9 Bytevectors	39	0	0	39	39	
 6.10 Control Features	24	0	10	34	34	
 6.11 Exceptions	18	2	0	20	30	
 6.12 Environments and evaluation	0	0	4	4	4	
-6.13 Input and output	3	0	38	41	63	
-Read syntax	6	0	67	73	95	
+6.13 Input and output	3	0	56	59	63	
+Read syntax	6	0	69	75	95	
 Numeric syntax	0	0	11	11	213	
 6.14 System interface	0	1	10	11	13	

@@ -154,6 +154,7 @@ pub enum SchemeValue {
     Pair(GcRef, GcRef),
     Str(String),
     Vector(Vec<GcRef>),
+    Bytevector(Vec<u8>),
     /// The result of `(values ...)` with zero or two-plus values. A single
     /// value is never wrapped. Travelling as an ordinary value lets multiple
     /// values pass unchanged through every continuation frame (closure

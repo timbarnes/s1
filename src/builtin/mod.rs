@@ -1,3 +1,4 @@
+pub mod bytevector;
 pub mod char;
 pub mod display;
 pub mod fileio;
@@ -14,8 +15,30 @@ use crate::gc_value;
 use crate::register_builtin_family;
 use num_traits::ToPrimitive;
 
+/// The optional `[start [end]]` arguments at `args[at..]` for a sequence of
+/// length `len`, checked: 0 <= start <= end <= len. Used by the copy, fill
+/// and conversion procedures that take a range.
+pub fn range_args(args: &[GcRef], at: usize, len: usize, who: &str) -> Result<(usize, usize), String> {
+    let index = |i: usize, default: usize| -> Result<usize, String> {
+        match args.get(i).map(|a| gc_value!(*a)) {
+            None => Ok(default),
+            Some(SchemeValue::Int(n)) => n
+                .to_usize()
+                .ok_or_else(|| format!("{}: index must be a non-negative integer", who)),
+            Some(_) => Err(format!("{}: index must be an exact integer", who)),
+        }
+    };
+    let start = index(at, 0)?;
+    let end = index(at + 1, len)?;
+    if start > end || end > len {
+        return Err(format!("{}: range {}..{} is out of bounds for length {}", who, start, end, len));
+    }
+    Ok((start, end))
+}
+
 /// Register all builtin functions in the environment
 pub fn register_builtins(heap: &mut GcHeap, env: EnvRef) {
+    bytevector::register_bytevector_builtins(heap, env.clone());
     char::register_char_builtins(heap, env.clone());
     display::register_display_builtins(heap, env.clone());
     list::register_list_builtins(heap, env.clone());

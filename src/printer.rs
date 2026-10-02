@@ -50,6 +50,16 @@ fn print_into(out: &mut String, obj: GcRef, write: bool) {
             print_separated(out, v, write);
             out.push(')');
         }
+        Bytevector(b) => {
+            out.push_str("#u8(");
+            for (i, byte) in b.iter().enumerate() {
+                if i > 0 {
+                    out.push(' ');
+                }
+                out.push_str(&byte.to_string());
+            }
+            out.push(')');
+        }
         // The values of a `(values ...)` package that reached a printer.
         Values(v) => print_separated(out, v, write),
         Symbol(s) if write => write_symbol(out, s),
