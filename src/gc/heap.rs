@@ -45,6 +45,13 @@ pub struct GcHeap {
     /// keeps `original` and `env` alive only while the alias itself is
     /// reachable (an ephemeron), and is dropped when the alias is collected.
     aliases: HashMap<GcRef, Alias>,
+    /// The global environment, recorded by `initialize_scheme_globals`, in
+    /// which `core_id` aliases resolve.
+    global_env: Option<crate::env::EnvRef>,
+    /// One cached alias per core name (see `core_id`); GC roots.
+    core_ids: HashMap<&'static str, GcRef>,
+    /// Cached special-form objects (see `core_form`); GC roots.
+    core_forms: HashMap<&'static str, GcRef>,
 }
 
 /// An alias's renaming record; see `GcHeap::aliases`.
@@ -85,6 +92,9 @@ impl GcHeap {
             current_epoch: 0,
             poison_sweep: std::env::var("S1_GC_POISON").is_ok(),
             aliases: HashMap::default(),
+            global_env: None,
+            core_ids: HashMap::default(),
+            core_forms: HashMap::default(),
         };
 
         // Pre-allocate singleton objects
@@ -265,6 +275,60 @@ impl GcHeap {
         alias
     }
 
+    /// Record the global environment, where `core_id` identifiers resolve.
+    pub fn set_global_env(&mut self, env: crate::env::EnvRef) {
+        self.global_env = Some(env);
+        self.core_ids.clear();
+        self.core_forms.clear();
+    }
+
+    /// The special-form object globally bound to `name`, for a rewrite to
+    /// put in operator position: the evaluator dispatches it directly, with
+    /// no lookup, and no local binding can intercept it. Only for special
+    /// forms whose handlers don't inspect their own keyword (`begin`, `if`,
+    /// `quote`, ...); `lambda` and `let` need `core_id`. Falls back to the
+    /// interned symbol if `name` isn't a global special form.
+    pub fn core_form(&mut self, name: &'static str) -> GcRef {
+        if let Some(form) = self.core_forms.get(name) {
+            return *form;
+        }
+        let sym = self.intern_symbol(name);
+        let global = match self.global_env.clone() {
+            Some(g) => g,
+            None => return sym,
+        };
+        match crate::env::EnvOps::lookup_local(&global, sym) {
+            Some(v) if matches!(self.get_value(v).as_callable(), Some(Callable::SpecialForm { .. })) => {
+                self.core_forms.insert(name, v);
+                v
+            }
+            _ => sym,
+        }
+    }
+
+    /// An identifier for the core form or procedure `name` that means the
+    /// global binding whatever the local ones: an alias of the interned
+    /// symbol resolved in the global environment. Special forms that rewrite
+    /// themselves into other forms (named `let`, `do`, internal definitions,
+    /// `guard`, ...) build their rewrites with these, so a user's local
+    /// `lambda` or `let` can't change what the rewrite means. One alias per
+    /// name is created and reused. Before a global environment is recorded
+    /// (some unit tests), this is just the interned symbol.
+    pub fn core_id(&mut self, name: &'static str) -> GcRef {
+        if let Some(id) = self.core_ids.get(name) {
+            return *id;
+        }
+        let sym = self.intern_symbol(name);
+        match self.global_env.clone() {
+            Some(global) => {
+                let id = self.make_alias(sym, global);
+                self.core_ids.insert(name, id);
+                id
+            }
+            None => sym,
+        }
+    }
+
     /// The renaming record for `id`, if it is an alias.
     pub fn alias(&self, id: GcRef) -> Option<&Alias> {
         self.aliases.get(&id)
@@ -380,6 +444,11 @@ impl GcHeap {
         // Symbol table roots
         for &sym in self.symbol_table.values() {
             mark_reachable(sym, epoch, &mut self.worklist);
+        }
+
+        // Cached core identifiers and special forms
+        for &id in self.core_ids.values().chain(self.core_forms.values()) {
+            mark_reachable(id, epoch, &mut self.worklist);
         }
 
         // Alias table, as ephemerons: a reachable alias keeps its original

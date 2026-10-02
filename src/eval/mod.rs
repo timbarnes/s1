@@ -131,6 +131,7 @@ pub fn initialize_scheme_globals(rt: &mut RunTime, env: EnvRef) -> Result<(), St
     env.define(stdin_sym, stdin_port);
     env.define(stdout_sym, stdout_port);
     env.define(stderr_sym, stderr_port);
+    rt.heap.set_global_env(env.clone());
     crate::builtin::register_builtins(rt.heap, env.clone());
     crate::special_forms::register_special_forms(rt.heap, env.clone());
     crate::sys_builtins::register_sys_builtins(rt, env.clone());

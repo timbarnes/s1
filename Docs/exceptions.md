@@ -44,7 +44,7 @@ Evaluates `body`. If it raises, control returns to the `guard`, running the `aft
   (car 1))                                       ; => "car: argument must be a pair"
 ```
 
-`guard` is a built-in special form for now. Until hygienic macros arrive (plan phase 5), a local binding named `lambda`, `let` or `cond` around a `guard` will interfere with it. Its other internals can't be affected by user variables.
+`guard` is a built-in special form. Its expansion can't be affected by the user's variables, including local bindings named `lambda`, `let` or `cond`.
 
 ## Error objects
 

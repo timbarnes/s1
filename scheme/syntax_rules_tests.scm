@@ -152,3 +152,20 @@
 (define-syntax survives-gc (syntax-rules () ((_ x) (let ((v x)) (list v v)))))
 (gc)
 (test-equal '(9 9) (survives-gc 9) "a transformer and its environment survive a collection")
+
+;; --- special forms that rewrite themselves use the global core forms, so
+;; local bindings of core names can't break them (and do's loop can't
+;; capture a user variable)
+(test-equal 1 (let ((lambda #f)) (define (f) 1) (f)) "internal define with a local lambda")
+(test-equal 2 (let ((lambda #f)) (define (g x) x) (g 2)) "procedure define with a local lambda")
+(test-equal 3 (let ((letrec #f)) (let lp ((i 0)) (if (< i 3) (lp (+ i 1)) i))) "named let with a local letrec")
+(test-equal 3 (let ((lambda #f)) (let lp ((i 0)) (if (< i 3) (lp (+ i 1)) i))) "named let with a local lambda")
+(test-equal '(mine mine)
+    (let ((loop 'mine)) (do ((i 0 (+ i 1)) (acc '() (cons loop acc))) ((= i 2) acc)))
+    "do doesn't capture a user variable named loop")
+(test-equal 'done (let ((if #f)) (do ((i 0 (+ i 1))) ((= i 2) 'done))) "do with a local if")
+(test-equal 'caught (let ((lambda #f)) (guard (e (#t 'caught)) (raise 'x))) "guard with a local lambda")
+(test-equal 'caught (let ((cond #f)) (guard (e (#t 'caught)) (raise 'x))) "guard with a local cond")
+(test-equal 3 (let ((let 1)) (let* ((a 1) (b 2)) (+ a b))) "let* with a local let")
+(test-equal 1 (let ((set! #f)) (letrec ((f (lambda () 1))) (f))) "letrec with a local set!")
+(test-equal '(x y) (let ((quote list)) `(x y)) "quasiquote with a local quote")

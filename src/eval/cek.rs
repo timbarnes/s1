@@ -117,10 +117,12 @@ pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
             // away and re-looking it up via EvalArg's operator-evaluation
             // phase — that redundant second lookup used to happen on every
             // non-special-form application.
-            let op_val = if let Symbol(_) = &gc_value!(*car) {
-                identifiers::lookup(rt.heap, *car, &state.env)
-            } else {
-                None
+            let op_val = match gc_value!(*car) {
+                Symbol(_) => identifiers::lookup(rt.heap, *car, &state.env),
+                // A special-form object put in operator position by a
+                // rewrite (GcHeap::core_form): dispatch it directly.
+                Callable(c) if matches!(**c, Callable::SpecialForm { .. }) => Some(*car),
+                _ => None,
             };
 
             // Quick path: is this a special form, or a syntax-rules macro?
@@ -476,7 +478,7 @@ fn handle_cond_clause(
                 // build (arrow_proc (quote test_value)): the value is already
                 // evaluated, so it must not be evaluated again as an argument
                 // (a list value would be taken for a call).
-                let quote = ec.heap.intern_symbol("quote");
+                let quote = ec.heap.core_form("quote");
                 let nil = ec.heap.nil_s();
                 let quoted = cons(*test_value, nil, ec.heap)?;
                 let quoted = cons(quote, quoted, ec.heap)?;

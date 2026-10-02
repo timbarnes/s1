@@ -245,7 +245,7 @@ pub fn define_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
             let name = car(signature)?;
             let params = cdr(signature)?;
 
-            let lambda_sym = ec.heap.intern_symbol("lambda");
+            let lambda_sym = ec.heap.core_id("lambda");
             // Pass the body forms through unwrapped, exactly as a literal
             // (lambda params body...) would, so create_lambda_or_macro's
             // leading-docstring detection and internal-define handling
@@ -386,7 +386,7 @@ pub fn let_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(),
             }
 
             // Transform to: (letrec ((name (lambda (params...) body...))) (name init_vals...))
-            let lambda_sym = ec.heap.intern_symbol("lambda");
+            let lambda_sym = ec.heap.core_id("lambda");
             let params_list = list_from_slice(&params, ec.heap);
             let body = wrap_body_in_begin(&body_exprs[..], ec.heap);
 
@@ -398,7 +398,7 @@ pub fn let_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(),
             call_args.extend_from_slice(&init_vals);
             let call_expr = list_from_slice(&call_args, ec.heap);
 
-            let letrec_sym = ec.heap.intern_symbol("letrec");
+            let letrec_sym = ec.heap.core_form("letrec");
             let letrec_expr = list_from_slice(&[letrec_sym, name_bindings, call_expr], ec.heap);
 
             insert_eval(state, letrec_expr, false);
@@ -458,13 +458,13 @@ pub fn let_star_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Resul
         wrap_body_in_begin(&formvec[2..], ec.heap)
     } else {
         // More bindings, create nested let*
-        let let_star_sym = ec.heap.intern_symbol("let*");
+        let let_star_sym = ec.heap.core_form("let*");
         let wrapped_body = wrap_body_in_begin(&formvec[2..], ec.heap);
         list_from_slice(&[let_star_sym, remaining_bindings, wrapped_body], ec.heap)
     };
 
     // Create the outer let with first binding
-    let let_sym = ec.heap.intern_symbol("let");
+    let let_sym = ec.heap.core_id("let");
     let first_binding_list = list_from_slice(&[first_binding], ec.heap);
     let outer_let = list_from_slice(&[let_sym, first_binding_list, inner_expr], ec.heap);
 
@@ -491,7 +491,7 @@ pub fn letrec_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
     let mut init_bindings = Vec::new();
     let mut set_exprs = Vec::new();
     let false_val = ec.heap.false_s();
-    let set_sym = ec.heap.intern_symbol("set!");
+    let set_sym = ec.heap.core_form("set!");
 
     for binding in bindings.iter() {
         match &ec.heap.get_value(*binding) {
@@ -512,7 +512,7 @@ pub fn letrec_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
     }
 
     // Build the complete expression
-    let let_sym = ec.heap.intern_symbol("let");
+    let let_sym = ec.heap.core_id("let");
     let init_bindings_list = list_from_slice(&init_bindings[..], ec.heap);
 
     // Process internal defines in the body
@@ -682,7 +682,7 @@ fn lower_quasiquote(
             Ok(list2(procs.list_to_vector, list_code, ec.heap).unwrap())
         }
         SchemeValue::Symbol(_) => {
-            let quote_sym = ec.heap.intern_symbol("quote");
+            let quote_sym = ec.heap.core_form("quote");
             Ok(list2(quote_sym, form, ec.heap).unwrap())
         }
         // Self-evaluating atoms (Int, Float, Str, Bool, Char, Nil, ...) need
@@ -702,7 +702,7 @@ fn qq_single_arg(rest: GcRef) -> Option<GcRef> {
 /// qq(d-1, x))` from the grammar above.
 fn wrap_tag(tag: &str, inner_code: GcRef, procs: &QqProcs, ec: &mut RunTime) -> GcRef {
     let tag_sym = ec.heap.intern_symbol(tag);
-    let quote_sym = ec.heap.intern_symbol("quote");
+    let quote_sym = ec.heap.core_form("quote");
     let quoted_tag = list2(quote_sym, tag_sym, ec.heap).unwrap();
     let nil = ec.heap.nil_s();
     let inner_cons = list_from_slice(&[procs.cons, inner_code, nil], ec.heap);
@@ -752,10 +752,10 @@ fn global_value(env: &EnvRef, ec: &mut RunTime, name: &str) -> Result<GcRef, Str
 /// ```
 ///
 /// The procedures are embedded as objects taken from the global
-/// environment, and `guard-k`, `condition`, `handler-k` and `args` are fresh
-/// uninterned symbols, so the expansion can't be disturbed by, or capture,
-/// the user's variables. `lambda`, `let`, `cond` and `else` are still
-/// looked up by name until hygienic macros arrive.
+/// environment, `lambda`, `let`, `cond` and `else` are core identifiers
+/// (`GcHeap::core_id`) that resolve globally, and `guard-k`, `condition`,
+/// `handler-k` and `args` are fresh uninterned symbols, so the expansion
+/// can't be disturbed by, or capture, the user's variables.
 fn guard_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     const USAGE: &str = "guard: expected (guard (var clause ...) body ...)";
     let form = list_to_vec(ec.heap, expr).map_err(|_| USAGE.to_string())?;
@@ -783,10 +783,10 @@ fn guard_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), S
     let condition = heap.fresh_symbol("condition");
     let handler_k = heap.fresh_symbol("handler-k");
     let args = heap.fresh_symbol("args");
-    let lambda = heap.intern_symbol("lambda");
-    let let_ = heap.intern_symbol("let");
-    let cond = heap.intern_symbol("cond");
-    let else_ = heap.intern_symbol("else");
+    let lambda = heap.core_id("lambda");
+    let let_ = heap.core_id("let");
+    let cond = heap.core_form("cond");
+    let else_ = heap.core_id("else");
     let nil = heap.nil_s();
     let l = |items: &[GcRef], heap: &mut GcHeap| list_from_slice(items, heap);
 
@@ -877,26 +877,12 @@ fn letrec_syntax_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Resu
 }
 
 /// Evaluate `expr` with its keyword replaced by the core form `name`.
-fn rewrite_head(expr: GcRef, name: &str, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
+fn rewrite_head(expr: GcRef, name: &'static str, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let rest = cdr(expr)?;
-    let head = core_identifier(name, ec, &state.env);
+    let head = ec.heap.core_id(name);
     let form = cons(head, rest, ec.heap)?;
     insert_eval(state, form, state.tail);
     Ok(())
-}
-
-/// An identifier for the core form or procedure `name` that resolves in the
-/// global environment whatever the local bindings: an alias of the interned
-/// symbol, resolved at the root of `env`. Used by forms that rewrite
-/// themselves into other forms, so a user's local `let` or `lambda` can't
-/// change what the rewrite means.
-pub fn core_identifier(name: &str, ec: &mut RunTime, env: &EnvRef) -> GcRef {
-    let mut global = env.clone();
-    while let Some(parent) = global.parent() {
-        global = parent;
-    }
-    let sym = ec.heap.intern_symbol(name);
-    ec.heap.make_alias(sym, global)
 }
 
 /// (unquote x) at the top level is an error: it must appear inside a quasiquote.
@@ -1006,10 +992,12 @@ pub fn do_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), 
     //                     (begin result_expr ...)
     //                     (begin command ... (loop step1 step2 ...))))
 
-    let let_sym = ec.heap.intern_symbol("let");
-    let loop_sym = ec.heap.intern_symbol("loop");
-    let if_sym = ec.heap.intern_symbol("if");
-    let begin_sym = ec.heap.intern_symbol("begin");
+    let let_sym = ec.heap.core_id("let");
+    // A fresh symbol, so the loop procedure can't capture a user variable
+    // named `loop` in the body or step expressions.
+    let loop_sym = ec.heap.fresh_symbol("loop");
+    let if_sym = ec.heap.core_form("if");
+    let begin_sym = ec.heap.core_form("begin");
 
     // Create initial bindings: ((var1 init1) (var2 init2) ...)
     let mut init_bindings = Vec::new();
@@ -1104,7 +1092,7 @@ fn transform_internal_defines(body_exprs: &[GcRef], heap: &mut GcHeap) -> Result
                 let body = &def_vec[2..];
                 let name = car(signature)?;
                 let params = cdr(signature)?;
-                let lambda_sym = heap.intern_symbol("lambda");
+                let lambda_sym = heap.core_id("lambda");
                 let lambda_body = wrap_body_in_begin(body, heap);
                 let lambda_expr = list_from_slice(&[lambda_sym, params, lambda_body], heap);
                 bindings.push(list2(name, lambda_expr, heap)?);
@@ -1113,7 +1101,7 @@ fn transform_internal_defines(body_exprs: &[GcRef], heap: &mut GcHeap) -> Result
         }
     }
 
-    let letrec_sym = heap.intern_symbol("letrec");
+    let letrec_sym = heap.core_form("letrec");
     let bindings_list = list_from_slice(&bindings, heap);
     let body_expr = wrap_body_in_begin(&expressions, heap);
     let letrec_expr = list_from_slice(&[letrec_sym, bindings_list, body_expr], heap);
@@ -1126,7 +1114,7 @@ pub fn wrap_body_in_begin(body_exprs: &[GcRef], heap: &mut GcHeap) -> GcRef {
         body_exprs[0]
     } else {
         // Create (begin expr1 expr2 ...)
-        let begin_sym = heap.intern_symbol("begin");
+        let begin_sym = heap.core_form("begin");
         let exprs = list_from_slice(body_exprs, heap);
         cons(begin_sym, exprs, heap).unwrap()
     }
