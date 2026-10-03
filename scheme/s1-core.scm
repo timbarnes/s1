@@ -170,7 +170,7 @@
 
 (define (zip . lists)
     "(zip list ...) returns a list of lists, pairing up the i-th elements of each input list"
-    (if (null? lists)
+    (if (or (null? lists) (%any-null? lists))
         '()
         (cons (map car lists)
               (apply zip (map cdr lists)))))
@@ -237,16 +237,16 @@
   (macro (sig . body)
       "(def sig . body) defines a function if sig is (name . args), or a variable if sig is a plain symbol"
       (cond
-          ((pair? sig) `(def-fn ,sig ,body))
-          ((symbol? sig) `(def-var ,sig ,body))
+          ((pair? sig) `(def-fn ,sig ,@body))
+          ((symbol? sig) `(def-var ,sig ,@body))
           (else (error "define: bad syntax" sig body)))))
 
 (define def-fn
   (macro (s . b)
      "(def-fn (name . args) body) expands to a (define name (lambda args body...)) function definition"
-     '(define ,(car s)
+     `(define ,(car s)
        (lambda ,(cdr s)
-         (begin ,@b)))))
+         ,@b))))
 
 (define def-var
   (macro (s . b)

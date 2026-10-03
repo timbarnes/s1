@@ -277,3 +277,18 @@
 
 ;; Recursive macro: one level only
 (test-equal '(if 1 (my-and 2 3) #f) (expand '(my-and 1 2 3)) "expand shows one level for recursive macro")
+
+(display "          === Testing s1-core utilities: def, zip ===")
+(newline)
+
+(def (def-double a) "doubles a" (define two 2) (* a two))
+(test-equal 8 (def-double 4) "def defines a procedure with a docstring and internal define")
+(test-equal "doubles a" (help 'def-double) "def keeps the docstring")
+(def (def-rest . xs) xs)
+(test-equal '(1 2) (def-rest 1 2) "def with a rest parameter")
+(def def-var-test 7)
+(test-equal 7 def-var-test "def defines a variable")
+(test-equal '((1 a) (2 b)) (zip '(1 2 3) '(a b)) "zip stops at the shortest list")
+(test-equal '((1) (2)) (zip '(1 2)) "zip of one list")
+(test-equal '() (zip) "zip of no lists")
+(test-equal 'reset (trace) "trace with no arguments returns the mode")

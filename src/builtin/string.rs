@@ -23,7 +23,7 @@ use num_bigint::BigInt;
 /// Bind the string procedures in `env`.
 pub fn register_string_builtins(heap: &mut GcHeap, env: EnvRef) {
     register_builtin_family!(heap, env,
-        ">string" => (to_string, "(>string <char1> [<char2> ..]) Create a string from the provided characters"),
+        ">string" => (to_string, "(>string obj ...) returns a string of the objects as display would print them, concatenated"),
         "string-upcase" => (string_upcase, "(string-upcase <string>) Convert a string to uppercase"),
         "string-downcase" => (string_downcase, "(string-downcase <string>) Convert a string to lowercase"),
         "substring" => (substring, "(substring <string> <start> <end>) The characters from index start up to, not including, end"),
@@ -87,15 +87,14 @@ fn list_to_string(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     }
 }
 
-/// `(>string arg)`
-/// Convert a lisp object to a string
+/// `(>string obj ...)`
+/// The objects' `display` representations, concatenated, as a new string.
 fn to_string(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if args.len() == 1 {
-        let result = new_string(heap, display_value(&args[0]).as_str());
-        Ok(result)
-    } else {
-        Err("to-string expects exactly one argument".to_string())
+    if args.is_empty() {
+        return Err(">string: expects at least 1 argument".to_string());
     }
+    let text: String = args.iter().map(display_value).collect();
+    Ok(new_string(heap, &text))
 }
 
 /// `(string-upcase string)`

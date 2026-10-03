@@ -317,13 +317,15 @@ fn help_sp(
 }
 
 /// `(debug-stack)`
-/// Prints the stack
+/// Prints the continuation frames waiting for this call's value, innermost
+/// first.
 fn debug_stack_sp(
     ec: &mut RunTime,
     _args: &[GcRef],
     state: &mut CEKState,
     next: KontRef,
 ) -> Result<(), String> {
+    crate::utilities::dbg_kont("", &next);
     state.control = Control::Value(ec.heap.void());
     state.kont = next;
     Ok(())
@@ -659,6 +661,7 @@ fn trace_sp(
             TraceType::Reset => ec.heap.intern_symbol("reset"),
         };
         state.control = Control::Value(result);
+        state.kont = next;
         return Ok(());
     }
     match &gc_value!(args[0]) {
@@ -679,15 +682,25 @@ fn trace_sp(
     Ok(())
 }
 
-/// `(debug-env ['g(lobal)])`
-/// Prints the environment, optionally including the global env.
+/// `(trace-env ['g(lobal)])`
+/// Prints the caller's local environment frames, innermost first; with `g`
+/// or `global`, the top-level frame too.
 fn trace_env_sp(
     ec: &mut RunTime,
-    _args: &[GcRef],
+    args: &[GcRef],
     state: &mut CEKState,
     next: KontRef,
 ) -> Result<(), String> {
     *ec.depth -= 1;
+    let global = match args {
+        [] => false,
+        [arg] => match &gc_value!(*arg) {
+            SchemeValue::Symbol(s) if s == "g" || s == "global" => true,
+            _ => return Err("trace-env: expects no argument, or g(lobal)".to_string()),
+        },
+        _ => return Err("trace-env: expects at most 1 argument".to_string()),
+    };
+    crate::utilities::dbg_env("", state.env.clone(), global);
     state.control = Control::Value(ec.heap.void());
     state.kont = next;
     Ok(())

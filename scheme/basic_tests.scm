@@ -355,6 +355,8 @@
 (test-equal "22.5" (>string 22.5) "Float to string")
 (test-equal "hello" (>string "hello") "String to string")
 (test-equal "(1 2 3)" (>string '(1 2 3)) "List to string")
+(test-equal "ab" (>string #\a #\b) ">string of several characters")
+(test-equal "42 x" (>string 42 " " 'x) ">string concatenates its arguments")
 (test-equal 5 (string-length "hello") "string-length")
 (test-equal 0 (string-length "") "string-length of empty string")
 (test-equal "now is the time" (string-downcase "Now Is The Time") "string-downcase")

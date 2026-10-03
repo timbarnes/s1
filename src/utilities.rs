@@ -263,19 +263,14 @@ pub fn dbg_one_kont(loc: &str, frame: &Kont) -> String {
 
 /// Print the continuation chain from `kont` down.
 pub fn dbg_kont(loc: &str, kont: &KontRef) {
-    print!("{}Stack: ", loc);
-    let mut kr = Rc::clone(&kont);
-    print!("{} ", dbg_one_kont("", &kr));
-    let k_next = kr.next();
-    match k_next {
-        Some(k) => kr = Rc::clone(k),
-        None => return,
-    };
-    while let Some(k) = kr.next() {
-        dbg_one_kont("", &kr);
-        kr = Rc::clone(k);
+    println!("{}Stack:", loc);
+    let mut kr = Rc::clone(kont);
+    loop {
+        println!(" {}", dbg_one_kont("", &kr).trim());
+        let Some(k) = kr.next() else { break };
+        let k = Rc::clone(k);
+        kr = k;
     }
-    println!("");
 }
 
 /// Print the name of a frame's kind.
@@ -321,11 +316,15 @@ pub fn dbg_env_short(frame: &EnvRef) -> String {
             _ => {}
         }
     }
-    let len = min(bindings.len(), 6);
-    bindings[..len].sort_by(|(k1, _v1), (k2, _v2)| k1.cmp(k2));
+    bindings.sort_by(|(k1, _v1), (k2, _v2)| k1.cmp(k2));
+    let more = bindings.len().saturating_sub(6);
+    bindings.truncate(min(bindings.len(), 6));
     let mut result = String::new();
     for (k, v) in bindings {
         result.push_str(&format!("{}=>{} ", &k, print_value(&v)));
+    }
+    if more > 0 {
+        result.push_str(&format!("... ({more} more)"));
     }
     result
 }
