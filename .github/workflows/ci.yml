@@ -1,0 +1,64 @@
+# Build s1 and run its tests on Linux, macOS and Windows on every push and
+# pull request: the Rust unit and process tests, the regression suite
+# (scheme/regression.scm) and the R7RS conformance suite (tests/r7rs).
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch cancels the run in progress.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        # Git Bash on Windows, so the same steps (and tests/r7rs/run.sh) run
+        # everywhere.
+        shell: bash
+    steps:
+      # Keep LF line endings on Windows: the test files compare exact output,
+      # and run.sh must be a valid bash script.
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release
+      - name: Rust tests
+        run: cargo test --release
+      - name: Regression suite
+        run: |
+          # The suite reports failures but always exits 0, so check its
+          # closing line.
+          ./target/release/s1 -r -q 2>&1 | tee regression.log
+          grep -q '^===  All [0-9]* tests passed!' regression.log
+      - name: R7RS conformance suite
+        run: S1_BIN="$PWD/target/release/s1" tests/r7rs/run.sh
+      - name: Run from outside the repository
+        run: |
+          # The core library is built in, so s1 must not need the repo.
+          s1="$PWD/target/release/s1"
+          cd "$RUNNER_TEMP"
+          echo '(display (when #t (map (lambda (x) (* x x)) (list 1 2 3))))' > t.scm
+          test "$("$s1" t.scm)" = "(1 4 9)"
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ matrix.os }}
+          path: |
+            regression.log
+            tests/r7rs/last-run.log
