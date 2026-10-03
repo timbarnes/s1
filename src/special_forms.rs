@@ -816,6 +816,14 @@ fn global_value(env: &EnvRef, ec: &mut RunTime, name: &str) -> Result<GcRef, Str
 ///          (lambda args (guard-k (lambda () (apply values args))))))))))
 /// ```
 ///
+/// except that `guard-k` is captured with `%call/ec`, not `call/cc`: it is
+/// only ever used to jump out to the guard (from the body's normal return,
+/// or from the handler), so it needn't copy the argument stack. A full
+/// continuation would, at every guard entry, making nested guards
+/// quadratic in time and memory. `handler-k` re-enters the raise point
+/// after the stack has been unwound, so it must be a full continuation; it
+/// is only captured when something is raised.
+///
 /// The procedures are embedded as objects taken from the global
 /// environment, `lambda`, `let`, `cond` and `else` are core identifiers
 /// (`GcHeap::core_id`) that resolve globally, and `guard-k`, `condition`,
@@ -837,6 +845,7 @@ fn guard_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), S
 
     let env = state.env.clone();
     let call_cc = global_value(&env, ec, "call/cc")?;
+    let call_ec = global_value(&env, ec, "%call/ec")?;
     let with_handler = global_value(&env, ec, "with-exception-handler")?;
     let call_with_values = global_value(&env, ec, "call-with-values")?;
     let apply = global_value(&env, ec, "apply")?;
@@ -903,7 +912,7 @@ fn guard_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), S
     let install = l(&[with_handler, handler, thunk], heap);
     let guard_k_params = l(&[guard_k], heap);
     let guard_k_lambda = l(&[lambda, guard_k_params, install], heap);
-    let capture_guard_k = l(&[call_cc, guard_k_lambda], heap);
+    let capture_guard_k = l(&[call_ec, guard_k_lambda], heap);
     let expansion = l(&[capture_guard_k], heap);
 
     insert_eval(state, expansion, state.tail);

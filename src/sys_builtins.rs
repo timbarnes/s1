@@ -31,6 +31,7 @@ pub fn register_sys_builtins(runtime: &mut RunTime, env: EnvRef) {
         "debug-stack" => debug_stack_sp,
         "call/cc" => call_cc_sp,
         "call-with-current-continuation" => call_cc_sp,
+        "%call/ec" => call_ec_sp,
         "escape" => escape_sp,
         "dynamic-wind" => dynamic_wind_sp,
         "exit" => exit_sp,
@@ -332,6 +333,32 @@ fn call_cc_sp(
     state: &mut CEKState,
     next: KontRef,
 ) -> Result<(), String> {
+    capture(ec, args, state, next, false)
+}
+
+/// (%call/ec func)
+/// call/cc for an escape-only continuation: one that is only invoked while
+/// the %call/ec call is still in progress (to jump out of it), never to
+/// re-enter it. It records the argument stack's length instead of copying
+/// the stack, so it costs the same however deep the computation is.
+/// `guard` uses it. Invoking it after the call has returned is an error.
+fn call_ec_sp(
+    ec: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
+    capture(ec, args, state, next, true)
+}
+
+/// call/cc, or with `escape_only`, %call/ec.
+fn capture(
+    ec: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+    escape_only: bool,
+) -> Result<(), String> {
     // 1. Check arguments
     if args.len() != 1 {
         return Err("call/cc: requires a single function argument".to_string());
@@ -351,11 +378,17 @@ fn call_cc_sp(
     // call/cc's own ApplyProc already popped), frames and all: they are never
     // mutated in place, so sharing the chain is safe for re-entry. The
     // pending EvalArg frames' arguments live on `arg_stack`, snapshotted here.
+    let (arg_stack, escape_len) = if escape_only {
+        (Vec::new(), Some(ec.arg_stack.len()))
+    } else {
+        (ec.arg_stack.clone(), None)
+    };
     let kont = new_continuation(
         ec.heap,
         Rc::clone(&next),
         ec.dynamic_wind.clone(),
-        ec.arg_stack.clone(),
+        arg_stack,
+        escape_len,
         *ec.handlers,
     );
     // Build the escape procedure `(lambda vals (<escape-values> k vals))`.
@@ -432,6 +465,27 @@ fn escape_to(
 ) -> Result<(), String> {
     match gc_value!(k) {
         SchemeValue::Continuation(k) => {
+            let new_arg_stack = match k.escape_len {
+                None => Some(k.arg_stack.clone()),
+                Some(len) => {
+                    // Escape-only: valid while k's frames are still below
+                    // us, which also guarantees the stack is at least `len`
+                    // long and unchanged below it.
+                    let mut frame = &state.kont;
+                    while !Rc::ptr_eq(frame, &k.kont) {
+                        match frame.next() {
+                            Some(next) => frame = next,
+                            None => {
+                                return Err(
+                                    "escape continuation invoked after its extent has ended".to_string()
+                                );
+                            }
+                        }
+                    }
+                    ec.arg_stack.truncate(len);
+                    None
+                }
+            };
             let thunks = schedule_dynamic_wind_transitions(&ec.dynamic_wind, &k.dw_stack);
             crate::eval::kont::insert_escape(
                 state,
@@ -439,7 +493,7 @@ fn escape_to(
                 thunks,
                 Rc::clone(&k.kont),
                 k.dw_stack.clone(),
-                k.arg_stack.clone(),
+                new_arg_stack,
                 k.handlers,
             );
             Ok(())
@@ -497,7 +551,7 @@ fn exit_sp(
         thunks,
         Rc::new(Kont::Exit { code }),
         Vec::new(),
-        Vec::new(),
+        Some(Vec::new()),
         nil,
     );
     Ok(())

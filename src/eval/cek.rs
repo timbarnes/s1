@@ -715,7 +715,9 @@ fn handle_escape(
         state.kont = new_kont;
         state.control = Control::Value(payload.result);
         *ec.dynamic_wind = payload.new_dw_stack;
-        *ec.arg_stack = payload.new_arg_stack;
+        if let Some(arg_stack) = payload.new_arg_stack {
+            *ec.arg_stack = arg_stack;
+        }
         *ec.handlers = payload.new_handlers;
     }
     Ok(())

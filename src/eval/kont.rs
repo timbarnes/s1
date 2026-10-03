@@ -2,6 +2,8 @@ use crate::env::EnvRef;
 use crate::eval::DynamicWind;
 use crate::gc::GcRef;
 use crate::printer::print_value;
+use rustc_hash::FxHashSet;
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -429,8 +431,10 @@ pub struct EscapePayload {
     pub result: GcRef,
     pub thunks: Vec<GcRef>,
     pub new_dw_stack: Vec<DynamicWind>,
-    /// The continuation's `arg_stack` snapshot (see `ContinuationData`).
-    pub new_arg_stack: Vec<GcRef>,
+    /// The continuation's `arg_stack` snapshot (see `ContinuationData`), or
+    /// None to keep the stack as it is (an escape-only continuation, which
+    /// truncated it already).
+    pub new_arg_stack: Option<Vec<GcRef>>,
     /// The continuation's exception handler list.
     pub new_handlers: GcRef,
 }
@@ -484,11 +488,51 @@ impl crate::gc::Mark for Control {
     }
 }
 
+thread_local! {
+    /// The shared continuation frames already marked in the current GC
+    /// cycle: the epoch (`crate::gc::GC_EPOCH`) they belong to, and their
+    /// addresses. Continuations share their frame chains, so without this
+    /// every captured continuation re-marked its whole chain: n nested
+    /// `guard`s, each holding a continuation, cost O(n^2) per collection.
+    static KONT_SEEN: RefCell<(u64, FxHashSet<usize>)> = RefCell::new((0, FxHashSet::default()));
+}
+
 impl crate::gc::Mark for KontRef {
     fn mark(&self, visit: &mut dyn FnMut(GcRef)) {
-        let mut worklist = vec![Rc::clone(self)];
+        let epoch = crate::gc::GC_EPOCH.load(std::sync::atomic::Ordering::Relaxed);
+        KONT_SEEN.with(|seen| {
+            let mut seen = seen.borrow_mut();
+            if seen.0 != epoch {
+                seen.0 = epoch;
+                seen.1.clear();
+            }
+        });
+        mark_kont_chain(self, visit);
+    }
+}
+
+/// Whether `frame` was already marked this cycle; records it if not. Only a
+/// frame with more than one owner can be reached twice: `strong_count` is
+/// its owners plus the worklist's own clone. Unshared frames, such as most
+/// of a deep recursion's chain, skip the set and cost nothing extra.
+fn already_marked(frame: &KontRef) -> bool {
+    Rc::strong_count(frame) > 2
+        && KONT_SEEN.with(|seen| !seen.borrow_mut().1.insert(Rc::as_ptr(frame) as usize))
+}
+
+/// Mark the frames from `start` down, stopping at any shared frame already
+/// marked this cycle: everything below it was (or is being) marked from
+/// there. Marking can re-enter this, through `visit` reaching a
+/// continuation object, so the set is only borrowed briefly.
+fn mark_kont_chain(start: &KontRef, visit: &mut dyn FnMut(GcRef)) {
+    use crate::gc::Mark;
+    {
+        let mut worklist = vec![Rc::clone(start)];
 
         while let Some(kont_ref) = worklist.pop() {
+            if already_marked(&kont_ref) {
+                continue;
+            }
             let kont = &*kont_ref;
             match kont {
                 Kont::Halt => {}
@@ -564,7 +608,7 @@ impl crate::gc::Mark for KontRef {
                     } = &**payload;
                     visit(*result);
                     visit(*new_handlers);
-                    for arg in new_arg_stack {
+                    for arg in new_arg_stack.iter().flatten() {
                         visit(*arg);
                     }
                     for thunk in thunks {
@@ -801,7 +845,7 @@ pub fn insert_escape(
     thunks: Vec<GcRef>,
     new_kont: KontRef,
     new_dw_stack: Vec<DynamicWind>,
-    new_arg_stack: Vec<GcRef>,
+    new_arg_stack: Option<Vec<GcRef>>,
     new_handlers: GcRef,
 ) {
     state.kont = Rc::new(Kont::Escape {

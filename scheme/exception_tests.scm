@@ -118,3 +118,43 @@
               (lambda () (raise 'deliberately-uncaught))
               (lambda () (set! uncaught-after-ran #t)))
 (test-equal #t uncaught-after-ran "uncaught error runs dynamic-wind after thunks")
+
+(display "          === Testing nested guards and escape-only continuations ===")
+(newline)
+
+;; Nested guards used to be cubic: every guard captured a full continuation
+;; (copying the argument stack), and every collection re-marked each one's
+;; whole frame chain. gc_stress_tests.scm defines **guard-depth-n** smaller.
+(define guard-depth-n (guard (e (#t 1000)) **guard-depth-n**))
+(define (nested-guards n)
+  (if (= n 0) 0 (+ 1 (guard (e (#t 'caught)) (nested-guards (- n 1))))))
+(test-equal guard-depth-n (nested-guards guard-depth-n) "deeply nested guards return normally")
+(define (nested-reraise n)
+  (if (= n 0) (raise 'deep) (guard (e ((eq? e 'never) 0)) (nested-reraise (- n 1)))))
+(test-equal '(outer deep) (guard (e (#t (list 'outer e))) (nested-reraise guard-depth-n))
+    "a raise passes through deeply nested guards whose clauses don't match")
+
+;; guard jumps out with an escape-only continuation (%call/ec). One still
+;; works when a full continuation re-enters the guard's body after the
+;; guard has returned: the guard's frames are part of the re-entered chain.
+(define guard-re-k #f)
+(define guard-re-count 0)
+(define guard-re-result
+  (guard (e (#t 'caught))
+    (+ 1 (call/cc (lambda (k) (set! guard-re-k k) 1)))))
+(if (< guard-re-count 1)
+    (begin (set! guard-re-count (+ guard-re-count 1)) (guard-re-k 10)))
+(test-equal 11 guard-re-result "guard returns normally after its body is re-entered")
+(define guard-re-raise
+  (guard (e (#t (list 'caught e)))
+    ((call/cc (lambda (k) (set! guard-re-k k) (lambda () 1))))))
+(if (equal? guard-re-raise 1) (guard-re-k (lambda () (raise 'later))))
+(test-equal '(caught later) guard-re-raise "guard catches a raise after its body is re-entered")
+
+(define saved-ec #f)
+(define (save-ec) (list (%call/ec (lambda (k) (set! saved-ec k) 1))))
+(test-equal '(1) (save-ec) "%call/ec returns normally")
+(test-equal '(2) (list (%call/ec (lambda (k) (+ 1 (k 2))))) "%call/ec escapes")
+(test-equal "escape continuation invoked after its extent has ended"
+    (guard (e (#t (error-object-message e))) (saved-ec 3))
+    "an escape-only continuation can't be used once its call has returned")

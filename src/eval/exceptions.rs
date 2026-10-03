@@ -128,7 +128,7 @@ fn uncaught(state: &mut CEKState, rt: &mut RunTime, obj: GcRef) {
         state.kont = halt;
     } else {
         let void = rt.heap.void();
-        insert_escape(state, void, thunks, halt, Vec::new(), Vec::new(), nil);
+        insert_escape(state, void, thunks, halt, Vec::new(), Some(Vec::new()), nil);
     }
 }
 

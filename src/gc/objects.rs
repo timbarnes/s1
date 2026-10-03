@@ -370,6 +370,7 @@ pub fn new_continuation(
     kont: KontRef,
     dw_stack: Vec<DynamicWind>,
     arg_stack: Vec<GcRef>,
+    escape_len: Option<usize>,
     handlers: GcRef,
 ) -> GcRef {
     let obj = GcObject {
@@ -377,6 +378,7 @@ pub fn new_continuation(
             kont,
             dw_stack,
             arg_stack,
+            escape_len,
             handlers,
         })),
         marked: 0,

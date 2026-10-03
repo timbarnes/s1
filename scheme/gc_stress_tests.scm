@@ -47,6 +47,7 @@
 
 ;; Exceptions add continuation frames (RestoreHandlers, RaiseReturn) and a
 ;; rooted handler list; run their suite with a collection at every chance.
+(define **guard-depth-n** 100)
 (load "scheme/exception_tests.scm")
 
 ;; syntax-rules adds the alias table (ephemerons) and transformer objects

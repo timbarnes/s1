@@ -238,6 +238,12 @@ pub struct ContinuationData {
     /// `args_base` indices — plus any arguments they had already evaluated —
     /// refer to this stack as it was then, not as it is when `k` is invoked.
     pub arg_stack: Vec<GcRef>,
+    /// For an escape-only continuation (`%call/ec`), the length of
+    /// `arg_stack` at capture, and `arg_stack` is left empty. It can only be
+    /// invoked while its `kont` is still part of the current continuation,
+    /// so the stack below that length is unchanged and escaping just
+    /// truncates to it: capturing costs nothing however deep the stack is.
+    pub escape_len: Option<usize>,
     /// The exception handler list (`RunTime::handlers`) at capture.
     pub handlers: GcRef,
 }
