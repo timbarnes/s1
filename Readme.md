@@ -144,18 +144,22 @@ cargo run -- -f file1.scm -f file2.scm
 # Execute files and exit (batch mode)
 cargo run -- -f script.scm -q
 
+# Run a script with arguments, then exit; (command-line) gives the arguments
+cargo run -- script.scm arg1 arg2
+
 # Skip loading core library
 cargo run -- -n
 
-# Enable evaluation tracing
-cargo run -- -t
+# Run the regression suite
+cargo run --release -- -r -q
 ```
 
 ### Command Line Options
 - `-f <file>` - Load Scheme file (can be repeated)
 - `-q` - Quit after loading files (batch mode)
 - `-n` - Skip loading `scheme/s1-core.scm`
-- `-t` - Enable trace mode for debugging
+- `-r` - Run the regression suite
+- `script [arg ...]` - Run a script after the `-f` files, then exit; everything after it is passed to the program (see [Docs/system-interface.md](Docs/system-interface.md))
 
 ### REPL Usage
 

@@ -17,6 +17,11 @@ Standard features s1 doesn't provide yet, and known issues. The R7RS conformance
 *   Done: see [Libraries](./libraries.md) and [Environments and Evaluation](./environments.md). `interaction-environment`, and `eval` and `load` with an environment argument (9a). The system and interaction environments, the standard libraries as export lists, and `environment` with library names (9b). `import` with `only`, `except`, `prefix` and `rename`; import sets in `environment`; `scheme-report-environment` and `null-environment` (9c). `define-library`, `include`, `include-ci`, `include-library-declarations` (9d). Library files on a search path (9e). `cond-expand` and `features` (9f). The conformance suite uses the real `import`, and its 6.12 tests pass (9g). Design: [libraries-design.md](./libraries-design.md).
 *   Not provided: `syntax-error`, and bindings for the auxiliary keywords `else`, `=>`, `_` and `...` (recognised by name), so they can't be imported or renamed.
 
+## System interface
+
+*   Done in phase 10: `command-line`, `exit` with a status and `dynamic-wind` unwinding, `emergency-exit`, `get-environment-variable(s)`, `current-second`, `current-jiffy`, `jiffies-per-second`, and running scripts (`s1 script arg ...`). See [System Interface](./system-interface.md).
+*   s1 finds `scheme/s1-core.scm` relative to the current directory, so a `#!/usr/bin/env s1` script only works when run from the s1 directory. A configured or compiled-in location would fix it.
+
 ## Pairs and lists
 
 *   Eight of the four-level `c...r` procedures are missing: `caaaar`, `caadar`, `cadaar`, `caddar`, `cdaaar`, `cdadar`, `cddaar`, `cdddar` (found by the `(scheme cxr)` export list; see `%library-unimplemented`).

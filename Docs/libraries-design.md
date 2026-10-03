@@ -112,7 +112,7 @@ exports, taken from R7RS appendix A: `(scheme base)`, `case-lambda`, `char`,
 `process-context`, `read`, `repl`, `time`, `write`, `r5rs`. At startup each
 becomes an export table of the system cells for those names.
 
-* A name s1 doesn't implement (`make-rectangular`, `exit` until phase 10) is
+* A name s1 doesn't implement (`make-rectangular`, for example) is
   left out of the table rather than failing the import. A regression test
   lists the missing names, which is also the checklist for the phase 11 audit.
 * `(s1)` exports every system binding that no standard library exports: s1's

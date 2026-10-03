@@ -38,9 +38,7 @@ baseline stays in step with the code. `S1_BIN` selects a prebuilt binary and
 Each section runs in its own process, so a reader desync or crash in one
 section cannot swallow the next ones.
 
-## Known gaps (1146 passing after phase 9)
+## Known gaps (1154 passing after phase 10)
 
 - **Complex numbers** are not supported and are reported as parse errors. They
   account for nearly all unreached tests (in 6.2 Numbers and Numeric syntax).
-- **6.14 System interface** (`command-line`, `exit`, time, environment
-  variables): phase 10.

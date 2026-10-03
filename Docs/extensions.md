@@ -4,12 +4,6 @@
 
 This document describes functions and features specific to the S1 Scheme interpreter that are not part of the R5RS specification.
 
-## `exit`
-
-`(exit)`
-
-Exits the Scheme interpreter with exit code 0.
-
 ## `gc-threshold`
 
 `(gc-threshold [n])`
