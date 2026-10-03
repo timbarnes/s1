@@ -1,5 +1,3 @@
-[Home](s1-docs.md)
-
 # Input and Output
 
 R7RS section 6.13. A port is an object that characters or bytes are read from or written to. Ports are shared: every reference to a port sees the same position and contents, and closing a port closes it everywhere. All of these procedures are built in except where noted.
@@ -68,5 +66,3 @@ Each takes an optional port, defaulting to the current output port.
 ## Loading
 
 `(load filename)` reads and evaluates the file's forms in turn. It works by pushing a port onto the stack of ports the REPL reads from (`push-port!`, `pop-port!`, s1 extensions). `(load filename environment)` instead evaluates the forms in `environment` before returning; see [System Interface](./system-interface.md).
-
-[Home](s1-docs.md)

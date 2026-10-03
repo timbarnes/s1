@@ -1,5 +1,3 @@
-[Home](s1-docs.md)
-
 # Numbers
 
 S1 implements the R7RS numeric tower without complex numbers. A number is one of:
@@ -72,5 +70,3 @@ Each comes in a floor version (quotient rounded toward negative infinity, remain
 
 * `(number->string z [radix])`: the external representation of `z` in radix 2, 8, 10 (the default) or 16. Rationals print as `n/d`. Flonums always show a decimal point, and an exponent when very large or small (`2.0`, `1.0e+21`, `5.0e-324`); they support only radix 10.
 * `(string->number string [radix])`: the number `string` represents in R7RS number syntax, or `#f` if it isn't one. Surrounding whitespace is not allowed. A radix prefix in the string overrides `radix`.
-
-[Home](s1-docs.md)

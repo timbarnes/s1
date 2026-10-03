@@ -1,5 +1,3 @@
-[Home](s1-docs.md)
-
 # Strings
 
 Strings hold Unicode characters; indexes count characters, not bytes. String literals support the escapes `\a \b \t \n \r \" \\ \|`, `\x3BB;` and a backslash at the end of a line (the line break and surrounding spaces are skipped). Procedures that take an optional `start` and `end` work on the characters from index `start` (default 0) up to, not including, `end` (default the length). All are built in.
@@ -30,5 +28,3 @@ Strings hold Unicode characters; indexes count characters, not bytes. String lit
 ## Iteration
 
 `(string-map proc s1 s2 ...)` returns a string of `proc`'s results on corresponding characters; `(string-for-each proc s1 s2 ...)` calls `proc` for effect. Both stop at the shortest string.
-
-[Home](s1-docs.md)

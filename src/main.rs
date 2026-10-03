@@ -1,8 +1,8 @@
 //! s1: a Scheme interpreter in Rust, aiming at R7RS-small.
 //!
-//! These are the internal docs, for working on the interpreter. Read the user
-//! documentation in `docs/s1-docs.md` and the design notes in `design/*.md`
-//! (both relative to the repository root) alongside them.
+//! These are the internal docs, for working on the interpreter. Read the
+//! [user documentation](https://timbarnes.github.io/s1/) (source in `docs/`)
+//! and the design notes in `design/*.md` alongside them.
 //!
 //! # How a form is evaluated
 //!

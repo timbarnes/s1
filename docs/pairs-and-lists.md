@@ -1,5 +1,3 @@
-[Home](s1-docs.md)
-
 # Pairs and Lists
 
 ## `pair?`
@@ -183,5 +181,3 @@ Applies `proc` to the elements of the `list`s and returns a list of the results,
 `(for-each proc list1 list2 ...)`
 
 Calls `proc` on corresponding elements of the lists, in order, for effect, stopping at the shortest list (so a circular list paired with a finite one terminates). Implemented in `s1-core.scm`.
-
-[Home](s1-docs.md)

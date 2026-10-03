@@ -1,5 +1,3 @@
-[Home](s1-docs.md)
-
 # Exceptions
 
 S1 implements R7RS's exception system (R7RS section 6.11). Any object can be raised. Errors are represented by **error objects**, which `error` creates and which built-in procedures raise when they fail.
@@ -68,5 +66,3 @@ An error object prints as `#<error "message" irritant ...>`.
 ## Uncaught exceptions
 
 When nothing handles an exception, s1 prints it as `Error: message irritant ...` (or `Error: uncaught exception: obj` for a raised object that isn't an error object). It then runs the `after` thunks of any `dynamic-wind` extents that were active, innermost first, and abandons the rest of the top-level form. The REPL, or the file being loaded, carries on with the next form. If an `after` thunk itself fails, the remaining ones are skipped.
-
-[Home](s1-docs.md)

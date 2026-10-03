@@ -1,8 +1,6 @@
-[Home](s1-docs.md)
-
 # Libraries
 
-R7RS sections 5.2 (`import`), 5.6 (libraries) and 4.2.1 (`cond-expand`). Programs run in the interaction environment, which already has every standard binding (see [Environments and Evaluation](./environments.md)), so a program needs `import` only for its own libraries or to rename. A program that starts with the usual R7RS `(import (scheme base) ...)` runs unchanged. The implementation is described in [libraries-design.md](../design/libraries-design.md).
+R7RS sections 5.2 (`import`), 5.6 (libraries) and 4.2.1 (`cond-expand`). Programs run in the interaction environment, which already has every standard binding (see [Environments and Evaluation](./environments.md)), so a program needs `import` only for its own libraries or to rename. A program that starts with the usual R7RS `(import (scheme base) ...)` runs unchanged. The implementation is described in [libraries-design.md](https://github.com/timbarnes/s1/blob/main/design/libraries-design.md).
 
 ## Standard libraries
 
@@ -101,5 +99,3 @@ Evaluates the forms of the first clause whose requirement holds, in place of the
 ```
 
 `(features)` returns s1's feature identifiers: `r7rs`, `exact-closed`, `ieee-float`, `full-unicode`, `ratios`, `s1`, and the operating system, its family, the architecture and the byte order, for example `linux unix posix x86-64 little-endian`. `full-unicode` is present: characters are Unicode scalar values, strings hold any of them, and the case, character-class and digit procedures follow Unicode. `exact-complex` is absent, since s1 has no complex numbers.
-
-[Home](s1-docs.md)

@@ -1,5 +1,3 @@
-[Home](s1-docs.md)
-
 # Macros
 
 S1 has two macro systems:
@@ -111,5 +109,3 @@ Because the expansion is plain code, identifiers in it can capture or be capture
 ```
 
 In the output of a `syntax-rules` expansion, renamed identifiers print with their original names, so two different `tmp`s look the same.
-
-[Home](s1-docs.md)

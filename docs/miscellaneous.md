@@ -1,5 +1,3 @@
-[Home](s1-docs.md)
-
 # Miscellaneous
 
 ## `help`
@@ -58,5 +56,3 @@ Returns `#t` if `obj` is a macro made with s1's `macro` form, and `#f` otherwise
 `(procedure? obj)`
 
 Returns `#t` if `obj` is a procedure, and `#f` otherwise. Implemented in `s1-core.scm`.
-
-[Home](s1-docs.md)

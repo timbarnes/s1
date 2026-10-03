@@ -1,5 +1,3 @@
-[Home](s1-docs.md)
-
 # Control Features
 
 ## Proper tail calls
@@ -63,5 +61,3 @@ Calls its `producer` argument with no arguments and a continuation that, when pa
 `(dynamic-wind before thunk after)`
 
 Calls `thunk` without arguments, returning the result(s) of this call. `before` and `after` are called just before and just after `thunk` is called.
-
-[Home](s1-docs.md)

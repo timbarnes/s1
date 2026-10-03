@@ -2,6 +2,8 @@
 
 A comprehensive Scheme interpreter written in Rust that aims to closely follow the R7RS specification. S1 features a modern garbage-collected runtime, lexical scoping, macro support, and an extensible I/O system.
 
+Documentation: the [user reference](https://timbarnes.github.io/s1/) (source in `docs/`) and the [internal docs](https://timbarnes.github.io/s1/api/s1/) for working on the interpreter.
+
 ## Features
 
 ### Core Language Support

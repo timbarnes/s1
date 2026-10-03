@@ -1,5 +1,3 @@
-[Home](s1-docs.md)
-
 # S1 Scheme Extensions
 
 This document describes functions and features specific to the S1 Scheme interpreter that are not part of the R5RS specification.
@@ -52,5 +50,3 @@ These are macros that provide a more convenient way to create definitions. `def`
 `(def (name args...) body ...)` is equivalent to `(define name (lambda (args...) body ...))`.
 
 `(def name value)` is equivalent to `(define name value)`.
-
-[Home](s1-docs.md)

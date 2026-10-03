@@ -1,5 +1,3 @@
-[Home](s1-docs.md)
-
 # System Interface
 
 R7RS section 6.14: `(scheme process-context)`, `(scheme time)`, and `load` from `(scheme load)`. `file-exists?` and `delete-file` are in [Input and Output](./input-and-output.md), and `features` in [Libraries](./libraries.md#cond-expand-and-features).
@@ -95,5 +93,3 @@ Returns 1000000000: a jiffy is a nanosecond.
 `(transcript-off)`
 
 Ends the transcript. **Not implemented.**
-
-[Home](s1-docs.md)

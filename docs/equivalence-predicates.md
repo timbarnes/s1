@@ -1,5 +1,3 @@
-[Home](s1-docs.md)
-
 # Equivalence Predicates
 
 ## `eq?`
@@ -19,5 +17,3 @@ The `eqv?` procedure is similar to `eq?`, but it is more discerning. It returns 
 `(equal? obj1 obj2)`
 
 `The `equal?` procedure returns `#t` if `obj1` and `obj2` print the same. In other words, it recursively compares the contents of pairs, vectors, and strings, and returns `#t` if the contents are the same.
-
-[Home](s1-docs.md)

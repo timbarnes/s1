@@ -1,5 +1,3 @@
-[Home](s1-docs.md)
-
 # Bytevectors
 
 Bytevectors hold bytes (exact integers 0 to 255) and are written `#u8(1 2 3)`; they evaluate to themselves. `equal?` compares their contents. Procedures with optional `start` and `end` work on the bytes from index `start` (default 0) up to, not including, `end` (default the length).
@@ -10,5 +8,3 @@ Bytevectors hold bytes (exact integers 0 to 255) and are written `#u8(1 2 3)`; t
 * `(bytevector-copy! to at from [start [end]])`: correct even when `to` and `from` are the same bytevector.
 * `(utf8->string bv [start [end]])`: decodes UTF-8 (an error if the bytes aren't valid UTF-8).
 * `(string->utf8 s [start [end]])`: encodes characters `start` to `end` of `s`.
-
-[Home](s1-docs.md)

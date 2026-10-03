@@ -1,5 +1,3 @@
-[Home](s1-docs.md)
-
 # Derived Expression Types
 
 R7RS section 4.2's derived forms. Most are hygienic `syntax-rules` macros defined in `scheme/s1-core.scm`, following R7RS's own reference definitions (section 7.3); `case-lambda` is built in. See also [Control Features](./control-features.md) for `values` and `dynamic-wind`, and [Exceptions](./exceptions.md) for `guard`.
@@ -96,5 +94,3 @@ Evaluates the body with each parameter set to its (converted) value, restoring t
 `(make-promise obj)` returns `obj` if it is a promise, otherwise a promise already forced to `obj`. `(promise? obj)` tests for promises.
 
 A promise is currently represented as a tagged vector, so `vector?` is also true of one. That will change when records are added.
-
-[Home](s1-docs.md)

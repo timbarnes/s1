@@ -1,5 +1,3 @@
-[Home](s1-docs.md)
-
 # Environments and Evaluation
 
 R7RS section 6.12. An environment is a set of top-level bindings that an expression can be evaluated in. Libraries, `import` and `cond-expand` are described in [Libraries](./libraries.md).
@@ -50,5 +48,3 @@ Evaluates `expr`, a datum, in `environment`, and returns its value. Definitions 
 `(load filename [environment])`
 
 With an environment, reads the forms in `filename` and evaluates them in turn in that environment, and returns when the file is finished. Without one, see [System Interface](./system-interface.md).
-
-[Home](s1-docs.md)

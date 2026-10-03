@@ -1,5 +1,3 @@
-[Home](s1-docs.md)
-
 # Characters
 
 Characters are Unicode scalar values. Literals: `#\a`, `#\λ`, `#\x3BB`, and the names `#\alarm`, `#\backspace`, `#\delete`, `#\escape`, `#\newline`, `#\null`, `#\return`, `#\space`, `#\tab`. All of these procedures are built in.
@@ -21,5 +19,3 @@ Characters are Unicode scalar values. Literals: `#\a`, `#\λ`, `#\x3BB`, and the
 * `(char->integer c)`, `(integer->char n)`: between characters and Unicode scalar values.
 * `(char-upcase c)`, `(char-downcase c)`: Unicode case mapping. A character whose mapping is more than one character (`ß` upcases to `SS`) is returned unchanged.
 * `(char-foldcase c)`: simple Unicode case folding, as used by the `-ci` comparisons.
-
-[Home](s1-docs.md)

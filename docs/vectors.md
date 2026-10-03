@@ -1,5 +1,3 @@
-[Home](s1-docs.md)
-
 # Vectors
 
 Vectors are written `#(a b c)`. Procedures with optional `start` and `end` work on the elements from index `start` (default 0) up to, not including, `end` (default the length). s1 also reads `[a b c]` as a vector (an extension).
@@ -11,5 +9,3 @@ Vectors are written `#(a b c)`. Procedures with optional `start` and `end` work 
 * `(vector-fill! v fill [start [end]])`: returns the vector (R7RS leaves the result unspecified).
 * `(vector->list v [start [end]])`, `(list->vector list)`, `(vector->string v [start [end]])`, `(string->vector s [start [end]])`.
 * `(vector-map proc v1 v2 ...)` returns a vector of `proc`'s results on corresponding elements; `(vector-for-each proc v1 v2 ...)` calls `proc` for effect. Both stop at the shortest vector.
-
-[Home](s1-docs.md)
