@@ -1,6 +1,8 @@
 # Libraries
 
-R7RS sections 5.2 (`import`), 5.6 (libraries) and 4.2.1 (`cond-expand`). Programs run in the interaction environment, which already has every standard binding (see [Environments and Evaluation](./environments.md)), so a program needs `import` only for its own libraries or to rename. A program that starts with the usual R7RS `(import (scheme base) ...)` runs unchanged. The implementation is described in [libraries-design.md](https://github.com/timbarnes/s1/blob/main/design/libraries-design.md).
+R7RS: [section 5.2, Import declarations](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-7.html#TAG:__tex2page_sec_5.2), [section 5.6, Libraries](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-7.html#TAG:__tex2page_sec_5.6), `cond-expand` in [section 4.2.1](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-6.html#TAG:__tex2page_sec_4.2.1), and the lists of [standard libraries](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-10.html#TAG:__tex2page_chap_A) and [feature identifiers](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-11.html#TAG:__tex2page_chap_B) in appendices A and B.
+
+Programs run in the interaction environment, which already has every standard binding (see [Environments and Evaluation](./environments.md)), so a program needs `import` only for its own libraries or to rename. A program that starts with the usual R7RS `(import (scheme base) ...)` runs unchanged. The implementation is described in [libraries-design.md](https://github.com/timbarnes/s1/blob/main/design/libraries-design.md).
 
 ## Standard libraries
 

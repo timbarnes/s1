@@ -1,8 +1,10 @@
 # Records
 
+R7RS: [section 5.5, Record-type definitions](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-7.html#TAG:__tex2page_sec_5.5).
+
 `(define-record-type type (constructor field ...) predicate (field accessor [modifier]) ...)`
 
-Defines a new record type (R7RS 5.5). `type` is bound to the record type, `constructor` to a procedure that makes a record from the named fields (others start unspecified), `predicate` to a test for records of this type, and each `accessor` and `modifier` to procedures that read and set a field. Accessors and modifiers raise an error when given anything but a record of their type.
+Defines a new record type. `type` is bound to the record type, `constructor` to a procedure that makes a record from the named fields (others start unspecified), `predicate` to a test for records of this type, and each `accessor` and `modifier` to procedures that read and set a field. Accessors and modifiers raise an error when given anything but a record of their type.
 
 ```scheme
 (define-record-type <pare>

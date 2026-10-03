@@ -1,13 +1,15 @@
 # S1 Scheme Interpreter
 
-A comprehensive Scheme interpreter written in Rust that aims to closely follow the R7RS specification. S1 features a modern garbage-collected runtime, lexical scoping, macro support, and an extensible I/O system.
+A Scheme interpreter written in Rust that implements [R7RS-small](https://standards.scheme.org/corrected-r7rs/r7rs.html), except for complex numbers. S1 features a modern garbage-collected runtime, lexical scoping, macro support, and an extensible I/O system.
 
 Documentation: the [user reference](https://timbarnes.github.io/s1/) (source in `docs/`) and the [internal docs](https://timbarnes.github.io/s1/api/s1/) for working on the interpreter.
 
 ## Features
 
 ### Core Language Support
-- **R7RS Compliance**: Implements core Scheme language features following the R7RS specification (incomplete)
+- **R7RS-small**: passes chibi-scheme's R7RS test suite except for complex numbers; see [Standards Conformance](https://timbarnes.github.io/s1/conformance/)
+- **Proper tail calls**, first-class re-entrant continuations, `dynamic-wind`, exceptions and parameters
+- **Libraries**: `import`, `define-library`, `.sld` library files and `cond-expand`
 - **Lexical Scoping**: Full lexical scoping with proper closure capture
 - **Garbage Collection**: Mark-and-sweep garbage collector with cycle detection
 - **Macro System**: Hygienic `syntax-rules` macros (`define-syntax`, `let-syntax`, `letrec-syntax`), plus s1's procedural `macro` form
@@ -58,8 +60,8 @@ Documentation: the [user reference](https://timbarnes.github.io/s1/) (source in 
 
 #### Type Predicates
 - `number?`, `symbol?`, `pair?`, `string?`, `vector?`
-- `boolean?`, `char?`, `closure?`, `macro?`, `primitive?`
-- `nil?`, `eq?` - Value testing
+- `boolean?`, `char?`, `procedure?`, `closure?`, `macro?`
+- `null?`, `eq?` - Value testing
 
 #### String Operations
 - `string-append` - Concatenate strings
@@ -85,7 +87,7 @@ Documentation: the [user reference](https://timbarnes.github.io/s1/) (source in 
 #### Utilities
 - `type-of` - Runtime type inspection
 - `help` - Documentation lookup
-- `quit` - Exit interpreter
+- `exit` - Exit interpreter
 
 ### Advanced Features
 
@@ -180,9 +182,9 @@ s1> (factorial 5)
 => 120
 
 s1> (help 'car)
-=> "Help for car: ..."
+=> "(car pair) -> first element of pair"
 
-s1> (quit)
+s1> (exit)
 ```
 
 ### File Loading
@@ -233,28 +235,11 @@ The `scheme/s1-core.scm` file provides additional Scheme functions:
 
 ## Development Status
 
-### Current Capabilities
-- ✅ Core Scheme evaluation
-- ✅ Lexical scoping and closures
-- ✅ Garbage collection
-- ✅ Macro system
-- ✅ File I/O
-- ✅ Interactive REPL
-- ✅ Comprehensive built-ins
+s1 implements R7RS-small apart from complex numbers, which are not planned. The [Standards Conformance](https://timbarnes.github.io/s1/conformance/) page lists where it departs from the report, and `design/todo.md` tracks open work, including:
 
-### Planned Features
-- 🔄 **Tail call optimization** (highest priority)
-- 📋 Full R7RS compliance
-- 📋 Additional standard library functions
-- 📋 Improved error reporting with source locations
-- 📋 Module system
-- 📋 Complex numbers (not planned)
-
-### Known Limitations
-- No tail call optimization (currently being implemented)
-- Limited standard library compared to full R7RS
-- No module system yet
-- Basic error messages without source location tracking
+- Faster evaluation by pre-analysing code (see `design/precompilation-design.md`)
+- Error reporting with source locations
+- Finding `scheme/s1-core.scm` without having to run s1 from its own directory
 
 ## Examples
 
@@ -262,7 +247,7 @@ The `scheme/s1-core.scm` file provides additional Scheme functions:
 ```scheme
 (define numbers (list 1 2 3 4 5))
 (define sum (lambda (lst)
-              (if (nil? lst)
+              (if (null? lst)
                   0
                   (+ (car lst) (sum (cdr lst))))))
 (sum numbers)  ; => 15
@@ -270,28 +255,27 @@ The `scheme/s1-core.scm` file provides additional Scheme functions:
 
 ### Higher-Order Functions
 ```scheme
-(define map (lambda (f lst)
-              (if (nil? lst)
+(define my-map (lambda (f lst)
+              (if (null? lst)
                   '()
                   (cons (f (car lst))
-                        (map f (cdr lst))))))
+                        (my-map f (cdr lst))))))
 
-(map (lambda (x) (* x x)) (list 1 2 3 4))  ; => (1 4 9 16)
+(my-map (lambda (x) (* x x)) (list 1 2 3 4))  ; => (1 4 9 16)
 ```
 
 ### Macros
 ```scheme
-(define unless (macro (test body)
-                 (list 'if test #f body)))
+(define-syntax my-unless
+  (syntax-rules ()
+    ((_ test body ...) (if test #f (begin body ...)))))
 
-(unless (> 3 5) (display "3 is not greater than 5"))
+(my-unless (> 3 5) (display "3 is not greater than 5"))
 ```
 
 ## Contributing
 
 S1 is under active development. Contributions are welcome, particularly in areas of:
-- Tail call optimization implementation
-- Standard library expansion
 - Performance improvements
 - Documentation and examples
 - Test coverage

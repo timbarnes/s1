@@ -1,5 +1,7 @@
 # Strings
 
+R7RS: [section 6.7, Strings](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-8.html#TAG:__tex2page_sec_6.7).
+
 Strings hold Unicode characters; indexes count characters, not bytes. String literals support the escapes `\a \b \t \n \r \" \\ \|`, `\x3BB;` and a backslash at the end of a line (the line break and surrounding spaces are skipped). Procedures that take an optional `start` and `end` work on the characters from index `start` (default 0) up to, not including, `end` (default the length). All are built in.
 
 ## Construction and access

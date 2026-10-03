@@ -1,6 +1,8 @@
 # Environments and Evaluation
 
-R7RS section 6.12. An environment is a set of top-level bindings that an expression can be evaluated in. Libraries, `import` and `cond-expand` are described in [Libraries](./libraries.md).
+R7RS: [section 6.12, Environments and evaluation](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-8.html#TAG:__tex2page_sec_6.12).
+
+An environment is a set of top-level bindings that an expression can be evaluated in. Libraries, `import` and `cond-expand` are described in [Libraries](./libraries.md).
 
 ## The system and interaction environments
 
@@ -22,7 +24,7 @@ Returns a new environment containing exactly the bindings of the [import sets](.
 
 ## `scheme-report-environment` and `null-environment`
 
-`(scheme-report-environment 5)` returns an immutable environment of `(scheme r5rs)`, and `(null-environment 5)` one with only its syntactic keywords (`if`, `define`, `let`, ...). R5RS procedures; 5 is the only version supported.
+These are R5RS procedures that R7RS keeps in `(scheme r5rs)` for older code. `(scheme-report-environment 5)` returns an immutable environment containing the bindings of `(scheme r5rs)`, and `(null-environment 5)` one with only its syntactic keywords (`if`, `define`, `let`, ...). 5 is the only version accepted. New code should use `environment`.
 
 ## `interaction-environment`
 

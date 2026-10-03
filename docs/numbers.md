@@ -1,5 +1,7 @@
 # Numbers
 
+R7RS: [section 6.2, Numbers](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-8.html#TAG:__tex2page_sec_6.2).
+
 S1 implements the R7RS numeric tower without complex numbers. A number is one of:
 
 * an **exact integer** of any size (`42`, `-12345678901234567890`)
@@ -8,7 +10,7 @@ S1 implements the R7RS numeric tower without complex numbers. A number is one of
 
 Exact arithmetic stays exact: `(/ 1 2)` is `1/2`, and a whole result comes back as an integer (`(/ 6 3)` is `2`). Any inexact operand makes the result inexact: `(+ 1/2 0.5)` is `1.0`. Exact division by exact zero is an error; inexact division follows IEEE 754 (`(/ 1.0 0)` is `+inf.0`).
 
-Complex number syntax such as `1+2i` is rejected by the reader with "complex numbers are not supported", and `sqrt`, `expt` and so on raise an error rather than return a complex result.
+Complex number syntax such as `1+2i` is rejected by the reader with "complex numbers are not supported", `sqrt` and `expt` raise an error rather than return a complex result, and `log`, `asin` and `acos` return `+nan.0` where the result would be complex.
 
 All of these procedures are built in (written in Rust).
 

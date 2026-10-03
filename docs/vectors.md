@@ -1,5 +1,7 @@
 # Vectors
 
+R7RS: [section 6.8, Vectors](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-8.html#TAG:__tex2page_sec_6.8).
+
 Vectors are written `#(a b c)`. Procedures with optional `start` and `end` work on the elements from index `start` (default 0) up to, not including, `end` (default the length). s1 also reads `[a b c]` as a vector (an extension).
 
 * `(vector? obj)`, `(make-vector k [fill])`, `(vector obj ...)`, `(vector-length v)`.

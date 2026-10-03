@@ -1,183 +1,43 @@
 # Pairs and Lists
 
-## `pair?`
+R7RS: [section 6.4, Pairs and lists](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-8.html#TAG:__tex2page_sec_6.4).
 
-`(pair? obj)`
+A pair holds two values, its car and its cdr, and is written `(a . b)`. A list is a chain of pairs whose last cdr is the empty list `()`, so `(1 2 3)` is `(1 . (2 . (3 . ())))`. A chain that ends in anything else is an improper list, `(1 2 . 3)`. Pairs are mutable, so a list can be made circular; `write` prints circular lists with [datum labels](./lexical-syntax.md#datum-labels).
 
-Returns `#t` if `obj` is a pair, and `#f` otherwise. Implemented via `type-of`.
+Procedures that take a list check that they got one: `length`, for example, raises an error for an improper or circular list rather than looping.
 
-## `cons`
+## Pairs
 
-`(cons obj1 obj2)`
+* `(pair? obj)`, `(cons obj1 obj2)`, `(car pair)`, `(cdr pair)`.
+* `(set-car! pair obj)`, `(set-cdr! pair obj)`.
+* `caar`, `cadr`, `cdar`, `cddr`, and every combination up to four levels deep (`caddr`, `cdddr`, `cadddr`, `cddddr`, ...): `(cadr x)` is `(car (cdr x))`. The three- and four-level forms are in `(scheme cxr)`.
 
-Returns a newly allocated pair whose car is `obj1` and whose cdr is `obj2`.
+## Lists
 
-## `car`
+* `(null? obj)`: `#t` for the empty list.
+* `(list? obj)`: `#t` for a proper list (finite and ending in `()`), `#f` otherwise, including for a circular list.
+* `(make-list k [fill])`, `(list obj ...)`.
+* `(length list)`, `(append list ...)`, `(reverse list)`. `append` shares its last argument, which needn't be a list: `(append '(1) 2)` is `(1 . 2)`.
+* `(list-tail list k)`: the list without its first `k` elements. `(list-ref list k)`: element `k`, counting from 0. `(list-set! list k obj)`: store into element `k`.
+* `(list-copy obj)`: a copy of the pairs of a list, proper or not. Anything else is returned as is.
 
-`(car pair)`
+## Searching
 
-Returns the car of `pair`.
+* `(memq obj list)`, `(memv obj list)`, `(member obj list [compare])`: the first sublist of `list` whose car is `obj`, or `#f`. They compare with `eq?`, `eqv?` and `equal?` respectively, or with `compare`.
+* `(assq obj alist)`, `(assv obj alist)`, `(assoc obj alist [compare])`: the first pair in the association list `alist` whose car is `obj`, or `#f`, compared the same way.
 
-## `cdr`
+```scheme
+(member 2.0 '(1 2 3) =)              ; => (2 3)
+(assv 2 '((1 one) (2 two)))          ; => (2 two)
+```
 
-`(cdr pair)`
+## Mapping
 
-Returns the cdr of `pair`.
+`(map proc list1 list2 ...)` and `(for-each proc list1 list2 ...)` are described in [Control Features](./control-features.md#map-and-for-each).
 
-## `set-car!`
+## s1 extensions
 
-`(set-car! pair obj)`
+s1-core defines a few list utilities that aren't in R7RS. See [S1 Extensions](./extensions.md#lists).
 
-Stores `obj` in the car field of `pair`.
-
-## `set-cdr!`
-
-`(set-cdr! pair obj)`
-
-Stores `obj` in the cdr field of `pair`.
-
-## `null?`
-
-`(null? obj)`
-
-Returns `#t` if `obj` is the empty list, and `#f` otherwise. Implemented in `s1-core.scm`.
-
-## `list?`
-
-`(list? obj)`
-
-Returns `#t` if `obj` is a proper list (finite and ending in the empty list), and `#f` otherwise, including for a circular list. Built in. `length` likewise reports an error for an improper or circular list instead of looping.
-
-## `make-list`, `list-copy`, `list-set!`
-
-`(make-list k [fill])` returns a list of `k` elements, each `fill`. `(list-copy obj)` returns a copy of the pairs of a list (proper or not); a non-list is returned as is. `(list-set! list k obj)` stores `obj` in element `k`. Built in.
-
-## `list`
-
-`(list obj ...)`
-
-Returns a newly allocated list of its arguments.
-
-## `length`
-
-`(length list)`
-
-Returns the length of `list`.
-
-## `append`
-
-`(append list ...)`
-
-Returns a list consisting of the elements of the first `list` followed by the elements of the other `list`s.
-
-## `reverse`
-
-`(reverse list)`
-
-Returns a newly allocated list consisting of the elements of `list` in reverse order.
-
-## `list-tail`
-
-`(list-tail list k)`
-
-Returns the sublist of `list` obtained by omitting the first `k` elements.
-
-## `list-ref`
-
-`(list-ref list k)`
-
-Returns the `k`th element of `list`.
-
-## `memq`
-
-`(memq obj list)`
-
-## `memv`
-
-`(memv obj list)`
-
-## `member`
-
-`(member obj list)`
-
-These procedures return the first sublist of `list` whose car is `obj`, where the sublists of `list` are the non-empty lists returned by `(list-tail list k)` for `k` from 0 to `(- (length list) 1)`. If `obj` does not occur in `list`, then `#f` is returned. `memq` uses `eq?` to compare `obj` with the elements of `list`, while `memv` uses `eqv?` and `member` uses `equal?`, or the procedure given as `(member obj list compare)`. `memq` and `memv` are built in; `member` is in `s1-core.scm`.
-
-## `assq`
-
-`(assq obj alist)`
-
-## `assv`
-
-`(assv obj alist)`
-
-## `assoc`
-
-`(assoc obj alist)`
-
-`alist` (for "association list") must be a list of pairs. These procedures find the first pair in `alist` whose car field is `obj`, and returns that pair. If no pair in `alist` has `obj` as its car, then `#f` is returned. `assq` uses `eq?` to compare `obj` with the car fields of the pairs in `alist`, while `assv` uses `eqv?` and `assoc` uses `equal?`, or the procedure given as `(assoc obj alist compare)`. `assq` and `assv` are built in; `assoc` is in `s1-core.scm`.
-
-## List Accessors
-
-These functions provide convenient access to nested list elements. Implemented in `s1-core.scm`.
-
-*   `cadr`
-*   `cdar`
-*   `caar`
-*   `cddr`
-*   `caddr`
-*   `cadddr`
-*   `cadar`
-*   `cddar`
-*   `caadr`
-*   `cdadr`
-*   `cdddr`
-*   `caaar`
-*   `cdaar`
-*   `caaadr`
-*   `cdaadr`
-*   `cadadr`
-*   `cddadr`
-*   `caaddr`
-*   `cdaddr`
-*   `cdddr`
-## `empty?`
-
-`(empty? obj)`
-
-Returns `#t` if `obj` is the empty list, and `#f` otherwise. An alias for `null?`. Implemented in `s1-core.scm`.
-
-## `top`
-
-`(top list)`
-
-Returns the first element of a list. An alias for `car`. Implemented in `s1-core.scm`.
-
-## `push!`
-
-`(push! obj list)`
-
-A macro that prepends an element to a list. Equivalent to `(set! list (cons obj list))`. Implemented in `s1-core.scm`.
-
-## `pop!`
-
-`(pop! list)`
-
-A macro that removes and returns the first element of a list. Equivalent to `(let ((result (car list))) (set! list (cdr list)) result)`. Implemented in `s1-core.scm`.
-
-## `zip`
-
-`(zip list ...)`
-
-Returns a list of lists, where the i-th list contains the i-th elements of the input lists. Implemented in `s1-core.scm`.
-
-## `map`
-
-`(map proc list ...)`
-
-Applies `proc` to the elements of the `list`s and returns a list of the results, stopping at the shortest list. Implemented in `s1-core.scm`.
-
-## `for-each`
-
-`(for-each proc list1 list2 ...)`
-
-Calls `proc` on corresponding elements of the lists, in order, for effect, stopping at the shortest list (so a circular list paired with a finite one terminates). Implemented in `s1-core.scm`.
+* `nil` is a variable bound to `()`, so `nil` and `'()` are interchangeable as values. The symbol `'nil` is an ordinary symbol, not the empty list.
+* `empty?`, `top`, `push!`, `pop!` and `zip`.

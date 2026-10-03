@@ -1,5 +1,7 @@
 # Characters
 
+R7RS: [section 6.6, Characters](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-8.html#TAG:__tex2page_sec_6.6).
+
 Characters are Unicode scalar values. Literals: `#\a`, `#\λ`, `#\x3BB`, and the names `#\alarm`, `#\backspace`, `#\delete`, `#\escape`, `#\newline`, `#\null`, `#\return`, `#\space`, `#\tab`. All of these procedures are built in.
 
 ## Comparison

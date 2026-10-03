@@ -1,6 +1,8 @@
 # Input and Output
 
-R7RS section 6.13. A port is an object that characters or bytes are read from or written to. Ports are shared: every reference to a port sees the same position and contents, and closing a port closes it everywhere. All of these procedures are built in except where noted.
+R7RS: [section 6.13, Input and output](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-8.html#TAG:__tex2page_sec_6.13).
+
+A port is an object that characters or bytes are read from or written to. Ports are shared: every reference to a port sees the same position and contents, and closing a port closes it everywhere. All of these procedures are built in except where noted.
 
 ## Kinds of port
 
@@ -58,7 +60,20 @@ Each takes an optional port, defaulting to the current output port.
 * `(write-u8 byte [port])`, `(write-bytevector bv [port [start [end]]])`.
 * `(flush-output-port [port])`: write out anything buffered (`flush-output` is an older name).
 
+### How objects print
+
+`write` and `display` print data in the syntax `read` accepts (see [Lexical Syntax](./lexical-syntax.md)). Objects that R7RS gives no external representation print as opaque `#<...>` forms, which can't be read back:
+
+* `#<procedure car>` for a built-in procedure, and `#<syntax if>` for a special form.
+* `#<procedure f>` for a closure (or `case-lambda` procedure) bound by `define`, `set!`, `letrec`, named `let` or an internal definition. A procedure takes the first name it is bound to and keeps it: after `(define (adder n) (lambda (x) (+ x n)))` and `(define add1 (adder 1))`, `add1` prints as `#<procedure add1>`. One that was never bound that way prints as `#<procedure>`.
+* `#<macro m>` for a `macro` procedure, `#<syntax-rules>` for a `syntax-rules` transformer, and `#<continuation>`.
+* Ports print by kind: `#<input-port string>`, `#<output-port stdout>`, `#<output-port "out.txt">`, `#<binary-input-port bytevector>`, `#<closed-port>`.
+* A record prints as its type name followed by its field values, `#<<point> 1 2>`; an error object as `#<error "message" irritant ...>`; an environment as `#<environment>`.
+* An unspecified value, such as the result of `(if #f #f)`, prints as `#<undefined>`.
+
 ## Files
+
+These are in `(scheme file)`, with the procedures above that open files.
 
 * `(file-exists? name)`.
 * `(delete-file name)`: a file that can't be deleted raises a `file-error?` error.

@@ -1,12 +1,25 @@
 # Derived Expression Types
 
-R7RS section 4.2's derived forms. Most are hygienic `syntax-rules` macros defined in `scheme/s1-core.scm`, following R7RS's own reference definitions (section 7.3); `case-lambda` is built in. See also [Control Features](./control-features.md) for `values` and `dynamic-wind`, and [Exceptions](./exceptions.md) for `guard`.
+R7RS: [section 4.2, Derived expression types](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-6.html#TAG:__tex2page_sec_4.2). The report calls these forms "derived" because they can be defined in terms of the [primitive expressions](./primitive-expressions.md), and gives reference definitions in [section 7.3](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-9.html#TAG:__tex2page_sec_7.3).
+
+In s1, `cond`, `and`, `or`, `let`, `let*`, `letrec`, named `let`, `begin`, `do`, `quasiquote`, `case-lambda` and `guard` are built into the evaluator. The others (`when`, `unless`, `case`, `letrec*`, `let-values`, `let*-values`, `define-values`, `parameterize`, `delay`, `delay-force`) are hygienic `syntax-rules` macros in `scheme/s1-core.scm`, following the report's definitions. Either way they are hygienic: rebinding `if`, `let` or `lambda` locally can't change what they do.
+
+`guard` is described in [Exceptions](./exceptions.md#guard), and `cond-expand` in [Libraries](./libraries.md#cond-expand-and-features).
 
 ## Conditionals
 
-### `when`, `unless`
+### `cond`
 
-`(when test expr1 expr2 ...)` evaluates the expressions in order if `test` is true; `(unless test expr1 expr2 ...)` if it is false. The result is that of the last expression, or unspecified if they don't run.
+`(cond clause ...)`
+
+Each clause is `(test expr ...)`. The tests are evaluated in order; the first that is true has its expressions evaluated, and the last one's value is the result. A clause with no expressions returns the value of its test. The last clause may be `(else expr ...)`. A clause `(test => proc)` calls `proc` with the test's value:
+
+```scheme
+(cond ((assv 'b '((a 1) (b 2))) => cadr)
+      (else #f))                          ; => 2
+```
+
+If no clause is true and there is no `else`, the result is unspecified.
 
 ### `case`
 
@@ -21,11 +34,52 @@ Evaluates `key` once and compares it with `eqv?` against the data in each clause
   (else => (lambda (x) x)))          ; => c
 ```
 
+### `and`, `or`
+
+`(and test ...)` evaluates the tests left to right and stops at the first false one, returning `#f`; otherwise it returns the last test's value, or `#t` if there are none. `(or test ...)` stops at the first true value and returns it, or returns `#f`. The last test is in tail position.
+
+### `when`, `unless`
+
+`(when test expr1 expr2 ...)` evaluates the expressions in order if `test` is true; `(unless test expr1 expr2 ...)` if it is false. The result is that of the last expression, or unspecified if they don't run.
+
 ## Binding constructs
 
-### `letrec*`
+Each of these binds variables in a new region, then evaluates a body. A body may start with [internal definitions](./program-structure.md#internal-definitions), and its last expression is in tail position.
 
-`(letrec* ((var init) ...) body ...)`: like `letrec`, with the inits evaluated left to right, each able to use the variables bound before it. (s1's `letrec` already behaves this way.)
+### `let`, `let*`
+
+`(let ((var init) ...) body ...)` evaluates all the inits, then binds them to the variables. The inits can't see the new variables. `(let* ((var init) ...) body ...)` binds them one at a time, so each init sees the variables before it:
+
+```scheme
+(let ((x 2) (y 3))
+  (let* ((x 7) (z (+ x y)))
+    (* z x)))                ; => 70
+```
+
+### `letrec`, `letrec*`
+
+`(letrec ((var init) ...) body ...)` binds the variables first and then evaluates the inits in their scope, so the inits can be mutually recursive procedures:
+
+```scheme
+(letrec ((even? (lambda (n) (if (= n 0) #t (odd? (- n 1)))))
+         (odd?  (lambda (n) (if (= n 0) #f (even? (- n 1))))))
+  (even? 100))               ; => #t
+```
+
+`letrec*` evaluates the inits left to right, each able to use the values of the variables bound before it. s1's `letrec` already behaves this way. In both, an init that uses the value of a variable not yet initialized is an error.
+
+### Named `let`
+
+`(let name ((var init) ...) body ...)`
+
+Like `let`, but also binds `name` within the body to a procedure whose parameters are the variables and whose body is `body`. Calling `name` in tail position loops:
+
+```scheme
+(let loop ((i 0) (acc '()))
+  (if (= i 3)
+      (reverse acc)
+      (loop (+ i 1) (cons i acc))))     ; => (0 1 2)
+```
 
 ### `let-values`, `let*-values`
 
@@ -43,24 +97,42 @@ Each `init` returns as many values as `formals` describes, and they are bound to
 
 Defines the variables in `formals` (as for `let-values`) from the values of `expr`, at top level or in a body. Other definitions may follow it in the same body.
 
-## Procedures
+## Sequencing
 
-### `case-lambda`
+### `begin`
 
-`(case-lambda (formals body ...) ...)`
+`(begin expr1 expr2 ...)` evaluates the expressions in order and returns the last one's value. At top level, or at the start of a body, `(begin definition ...)` splices its definitions into the surrounding scope, which is how a macro can expand into several definitions.
 
-A procedure that, when called, runs the first clause whose `formals` accept that many arguments. Calling it with a number of arguments no clause accepts is an error.
+## Iteration
+
+### `do`
+
+`(do ((var init step) ...) (test result ...) command ...)`
+
+Binds each `var` to its `init`, then repeats: if `test` is true, evaluate the `result` expressions and return the last one's value (unspecified if there are none); otherwise evaluate the `command`s for effect, then rebind each `var` to the value of its `step`. A variable without a `step` keeps its value.
 
 ```scheme
-(define range
-  (case-lambda
-    ((e) (range 0 e))
-    ((b e) (do ((r '() (cons e r)) (e (- e 1) (- e 1))) ((< e b) r)))))
-(range 3)      ; => (0 1 2)
-(range 3 5)    ; => (3 4)
+(do ((vec (make-vector 5))
+     (i 0 (+ i 1)))
+    ((= i 5) vec)
+  (vector-set! vec i i))     ; => #(0 1 2 3 4)
 ```
 
-## Parameters
+Named `let` is the other way to loop. Both run in constant space however many times they repeat.
+
+## Delayed evaluation
+
+### `delay`, `delay-force`, `force`
+
+`(delay expr)` returns a promise to evaluate `expr`. `(force promise)` evaluates it the first time and returns the same value every time after. Forcing a non-promise returns it unchanged.
+
+`(delay-force expr)`, where `expr` evaluates to a promise, is for iterative lazy algorithms: forcing a long chain of `delay-force` promises runs in constant space.
+
+### `make-promise`, `promise?`
+
+`(make-promise obj)` returns `obj` if it is a promise, otherwise a promise already forced to `obj`. `(promise? obj)` tests for promises. A promise is a [record](./records.md) of a type private to s1-core.
+
+## Dynamic bindings
 
 ### `make-parameter`
 
@@ -81,16 +153,34 @@ Evaluates the body with each parameter set to its (converted) value, restoring t
 (parameterize ((radix 2)) (f 12)) ; => "1100"
 ```
 
-## Promises
+The current ports are parameters, so `parameterize` can redirect output (see [Input and Output](./input-and-output.md#current-ports)).
 
-### `delay`, `delay-force`, `force`
+## Quasiquote
 
-`(delay expr)` returns a promise to evaluate `expr`. `(force promise)` evaluates it the first time and returns the same value every time after. Forcing a non-promise returns it unchanged.
+`` (quasiquote template) ``, or `` `template ``
 
-`(delay-force expr)`, where `expr` evaluates to a promise, is for iterative lazy algorithms: forcing a long chain of `delay-force` promises runs in constant space.
+Builds list and vector structure from a template, like `quote`, except that parts marked with `,` (`unquote`) are evaluated and inserted, and parts marked with `,@` (`unquote-splicing`) are evaluated and their elements spliced in:
 
-### `make-promise`, `promise?`
+```scheme
+`(1 ,(+ 1 1) ,@(list 3 4))          ; => (1 2 3 4)
+`#(a ,(* 2 3))                       ; => #(a 6)
+```
 
-`(make-promise obj)` returns `obj` if it is a promise, otherwise a promise already forced to `obj`. `(promise? obj)` tests for promises.
+Quasiquotes nest: an inner `` ` `` raises the level, and only unquotes at the outermost level are evaluated. `write` prints the nested forms in their long form, as `(quasiquote ...)` and `(unquote ...)`.
 
-A promise is currently represented as a tagged vector, so `vector?` is also true of one. That will change when records are added.
+## Procedures
+
+### `case-lambda`
+
+`(case-lambda (formals body ...) ...)`
+
+A procedure that, when called, runs the first clause whose `formals` accept that many arguments. Calling it with a number of arguments no clause accepts is an error. This is R7RS's way to write procedures with optional arguments.
+
+```scheme
+(define range
+  (case-lambda
+    ((e) (range 0 e))
+    ((b e) (do ((r '() (cons e r)) (e (- e 1) (- e 1))) ((< e b) r)))))
+(range 3)      ; => (0 1 2)
+(range 3 5)    ; => (3 4)
+```

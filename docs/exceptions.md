@@ -1,6 +1,8 @@
 # Exceptions
 
-S1 implements R7RS's exception system (R7RS section 6.11). Any object can be raised. Errors are represented by **error objects**, which `error` creates and which built-in procedures raise when they fail.
+R7RS: [section 6.11, Exceptions](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-8.html#TAG:__tex2page_sec_6.11).
+
+Any object can be raised. Errors are represented by **error objects**, which `error` creates and which built-in procedures raise when they fail.
 
 ## Handlers
 

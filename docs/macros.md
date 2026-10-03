@@ -1,8 +1,10 @@
 # Macros
 
+R7RS: [section 4.3, Macros](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-6.html#TAG:__tex2page_sec_4.3). Syntax definitions are in [section 5.4](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-7.html#TAG:__tex2page_sec_5.4).
+
 S1 has two macro systems:
 
-* **`syntax-rules`** (R7RS 4.3): pattern-based and **hygienic**. Use it for new code.
+* **`syntax-rules`**: the standard system, pattern-based and **hygienic**. Use it for new code.
 * **`macro`**, an s1 extension: the macro body is ordinary Scheme code that computes the expansion, usually with quasiquote. It is **not** hygienic.
 
 Both kinds of macro are values bound in the environment, like procedures. A use is expanded when the evaluator reaches it, and the expansion is evaluated in place.

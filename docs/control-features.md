@@ -1,63 +1,55 @@
 # Control Features
 
+R7RS: [section 6.10, Control features](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-8.html#TAG:__tex2page_sec_6.10), and [section 3.5, Proper tail recursion](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-5.html#TAG:__tex2page_sec_3.5).
+
 ## Proper tail calls
 
-s1 is properly tail-recursive (R7RS 3.5): a procedure call in tail position reuses the caller's continuation, so a loop written as a tail call runs in constant space however many times it repeats. The tail positions are the last expression of a `lambda` or `case-lambda` body; the branches of `if`, `cond` (including `=>`), `case`, `when` and `unless`; the last expression of `and`, `or` and `begin`; the bodies of every `let` form, named `let`, `let-values`, `let-syntax` and `letrec-syntax`; a `do` loop's result expressions; and macro uses in any of these. `apply` and `call/cc` call their procedure, and `call-with-values` its consumer, in tail position.
+s1 is properly tail-recursive: a procedure call in tail position reuses the caller's continuation, so a loop written as a tail call runs in constant space however many times it repeats. The tail positions are the last expression of a `lambda` or `case-lambda` body; the branches of `if`, `cond` (including `=>`), `case`, `when` and `unless`; the last expression of `and`, `or` and `begin`; the bodies of every `let` form, named `let`, `let-values`, `let-syntax` and `letrec-syntax`; a `do` loop's result expressions; and macro uses in any of these. `apply` and `call/cc` call their procedure, and `call-with-values` its consumer, in tail position.
 
 Calls inside `guard`, `parameterize`, `dynamic-wind` and `with-exception-handler` bodies aren't tail calls, since those forms must do something after the body returns. Neither is `eval`.
 
+Recursion that isn't in tail position is limited only by memory, but very deep recursion (hundreds of thousands of pending calls) gets progressively slower, because the garbage collector walks the whole chain of pending continuations.
+
 `(%kont-depth)`, an internal procedure, returns the number of continuation frames waiting for its value; the regression suite's `scheme/tail_tests.scm` uses it to check every tail context.
 
-## `procedure?`
+## Procedures
 
-`(procedure? obj)`
+* `(procedure? obj)`: `#t` for built-in procedures, closures, `case-lambda` procedures, parameter objects and continuations.
+* `(apply proc arg1 ... args)`: calls `proc` with the arguments `arg1 ...` followed by the elements of the list `args`. `(apply + 1 2 '(3 4))` is `10`.
 
-Returns `#t` if `obj` is a procedure, and `#f` otherwise. Implemented via `type-of`.
+## `map` and `for-each`
 
-## `apply`
+`(map proc list1 list2 ...)` returns a list of the results of applying `proc` to corresponding elements of the lists. `(for-each proc list1 list2 ...)` does the same for effect, in order from first to last. Both stop at the end of the shortest list, so a circular list can be paired with a finite one. s1's `map` also applies `proc` in order, though R7RS doesn't require that.
 
-`(apply proc arg1 ... args)`
+`string-map`, `string-for-each`, `vector-map` and `vector-for-each` are the same for strings and vectors; see [Strings](./strings.md#iteration) and [Vectors](./vectors.md).
 
-Calls `proc` with the elements of the list `(append (list arg1 ...) args)` as the actual arguments.
+## Continuations
 
-## `map`
+`(call-with-current-continuation proc)`, or `(call/cc proc)`
 
-`(map proc list1 list2 ...)`
+Calls `proc` with the current continuation, packaged as an escape procedure. Calling the escape procedure with a value, at any later time, returns that value from the `call/cc` again. Continuations are fully re-entrant: one can be called after the `call/cc` has returned, any number of times, as generators and backtracking need.
 
-The `map` procedure applies `proc` element-wise to the elements of the `list`s and returns a list of the results, in order. Implemented in `s1-core.scm`.
+```scheme
+(call/cc (lambda (k) (+ 1 (k 42))))     ; => 42
+```
 
-## `for-each`
+Calling a continuation runs the `before` and `after` thunks of any `dynamic-wind` extents it enters or leaves. A continuation captured during a top-level form covers the rest of that form only: invoking it later finishes that form, and evaluation carries on from the form that invoked it.
 
-`(for-each proc list1 list2 ...)`
+For exceptions, which are the usual way to escape on error, see [Exceptions](./exceptions.md).
 
-Similar to `map`, but `for-each` is called for its side effects rather than for its values. Implemented in `s1-core.scm`.
+## Multiple values
 
-## `force`
+* `(values obj ...)`: returns its arguments as multiple values to its continuation.
+* `(call-with-values producer consumer)`: calls `producer` with no arguments and passes the values it returns as arguments to `consumer`. `(call-with-values (lambda () (values 1 2)) +)` is `3`.
 
-`(force promise)`
-
-Forces the value of `promise`.
-
-## `call-with-current-continuation`
-
-`(call-with-current-continuation proc)`
-
-`proc` must be a procedure of one argument. The procedure `call-with-current-continuation` packages up the current continuation (see the following section) as an "escape procedure" and passes it as an argument to `proc`.
-
-## `values`
-
-`(values obj ...)`
-
-Delivers all of its arguments to its continuation.
-
-## `call-with-values`
-
-`(call-with-values producer consumer)`
-
-Calls its `producer` argument with no arguments and a continuation that, when passed some values, calls the `consumer` procedure with those values as arguments.
+`let-values`, `let*-values` and `define-values` bind multiple values to variables; see [Derived Expressions](./derived-expressions.md#let-values-let-values).
 
 ## `dynamic-wind`
 
 `(dynamic-wind before thunk after)`
 
-Calls `thunk` without arguments, returning the result(s) of this call. `before` and `after` are called just before and just after `thunk` is called.
+Calls `before`, then `thunk`, then `after`, all with no arguments, and returns `thunk`'s values. If control leaves `thunk` by any means (a continuation, an exception, `exit`), `after` runs on the way out; if control re-enters it through a continuation, `before` runs again. `parameterize`, `guard` and the exception handlers are built on the same mechanism.
+
+## Promises
+
+`force`, `delay`, `delay-force` and `make-promise` are in [Derived Expressions](./derived-expressions.md#delayed-evaluation).

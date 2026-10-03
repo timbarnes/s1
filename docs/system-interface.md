@@ -1,6 +1,6 @@
 # System Interface
 
-R7RS section 6.14: `(scheme process-context)`, `(scheme time)`, and `load` from `(scheme load)`. `file-exists?` and `delete-file` are in [Input and Output](./input-and-output.md), and `features` in [Libraries](./libraries.md#cond-expand-and-features).
+R7RS: [section 6.14, System interface](https://standards.scheme.org/corrected-r7rs/r7rs-Z-H-8.html#TAG:__tex2page_sec_6.14). It covers `(scheme process-context)`, `(scheme time)`, and `load` from `(scheme load)`. `file-exists?` and `delete-file` are in [Input and Output](./input-and-output.md), and `features` in [Libraries](./libraries.md#cond-expand-and-features).
 
 ## Running s1
 
@@ -81,15 +81,3 @@ Returns 1000000000: a jiffy is a nanosecond.
 `(load filename [environment])`
 
 `filename` must be a string. The `load` procedure reads expressions and definitions from the file and evaluates them sequentially. Without an environment, the file is pushed onto the stack of ports the REPL reads from, so its forms are evaluated in the interaction environment after the current top-level form finishes. With an environment, they are evaluated in it before `load` returns (see [Environments and Evaluation](./environments.md)). Implemented in `s1-core.scm`.
-
-## `transcript-on`
-
-`(transcript-on filename)`
-
-`filename` must be a string. Starts a transcript of interaction with the user, saving it to the file. **Not implemented.**
-
-## `transcript-off`
-
-`(transcript-off)`
-
-Ends the transcript. **Not implemented.**
