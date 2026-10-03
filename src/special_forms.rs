@@ -234,6 +234,17 @@ pub fn define_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
             let sym = args[1];
             let value_expr = args[2];
 
+            // A value that needs no machine step is bound here, without a
+            // Bind frame.
+            match crate::eval::cek::immediate(ec, state, value_expr) {
+                crate::eval::cek::Immediate::Value(v) => {
+                    state.env.define(sym, v);
+                    insert_value(state, sym);
+                    return Ok(());
+                }
+                crate::eval::cek::Immediate::Raised => return Ok(()),
+                crate::eval::cek::Immediate::Deferred => {}
+            }
             insert_bind(state, sym, state.env.clone(), true);
             insert_eval(state, value_expr, false);
             Ok(())
@@ -274,6 +285,17 @@ pub fn set_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(),
     // `counter` its definition environment sees, under the key bound there.
     match crate::eval::identifiers::resolve(ec.heap, args[1], &state.env) {
         Some(r) => {
+            // A value that needs no machine step is assigned here, without
+            // a Bind frame.
+            match crate::eval::cek::immediate(ec, state, args[2]) {
+                crate::eval::cek::Immediate::Value(v) => {
+                    r.frame.define(r.key, v);
+                    insert_value(state, ec.heap.unspecified());
+                    return Ok(());
+                }
+                crate::eval::cek::Immediate::Raised => return Ok(()),
+                crate::eval::cek::Immediate::Deferred => {}
+            }
             insert_bind(state, r.key, r.frame, false);
             insert_eval(state, args[2], false);
             Ok(())
@@ -293,6 +315,17 @@ pub fn if_sf(expr: GcRef, evaluator: &mut RunTime, state: &mut CEKState) -> Resu
             } else {
                 evaluator.heap.unspecified()
             };
+            // A test that needs no machine step (see eval::cek::immediate)
+            // is decided here, without an If frame.
+            match crate::eval::cek::immediate(evaluator, state, a[1]) {
+                crate::eval::cek::Immediate::Value(v) => {
+                    let branch = if crate::gc::is_false(v) { else_clause } else { a[2] };
+                    insert_eval(state, branch, state.tail);
+                    return Ok(());
+                }
+                crate::eval::cek::Immediate::Raised => return Ok(()),
+                crate::eval::cek::Immediate::Deferred => {}
+            }
             insert_if(state, a[2], else_clause);
             insert_eval(state, a[1], false);
             Ok(())

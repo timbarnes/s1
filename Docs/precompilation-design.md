@@ -127,6 +127,32 @@ Caveats: `trace` shows fewer steps; a continuation captured inside a later
 argument sees the inlined values already on `arg_stack`, which is exactly
 what the existing snapshot mechanism expects.
 
+### Step 1 as implemented
+
+The implementation (`immediate` in `src/eval/cek.rs`) goes a little further
+than the prototype. An expression is evaluated directly if it is a constant, a
+variable that a plain lookup finds, or a call whose operator is a variable
+bound to a built-in procedure and whose arguments are all constants or such
+variables. Every argument is checked before the built-in is called, so if the
+expression turns out not to qualify nothing has been evaluated and it takes
+the normal path. A built-in that fails raises its error exactly as it would
+from the machine, so `guard` and handlers see no difference.
+
+It is used for later arguments of a call, the test of `if`, and the value of
+`define` and `set!`. Each extension was measured separately (medians, seconds):
+
+| | fib 25 | typical | macro loop | regression |
+|---|---|---|---|---|
+| before | 0.52 | 0.50 | 0.39 | 0.99 |
+| arguments (constants, variables) | 0.45 | | | |
+| + built-in calls | 0.33 | | | |
+| + `if` tests | 0.29 | | | |
+| + `define`/`set!` values | **0.28 (-46%)** | **0.39 (-22%)** | **0.28 (-28%)** | **0.89 (-10%)** |
+
+The regression suite has tests for the cases that could differ: evaluation
+order, unbound variables, built-in errors in each position, a failed `define`,
+a locally rebound built-in, and `call/cc` among direct arguments.
+
 ## The R7RS environment model these techniques must fit
 
 What full R7RS environments (phase 9) require, independent of how they are
@@ -274,8 +300,9 @@ What would fight R7RS environments, and must be avoided:
 
 ## Recommended plan
 
-1. **Inline trivial operands** (now). About 20 lines; 10-24% measured. Extend
-   to `if` tests and `define`/`set!` values, measuring each.
+1. **Inline trivial operands.** Done: 10-46% measured, including built-in
+   calls on trivial arguments, `if` tests and `define`/`set!` values (see
+   "Step 1 as implemented").
 2. **Cells for top-level environments** (with phase 9). Change only the
    global frame's representation (names map to cells; local frames stay as
    they are), so the change stays inside `env.rs` plus `define`/`set!`. Cells

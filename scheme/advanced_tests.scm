@@ -589,3 +589,24 @@
 (test-equal '(11 22 31)
     (let ((ls (list 1 2))) (set-cdr! (cdr ls) ls) (map + ls '(10 20 30)))
     "map over a circular first list stops at the finite one")
+
+;; Expressions that need no machine step (constants, bound variables, and
+;; built-in calls on those) are evaluated directly as arguments, if tests and
+;; define/set! values. These check that the shortcut changes nothing.
+(display "          === Testing direct evaluation of simple expressions ===")
+(newline)
+(define direct-calls 0)
+(define (direct-bump!) (set! direct-calls (+ direct-calls 1)) direct-calls)
+(test-equal '(1 1 2) (list (+ direct-calls 1) (direct-bump!) (+ direct-calls 1))
+    "arguments are still evaluated left to right")
+(test-equal "Unbound variable: no-such-variable-here"
+    (guard (e (#t (error-object-message e))) (list 1 no-such-variable-here))
+    "an unbound variable argument raises as before")
+(test-equal 'caught (guard (e (#t 'caught)) (list 1 (car 5) 3)) "a built-in's error in an argument is catchable")
+(test-equal 'caught (guard (e (#t 'caught)) (if (car 5) 1 2)) "a built-in's error in an if test is catchable")
+(test-equal 'caught (guard (e (#t 'caught)) (define direct-zz (car 5))) "a built-in's error in a define value is catchable")
+(test-equal 'unbound (guard (e (#t 'unbound)) direct-zz) "a failed define binds nothing")
+(test-equal 'shadow (let ((car (lambda (x) 'shadow))) (car '(1 2))) "a locally rebound built-in isn't called directly")
+(test-equal 6 (+ 1 (call/cc (lambda (k) (k 2))) 3) "call/cc in an argument after direct ones")
+(test-equal '(1 2) (let ((x 1) (y 0)) (set! y (+ x 1)) (list x y)) "set! of a built-in call's value")
+(test-equal 'yes (if (pair? '(a)) 'yes 'no) "an if test decided directly")

@@ -92,14 +92,114 @@ fn step(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> {
     }
 }
 
+/// Whether a value evaluates to itself.
+#[inline]
+fn is_self_evaluating(v: &crate::gc::SchemeValue) -> bool {
+    matches!(
+        v,
+        Int(_)
+            | Rational(_)
+            | Float(_)
+            | Str(_)
+            | Bool(_)
+            | Vector(_)
+            | Bytevector(_)
+            | Char(_)
+            | Nil
+            | Callable(_)
+            | Continuation(_)
+            | ErrorObject(_)
+            | RecordType(_)
+            | Record(_)
+            | Void
+            | Undefined
+    )
+}
+
+/// The value of an atomic expression: a constant, or a variable that is
+/// bound. `None` for a form or an unbound variable.
+#[inline]
+fn atomic_value(rt: &RunTime, state: &CEKState, expr: GcRef) -> Option<GcRef> {
+    match gc_value!(expr) {
+        Symbol(_) => identifiers::lookup(rt.heap, expr, &state.env),
+        v if is_self_evaluating(v) => Some(expr),
+        _ => None,
+    }
+}
+
+/// The result of trying to evaluate an expression without machine steps.
+pub enum Immediate {
+    Value(GcRef),
+    /// It needs the machine: evaluate it the normal way. Nothing has run.
+    Deferred,
+    /// A built-in raised an error, which has been raised in `state`: the
+    /// caller must stop and return.
+    Raised,
+}
+
+/// Evaluate `expr` directly when that needs no machine step: a constant, a
+/// bound variable, or a call to a built-in procedure whose arguments are
+/// all constants or bound variables (`(< n 2)`, `(car x)`). Anything else
+/// is `Deferred`, with nothing evaluated, so the normal path can't repeat
+/// any side effect. A built-in's error is raised exactly as the normal
+/// path would.
+///
+/// About half of all evaluator steps used to be spent on such expressions;
+/// see Docs/precompilation-design.md.
+#[inline]
+pub fn immediate(rt: &mut RunTime, state: &mut CEKState, expr: GcRef) -> Immediate {
+    match gc_value!(expr) {
+        Pair(op, args) => {
+            let (op, args) = (*op, *args);
+            if !matches!(gc_value!(op), Symbol(_)) {
+                return Immediate::Deferred;
+            }
+            let func = match identifiers::lookup(rt.heap, op, &state.env)
+                .and_then(|v| gc_value!(v).as_callable())
+            {
+                Some(Callable::Builtin { func, .. }) => *func,
+                _ => return Immediate::Deferred,
+            };
+            // All the arguments must be atomic before anything is called.
+            let base = rt.arg_stack.len();
+            let mut rest = args;
+            while let Pair(arg, next) = gc_value!(rest) {
+                match atomic_value(rt, state, *arg) {
+                    Some(v) => rt.arg_stack.push(v),
+                    None => {
+                        rt.arg_stack.truncate(base);
+                        return Immediate::Deferred;
+                    }
+                }
+                rest = *next;
+            }
+            if !matches!(gc_value!(rest), Nil) {
+                rt.arg_stack.truncate(base);
+                return Immediate::Deferred;
+            }
+            let values = rt.arg_stack.split_off(base);
+            match func(rt.heap, &values) {
+                Ok(v) => Immediate::Value(v),
+                Err(err) => {
+                    post_error(state, rt, &err);
+                    Immediate::Raised
+                }
+            }
+        }
+        _ => match atomic_value(rt, state, expr) {
+            Some(v) => Immediate::Value(v),
+            None => Immediate::Deferred,
+        },
+    }
+}
+
 /// Capture the current environment and control state, then pass the CEKState to the CEK loop.
 ///
 pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
     //dump_cek("   eval_cek", &state);
     match &gc_value!(expr) {
         // Self-evaluating values are returned unchanged
-        Int(_) | Rational(_) | Float(_) | Str(_) | Bool(_) | Vector(_) | Bytevector(_) | Char(_) | Nil | Callable(_)
-        | Continuation(_) | ErrorObject(_) | RecordType(_) | Record(_) | Void | Undefined => {
+        v if is_self_evaluating(v) => {
             state.control = Control::Value(expr);
         }
         // Symbols are looked up in the environment
@@ -688,6 +788,20 @@ fn handle_eval_arg(
     // Vec; continuations snapshot and restore that stack (see
     // RunTimeStruct::arg_stack).
     ec.arg_stack.push(val);
+    // Arguments that need no machine step (see `immediate`) are evaluated
+    // here, straight onto the stack, instead of with a step and an EvalArg
+    // frame each. The first one that needs real evaluation stops this.
+    let mut remaining_exprs = remaining_exprs;
+    while let Pair(head, rest) = gc_value!(remaining_exprs) {
+        match immediate(ec, state, *head) {
+            Immediate::Value(value) => {
+                ec.arg_stack.push(value);
+                remaining_exprs = *rest;
+            }
+            Immediate::Deferred => break,
+            Immediate::Raised => return Ok(()),
+        }
+    }
     match gc_value!(remaining_exprs) {
         Nil => {
             let evaluated_args = Rc::new(ec.arg_stack.split_off(args_base as usize + 1));
