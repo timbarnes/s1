@@ -22,7 +22,7 @@
 //! 4. [`printer`] gives values their external representation.
 //!
 //! [`main`] loads `scheme/s1-core.scm` (the parts of the language written in
-//! Scheme) into the system environment, registers the standard libraries
+//! Scheme, compiled into the binary as [`CORE`]) into the system environment, registers the standard libraries
 //! ([`libraries`]), then runs files, a script, or the REPL in the
 //! interaction environment.
 //!
@@ -79,12 +79,20 @@ use argh::FromArgs;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+/// The text of `scheme/s1-core.scm`, compiled in so that s1 runs from any
+/// directory and an installed binary needs no files beside it. `--core`
+/// loads a file in its place, for working on the core without rebuilding.
+const CORE: &str = include_str!("../scheme/s1-core.scm");
+
 #[derive(FromArgs)]
 /// A simple Scheme interpreter
 struct Args {
-    /// do not load scheme/s1-core.scm
+    /// do not load the core library (s1-core.scm)
     #[argh(switch, short = 'n')]
     no_core: bool,
+    /// load the core library from this file instead of the copy built into s1
+    #[argh(option)]
+    core: Option<String>,
     /// files to load after core (can be repeated)
     #[argh(option, short = 'f')]
     file: Vec<String>,
@@ -131,7 +139,15 @@ fn main() {
     // s1-core.scm is part of the system: it loads, to completion, into the
     // system environment, before the interaction environment is made.
     if !args.no_core {
-        run_startup_command("(push-port! (open-input-file \"scheme/s1-core.scm\"))", &mut state, &mut rt);
+        let source = match &args.core {
+            Some(path) => std::fs::read_to_string(path).unwrap_or_else(|e| {
+                eprintln!("Cannot read core library {}: {}", path, e);
+                std::process::exit(1);
+            }),
+            None => CORE.to_string(),
+        };
+        let port = crate::gc::new_port(rt.heap, crate::io::new_string_port_input(&source));
+        rt.port_stack.push(port);
         repl(&mut rt, &mut state, true, system.clone());
         if banner {
             println!("s1-core loaded");

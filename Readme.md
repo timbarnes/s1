@@ -161,7 +161,8 @@ cargo run --release -- -r -q
 ### Command Line Options
 - `-f <file>` - Load Scheme file (can be repeated)
 - `-q` - Quit after loading files (batch mode)
-- `-n` - Skip loading `scheme/s1-core.scm`
+- `-n` - Skip loading the core library (`scheme/s1-core.scm`)
+- `--core <file>` - Load the core library from `file` instead of the copy built into s1
 - `-r` - Run the regression suite
 - `script [arg ...]` - Run a script after the `-f` files, then exit; everything after it is passed to the program (see [docs/system-interface.md](docs/system-interface.md))
 
@@ -189,7 +190,7 @@ s1> (exit)
 
 ### File Loading
 
-The interpreter automatically loads `scheme/s1-core.scm` on startup (unless `-n` is specified), which provides additional standard library functions and utilities.
+The interpreter loads its core library on startup (unless `-n` is specified), which provides additional standard library functions and utilities. `scheme/s1-core.scm` is compiled into the binary, so s1 runs from any directory; after editing it, rebuild, or try the changes with `--core scheme/s1-core.scm`.
 
 ## Building
 
@@ -239,7 +240,6 @@ s1 implements R7RS-small apart from complex numbers, which are not planned. The 
 
 - Faster evaluation by pre-analysing code (see `design/precompilation-design.md`)
 - Error reporting with source locations
-- Finding `scheme/s1-core.scm` without having to run s1 from its own directory
 
 ## Examples
 

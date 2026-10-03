@@ -715,15 +715,32 @@ fn register_library_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState, n
 // ---------------------------------------------------------------------------
 // Library files
 
-/// The directories searched for library files: those in `S1_LIBRARY_PATH`
-/// (colon separated), then the current directory, then `scheme/lib`.
+/// The directories searched for library files, in order:
+///
+/// 1. those in `S1_LIBRARY_PATH`, separated as `PATH` is (`:` on Unix, `;`
+///    on Windows);
+/// 2. the current directory;
+/// 3. the user's library directory, `s1/lib` in the platform's data
+///    directory (`~/.local/share` on Linux, `~/Library/Application Support`
+///    on macOS, `%APPDATA%` on Windows);
+/// 4. the installation's library directory, found from the executable so
+///    that an installed tree can be moved: `<prefix>/share/s1/lib` for a
+///    binary in `<prefix>/bin`, or `lib` beside `s1.exe` on Windows.
 fn search_path() -> Vec<std::path::PathBuf> {
-    let mut dirs: Vec<std::path::PathBuf> = std::env::var("S1_LIBRARY_PATH")
-        .map(|p| p.split(':').filter(|d| !d.is_empty()).map(std::path::PathBuf::from).collect())
-        .unwrap_or_default();
-    dirs.push(".".into());
-    dirs.push("scheme/lib".into());
-    dirs
+    let mut path: Vec<std::path::PathBuf> =
+        std::env::var_os("S1_LIBRARY_PATH").map(|p| std::env::split_paths(&p).filter(|d| !d.as_os_str().is_empty()).collect()).unwrap_or_default();
+    path.push(".".into());
+    if let Some(data) = dirs::data_dir() {
+        path.push(data.join("s1").join("lib"));
+    }
+    if let Some(bin) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|d| d.to_path_buf())) {
+        if cfg!(windows) {
+            path.push(bin.join("lib"));
+        } else if let Some(prefix) = bin.parent() {
+            path.push(prefix.join("share").join("s1").join("lib"));
+        }
+    }
+    path
 }
 
 /// The file a library is looked for in: its name parts joined by `/`, with

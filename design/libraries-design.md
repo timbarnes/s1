@@ -36,8 +36,9 @@ Existing programs and the REPL keep working without any `import`.
 4. **`environment` returns immutable environments**: `define` and `set!` in
    them are errors.
 5. **Library files** are `<name parts joined by />.sld`, searched for in
-   the directories in `S1_LIBRARY_PATH` (colon separated), then `.`, then
-   `scheme/lib`.
+   the directories in `S1_LIBRARY_PATH` (separated as `PATH` is), then `.`,
+   then the user's data directory (`s1/lib`), then the installation's
+   (`<prefix>/share/s1/lib`, or `lib` beside `s1.exe` on Windows).
 
 ## The environments
 

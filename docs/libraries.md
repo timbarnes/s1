@@ -72,9 +72,10 @@ count                 ; => 1: importers see the library's assignments
 
 When `import` (or a library's `import` declaration) names a library that isn't registered, s1 looks for a file named after it: the name's parts joined by `/`, with `.sld` added, so `(foo bar)` is `foo/bar.sld`. It searches, in order:
 
-1. the directories in the environment variable `S1_LIBRARY_PATH`, separated by colons;
+1. the directories in the environment variable `S1_LIBRARY_PATH`, separated as in `PATH` (by colons on Linux and macOS, semicolons on Windows);
 2. the current directory;
-3. `scheme/lib`.
+3. your own library directory, `s1/lib` in the platform's data directory: `~/.local/share/s1/lib` on Linux (or `$XDG_DATA_HOME/s1/lib`), `~/Library/Application Support/s1/lib` on macOS, and `%APPDATA%\s1\lib` on Windows;
+4. the installation's library directory: `share/s1/lib` under the prefix s1 is installed in (`/usr/local/share/s1/lib` for `/usr/local/bin/s1`), or `lib` beside `s1.exe` on Windows.
 
 The first file found is evaluated in the interaction environment, normally defining the library with `define-library`, and the import goes ahead. A library file may itself import libraries from files.
 

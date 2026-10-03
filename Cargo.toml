@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 argh = "0.1"
+dirs = "5"
 mimalloc = "0.1.52"
 num-bigint = { version = "0.4.6", features = ["serde"] }
 num-integer = "0.1"

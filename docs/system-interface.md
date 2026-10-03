@@ -4,11 +4,12 @@ R7RS: [section 6.14, System interface](https://standards.scheme.org/corrected-r7
 
 ## Running s1
 
-`s1 [-n] [-f file]... [-q] [-r] [script [arg ...]]`
+`s1 [-n] [--core file] [-f file]... [-q] [-r] [script [arg ...]]`
 
 * With no script, s1 loads the `-f` files in order and then starts the REPL, or exits if `-q` is given.
 * With a script, s1 loads the `-f` files, runs the script, and exits. Everything after the script name, including words that start with `-`, is passed to the program, and `command-line` returns it. A script gets no startup banner, so its output is its own.
-* A script's first line may be `#!/usr/bin/env s1` (the reader treats `#!/...` and `#! ...` as comments to the end of the line). s1 loads `scheme/s1-core.scm` from the current directory, so for now it must be run from the s1 directory.
+* A script's first line may be `#!/usr/bin/env s1` (the reader treats `#!/...` and `#! ...` as comments to the end of the line).
+* s1's core library, `scheme/s1-core.scm`, is built into the binary, so s1 runs from any directory. `-n` skips it; `--core file` loads `file` in its place, for working on the core without rebuilding.
 
 Exit status: 0 when the program finishes, or whatever `exit` gives. While a script is running, an uncaught error or a syntax error ends it with status 70 (`EX_SOFTWARE`), after the `after` thunks of any `dynamic-wind` it is inside have run. Without a script, an error is reported and s1 carries on with the next form.
 

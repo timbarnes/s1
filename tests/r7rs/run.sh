@@ -16,7 +16,7 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
-cd "$root"   # s1 loads scheme/s1-core.scm relative to the cwd
+cd "$root"
 
 suite="$here/r7rs-tests.scm"
 shim="$here/shim.scm"

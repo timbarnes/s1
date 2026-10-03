@@ -52,11 +52,10 @@ R7RS leaves these to the implementation.
 | Jiffies | nanoseconds since s1 started ([System Interface](./system-interface.md#jiffies-per-second)) |
 | Exit status of `(exit obj)` | 0 for no `obj` or `#t`, 1 for `#f`, `obj` itself for an exact integer ([System Interface](./system-interface.md#exit)) |
 | Feature identifiers | `r7rs exact-closed ieee-float full-unicode ratios s1`, plus the OS, architecture and byte order ([Libraries](./libraries.md#cond-expand-and-features)) |
-| Library file names | `(foo bar)` is `foo/bar.sld`, searched on `S1_LIBRARY_PATH`, then `.`, then `scheme/lib` ([Libraries](./libraries.md#library-files)) |
+| Library file names | `(foo bar)` is `foo/bar.sld`, searched on `S1_LIBRARY_PATH`, then `.`, then the user's and the installation's library directories ([Libraries](./libraries.md#library-files)) |
 | Uncaught errors | reported on standard error; a script then exits with status 70, the REPL carries on ([Exceptions](./exceptions.md#uncaught-exceptions)) |
 
 ## Known limitations
 
-* s1 loads its core library from `scheme/s1-core.scm` relative to the current directory, so it must be run from the s1 directory.
 * Very deep non-tail recursion gets progressively slower (see [Control Features](./control-features.md#proper-tail-calls)). Loops written as tail calls are unaffected.
 * Indexing a string that contains non-ASCII characters (`string-ref`, `string-set!`, `substring`) scans from the start.

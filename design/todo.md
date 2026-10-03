@@ -17,7 +17,7 @@ Standard features s1 doesn't provide yet, and known issues. The R7RS conformance
 ## System interface
 
 *   Done in phase 10: `command-line`, `exit` with a status and `dynamic-wind` unwinding, `emergency-exit`, `get-environment-variable(s)`, `current-second`, `current-jiffy`, `jiffies-per-second`, and running scripts (`s1 script arg ...`). See [System Interface](../docs/system-interface.md).
-*   s1 finds `scheme/s1-core.scm` relative to the current directory, so a `#!/usr/bin/env s1` script only works when run from the s1 directory. A configured or compiled-in location would fix it.
+*   Done: `scheme/s1-core.scm` is compiled into the binary (`--core file` overrides it), so s1 and `#!/usr/bin/env s1` scripts run from any directory. Library files are also searched for in the user's data directory and in `share/s1/lib` under the installation prefix (`lib` beside `s1.exe` on Windows).
 
 ## Audit (R7RS phase 11, done)
 
