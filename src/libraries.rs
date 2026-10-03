@@ -362,6 +362,7 @@ pub fn register_library_builtins(heap: &mut GcHeap, env: EnvRef) {
         "environment" => (environment, "(environment import-set ...) A new immutable environment containing the bindings of the import sets"),
         "scheme-report-environment" => (scheme_report_environment, "(scheme-report-environment 5) An immutable environment of (scheme r5rs)"),
         "null-environment" => (null_environment, "(null-environment 5) An immutable environment of the syntax in (scheme r5rs)"),
+        "features" => (features, "(features) The feature identifiers cond-expand recognizes, as a list of symbols"),
         "library-exports" => (library_exports, "(library-exports library-name) The names a registered library exports, as a list of symbols"),
         "library-names" => (library_names, "(library-names) The names of the registered libraries"),
         "%library-unimplemented" => (library_unimplemented, "(%library-unimplemented library-name) The names R7RS assigns a standard library that s1 doesn't define, as a list of strings"),
@@ -573,7 +574,10 @@ fn collect_declarations(heap: &mut GcHeap, decls: &[GcRef], out: &mut Declaratio
                 let forms = include_forms(heap, crate::gc::cdr(*decl)?, false, &keyword)?;
                 collect_declarations(heap, &forms, out)?;
             }
-            "cond-expand" => return Err(format!("{}: cond-expand is not supported yet", who)),
+            "cond-expand" => {
+                let chosen = choose_cond_expand_clause(heap, args, who)?;
+                collect_declarations(heap, &chosen, out)?;
+            }
             _ => return Err(format!("{}: unknown declaration {}", who, crate::printer::print_value(decl))),
         }
     }
@@ -830,4 +834,119 @@ fn relocate_includes(heap: &mut GcHeap, form: GcRef, dir: &std::path::Path) -> G
         new_parts.push(list_from_slice(&relocated, heap));
     }
     list_from_slice(&new_parts, heap)
+}
+
+// ---------------------------------------------------------------------------
+// cond-expand and features
+
+/// s1's feature identifiers (R7RS appendix B), as strings.
+fn feature_names() -> Vec<String> {
+    let mut names: Vec<String> = ["r7rs", "exact-closed", "ieee-float", "ratios", "s1"]
+        .iter()
+        .map(|f| f.to_string())
+        .collect();
+    names.push(std::env::consts::OS.to_string());
+    names.push(std::env::consts::FAMILY.to_string());
+    if std::env::consts::FAMILY == "unix" {
+        names.push("posix".to_string());
+    }
+    // R7RS spells architectures with hyphens: x86-64, not x86_64.
+    names.push(std::env::consts::ARCH.replace('_', "-"));
+    names.push(if cfg!(target_endian = "little") { "little-endian" } else { "big-endian" }.to_string());
+    names
+}
+
+/// (features)
+fn features(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if !args.is_empty() {
+        return Err("features: takes no arguments".to_string());
+    }
+    let symbols: Vec<GcRef> = feature_names().iter().map(|f| heap.intern_symbol(f)).collect();
+    Ok(list_from_slice(&symbols, heap))
+}
+
+/// Whether a cond-expand feature requirement holds: a feature identifier,
+/// (library name) for a library that is registered or has a file on the
+/// search path, or and / or / not of requirements.
+fn requirement_holds(heap: &GcHeap, req: GcRef, features: &[String], who: &str) -> Result<bool, String> {
+    let bad = || format!("{}: bad feature requirement {}", who, crate::printer::print_value(&req));
+    match gc_value!(req) {
+        SchemeValue::Symbol(_) => Ok(features.contains(&identifier_name(heap, req))),
+        SchemeValue::Pair(head, _) => {
+            let parts = crate::gc::list_to_vec(heap, req).map_err(|_| bad())?;
+            let args = &parts[1..];
+            match identifier_name(heap, *head).as_str() {
+                "and" => {
+                    for r in args {
+                        if !requirement_holds(heap, *r, features, who)? {
+                            return Ok(false);
+                        }
+                    }
+                    Ok(true)
+                }
+                "or" => {
+                    for r in args {
+                        if requirement_holds(heap, *r, features, who)? {
+                            return Ok(true);
+                        }
+                    }
+                    Ok(false)
+                }
+                "not" => match args {
+                    [r] => Ok(!requirement_holds(heap, *r, features, who)?),
+                    _ => Err(bad()),
+                },
+                "library" => match args {
+                    [name] => {
+                        let name = library_name(*name, who)?;
+                        Ok(heap.libraries.get(&name).is_some() || find_library_file(&name).is_some())
+                    }
+                    _ => Err(bad()),
+                },
+                _ => Err(bad()),
+            }
+        }
+        _ => Err(bad()),
+    }
+}
+
+/// The body of the first cond-expand clause whose requirement holds (an
+/// `else` clause, last, always does), or nothing if none does.
+fn choose_cond_expand_clause(heap: &GcHeap, clauses: &[GcRef], who: &str) -> Result<Vec<GcRef>, String> {
+    let features = feature_names();
+    for (i, clause) in clauses.iter().enumerate() {
+        let parts = crate::gc::list_to_vec(heap, *clause).unwrap_or_default();
+        let Some(req) = parts.first() else {
+            return Err(format!("{}: bad clause {}", who, crate::printer::print_value(clause)));
+        };
+        let holds = if identifier_name(heap, *req) == "else" {
+            if i + 1 != clauses.len() {
+                return Err(format!("{}: else must be the last clause", who));
+            }
+            true
+        } else {
+            requirement_holds(heap, *req, &features, who)?
+        };
+        if holds {
+            return Ok(parts[1..].to_vec());
+        }
+    }
+    Ok(Vec::new())
+}
+
+/// (cond-expand (requirement form ...) ... [(else form ...)])
+/// The forms of the first clause whose requirement holds, as a `begin` in
+/// place of the cond-expand; unspecified if no clause holds.
+pub fn cond_expand_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
+    let clauses = crate::gc::list_to_vec(ec.heap, crate::gc::cdr(expr)?)?;
+    let forms = choose_cond_expand_clause(ec.heap, &clauses, "cond-expand")?;
+    if forms.is_empty() {
+        crate::eval::insert_value(state, ec.heap.unspecified());
+        return Ok(());
+    }
+    let begin = ec.heap.core_form("begin");
+    let body = list_from_slice(&forms, ec.heap);
+    let begin_form = crate::gc::new_pair(ec.heap, begin, body);
+    crate::eval::insert_eval(state, begin_form, state.tail);
+    Ok(())
 }

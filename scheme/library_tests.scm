@@ -76,7 +76,7 @@
 
 ;; What R7RS assigns the standard libraries that s1 doesn't define yet: the
 ;; checklist for the rest of phase 9 and the phase 11 audit.
-(test-equal '(((scheme base) ("..." "=>" "_" "cond-expand" "else" "features" "syntax-error"))
+(test-equal '(((scheme base) ("..." "=>" "_" "else" "syntax-error"))
               ((scheme complex) ("angle" "imag-part" "magnitude" "make-polar" "make-rectangular" "real-part"))
               ((scheme cxr) ("caaaar" "caadar" "cadaar" "caddar" "cdaaar" "cdadar" "cddaar" "cdddar"))
               ((scheme process-context) ("command-line" "emergency-exit" "get-environment-variable" "get-environment-variables"))
@@ -282,3 +282,36 @@
 (test-equal "import: unknown library (tests libs no-such-file)"
     (guard (e (#t (error-object-message e))) (eval '(import (tests libs no-such-file)) (interaction-environment)))
     "a library with no file")
+
+(display "          === Testing cond-expand and features ===")
+(newline)
+
+(test-equal '(#t #t #t) (map (lambda (f) (and (memq f (features)) #t)) '(r7rs ratios s1)) "features")
+(test-equal #f (and (memq 'exact-complex (features)) #t) "no complex numbers")
+(test-equal 'yes (cond-expand (r7rs 'yes) (else 'no)) "a feature")
+(test-equal 'else (cond-expand (no-such-feature 'yes) (else 'else)) "else")
+(test-equal 'and-or-not
+    (cond-expand ((and s1 (or no-such-feature r7rs) (not no-such-feature)) 'and-or-not) (else 'no))
+    "and, or and not")
+(test-equal '(registered on-disk absent)
+    (list (cond-expand ((library (scheme base)) 'registered) (else 'no))
+          (cond-expand ((library (tests libs never-imported)) 'on-disk) (else 'no))
+          (cond-expand ((library (no such library)) 'present) (else 'absent)))
+    "library requirements")
+(cond-expand (s1 (define defined-by-cond-expand 'top)) (else))
+(test-equal 'top defined-by-cond-expand "cond-expand at top level can define")
+(test-equal #t (eq? (if #f #f) (cond-expand (no-such-feature 1))) "no clause holds")
+(test-equal "cond-expand: else must be the last clause"
+    (guard (e (#t (error-object-message e))) (cond-expand (else 1) (r7rs 2)))
+    "else must be last")
+
+(define-library (test expanded)
+  (export which)
+  (cond-expand
+    ((library (scheme base)) (import (scheme base)))
+    (else (import (s1))))
+  (cond-expand
+    (no-such-feature (begin (define which 'wrong)))
+    (s1 (begin (define which 'right)))))
+(import (test expanded))
+(test-equal 'right which "cond-expand declarations in define-library")

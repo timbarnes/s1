@@ -2,7 +2,7 @@
 
 # Libraries and environments: design (phase 9)
 
-Status: in progress. Steps 9a to 9e are implemented; the rest is design.
+Status: in progress. Steps 9a to 9f are implemented; 9g (conformance and docs) remains.
 Built on the binding cells of commit 7300841 (`BindingCell` in `src/env.rs`).
 
 ## Goal
@@ -200,10 +200,11 @@ documented, not changed.
 * `(cond-expand clause ...)` at top level and in libraries. Requirements are
   feature identifiers, `(library name)` (true if the library is registered
   or can be found on disk), `(and ...)`, `(or ...)`, `(not ...)` and `else`.
-* `(features)` returns s1's feature list: `r7rs`, `exact-closed`, `ratios`,
-  `full-unicode` (if the audit confirms it), `s1`, and the OS and
-  architecture names (`linux`, `unix`, `x86-64`, ...). Not `exact-complex`,
-  since s1 has no complex numbers.
+* `(features)` returns s1's feature list: `r7rs`, `exact-closed`,
+  `ieee-float`, `ratios`, `s1`, and the OS, OS family (plus `posix` on
+  unix), architecture and byte order (`linux`, `unix`, `posix`, `x86-64`,
+  `little-endian`). Not `exact-complex`, since s1 has no complex numbers;
+  `full-unicode` waits for the phase 11 audit to confirm it.
 
 ## Library files
 

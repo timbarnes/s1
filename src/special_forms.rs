@@ -66,6 +66,7 @@ pub fn register_special_forms(heap: &mut GcHeap, env: EnvRef) {
         "define-library" => crate::libraries::define_library_sf,
         "include" => crate::libraries::include_sf,
         "include-ci" => crate::libraries::include_ci_sf,
+        "cond-expand" => crate::libraries::cond_expand_sf,
     );
 }
 

@@ -73,7 +73,7 @@ count                 ; => 1: importers see the library's assignments
 * `define-library` is allowed only at top level. Evaluating it again replaces the library for later imports; existing importers keep the variables they imported.
 * Files named in `include` declarations are relative to the library file's directory when the library was loaded from a file (below), and otherwise to the current directory.
 
-`cond-expand` declarations come in phase 9f.
+* `(cond-expand clause ...)` declarations choose further declarations, as below.
 
 ## Library files
 
@@ -90,6 +90,24 @@ Each file is loaded at most once per run. If it doesn't define the library its n
 ## `include` and `include-ci`
 
 `(include file ...)` reads the forms in the files and evaluates them in place of the `include`, as a `begin`. `(include-ci file ...)` does the same, reading with case folding. Both work anywhere an expression or definition can appear.
+
+## `cond-expand` and `features`
+
+`(cond-expand (requirement form ...) ... [(else form ...)])`
+
+Evaluates the forms of the first clause whose requirement holds, in place of the `cond-expand`, as a `begin`. If no clause holds and there is no `else`, the result is unspecified. In `define-library`, the forms are declarations instead. A requirement is:
+
+* a feature identifier, true if it is in `(features)`;
+* `(library library-name)`: true if the library is registered or its file is on the search path (it isn't loaded);
+* `(and requirement ...)`, `(or requirement ...)`, `(not requirement)`.
+
+```scheme
+(cond-expand
+  ((and s1 (library (scheme char))) (define upcase char-upcase))
+  (else (define (upcase c) c)))
+```
+
+`(features)` returns s1's feature identifiers: `r7rs`, `exact-closed`, `ieee-float`, `ratios`, `s1`, and the operating system, its family, the architecture and the byte order, for example `linux unix posix x86-64 little-endian`. `exact-complex` is absent, since s1 has no complex numbers; `full-unicode` waits for the phase 11 audit.
 
 ## `environment`
 
