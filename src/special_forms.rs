@@ -62,6 +62,7 @@ pub fn register_special_forms(heap: &mut GcHeap, env: EnvRef) {
         "define-syntax" => define_sf,
         "let-syntax" => let_syntax_sf,
         "letrec-syntax" => letrec_syntax_sf,
+        "import" => crate::libraries::import_sf,
     );
 }
 

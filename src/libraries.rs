@@ -235,11 +235,103 @@ pub fn format_name(name: &LibraryName) -> String {
     format!("({})", name.join(" "))
 }
 
-/// Bind every export of `library` in `env`, as imports.
-pub fn import_all(env: &EnvRef, library: &Library) {
-    for (name, cell) in &library.exports {
-        env.bind_cell(*name, cell.clone());
+/// The (name, cell) pairs an import set denotes (R7RS 5.2):
+/// a library name, or `only`, `except`, `prefix` or `rename` applied to an
+/// import set. Identifiers are compared by the name they are written as, so
+/// an import produced by a macro works.
+pub fn resolve_import_set(heap: &mut GcHeap, set: GcRef, who: &str) -> Result<Vec<(GcRef, CellRef)>, String> {
+    let parts = crate::gc::list_to_vec(heap, set)
+        .map_err(|_| format!("{}: not an import set: {}", who, crate::printer::print_value(&set)))?;
+    let keyword = parts.first().map(|head| identifier_name(heap, *head));
+    let modifier = matches!(keyword.as_deref(), Some("only" | "except" | "prefix" | "rename"));
+    if !modifier || parts.len() < 2 {
+        let name = library_name(set, who)?;
+        let library = heap
+            .libraries
+            .get(&name)
+            .ok_or_else(|| format!("{}: unknown library {}", who, format_name(&name)))?;
+        return Ok(library.exports.clone());
     }
+    let keyword = keyword.unwrap();
+    let mut bindings = resolve_import_set(heap, parts[1], who)?;
+    let args = &parts[2..];
+    let position = |bindings: &Vec<(GcRef, CellRef)>, heap: &GcHeap, id: GcRef| -> Result<usize, String> {
+        let name = identifier_name(heap, id);
+        bindings
+            .iter()
+            .position(|(n, _)| symbol_name(*n) == name)
+            .ok_or_else(|| format!("{}: {} is not in the import set {}", who, name, crate::printer::print_value(&parts[1])))
+    };
+    match keyword.as_str() {
+        "only" => {
+            let mut kept = Vec::with_capacity(args.len());
+            for id in args {
+                kept.push(bindings[position(&bindings, heap, *id)?].clone());
+            }
+            bindings = kept;
+        }
+        "except" => {
+            for id in args {
+                let i = position(&bindings, heap, *id)?;
+                bindings.remove(i);
+            }
+        }
+        "prefix" => {
+            let [prefix] = args else {
+                return Err(format!("{}: prefix takes an import set and one identifier", who));
+            };
+            let prefix = identifier_name(heap, *prefix);
+            for (name, _) in bindings.iter_mut() {
+                *name = heap.intern_symbol(&format!("{}{}", prefix, symbol_name(*name)));
+            }
+        }
+        _ => {
+            // rename: each argument is (from to)
+            for pair in args {
+                let ids = crate::gc::list_to_vec(heap, *pair).unwrap_or_default();
+                let [from, to] = ids[..] else {
+                    return Err(format!("{}: rename expects (from to) pairs", who));
+                };
+                let i = position(&bindings, heap, from)?;
+                bindings[i].0 = heap.intern_symbol(&identifier_name(heap, to));
+            }
+        }
+    }
+    Ok(bindings)
+}
+
+/// The name an identifier is written as (an alias's original name), or ""
+/// for anything that isn't an identifier.
+fn identifier_name(heap: &GcHeap, id: GcRef) -> String {
+    symbol_name(crate::eval::identifiers::strip(heap, id))
+}
+
+/// Bind `bindings` in the top-level environment `env`, as imports.
+pub fn import_bindings(env: &EnvRef, bindings: Vec<(GcRef, CellRef)>) {
+    for (name, cell) in bindings {
+        env.bind_cell(name, cell);
+    }
+}
+
+/// (import import-set ...)
+/// Valid where definitions are, at the top level of an environment. Every
+/// import set is resolved before anything is bound, so a failing import
+/// binds nothing.
+pub fn import_sf(expr: GcRef, ec: &mut crate::eval::RunTime, state: &mut crate::eval::CEKState) -> Result<(), String> {
+    if !matches!(state.env.borrow().bindings, crate::env::Bindings::Large(_)) {
+        return Err("import: only allowed at top level".to_string());
+    }
+    if !state.env.is_mutable() {
+        return Err("import: this environment is immutable".to_string());
+    }
+    let sets = crate::gc::list_to_vec(ec.heap, crate::gc::cdr(expr)?)?;
+    let mut bindings = Vec::new();
+    for set in sets {
+        bindings.extend(resolve_import_set(ec.heap, set, "import")?);
+    }
+    import_bindings(&state.env, bindings);
+    crate::eval::insert_value(state, ec.heap.unspecified());
+    Ok(())
 }
 
 /// Make the interaction environment: a new top-level environment with every
@@ -254,7 +346,9 @@ pub fn make_interaction_env(system: &EnvRef) -> EnvRef {
 
 pub fn register_library_builtins(heap: &mut GcHeap, env: EnvRef) {
     register_builtin_family!(heap, env,
-        "environment" => (environment, "(environment library-name ...) A new immutable environment containing the exports of the named libraries"),
+        "environment" => (environment, "(environment import-set ...) A new immutable environment containing the bindings of the import sets"),
+        "scheme-report-environment" => (scheme_report_environment, "(scheme-report-environment 5) An immutable environment of (scheme r5rs)"),
+        "null-environment" => (null_environment, "(null-environment 5) An immutable environment of the syntax in (scheme r5rs)"),
         "library-exports" => (library_exports, "(library-exports library-name) The names a registered library exports, as a list of symbols"),
         "library-names" => (library_names, "(library-names) The names of the registered libraries"),
         "%library-unimplemented" => (library_unimplemented, "(%library-unimplemented library-name) The names R7RS assigns a standard library that s1 doesn't define, as a list of strings"),
@@ -268,16 +362,51 @@ fn lookup<'a>(heap: &'a GcHeap, datum: GcRef, who: &str) -> Result<&'a Library, 
         .ok_or_else(|| format!("{}: unknown library {}", who, format_name(&name)))
 }
 
-/// (environment library-name ...)
-fn environment(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+fn environment_value(heap: &mut GcHeap, bindings: Vec<(GcRef, CellRef)>) -> GcRef {
     let env = Frame::new_top_level(false);
-    for arg in args {
-        import_all(&env, lookup(heap, *arg, "environment")?);
-    }
-    Ok(heap.alloc(crate::gc::GcObject {
+    import_bindings(&env, bindings);
+    heap.alloc(crate::gc::GcObject {
         value: SchemeValue::Environment(env),
         marked: 0,
-    }))
+    })
+}
+
+/// (environment import-set ...)
+fn environment(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    let mut bindings = Vec::new();
+    for arg in args {
+        bindings.extend(resolve_import_set(heap, *arg, "environment")?);
+    }
+    Ok(environment_value(heap, bindings))
+}
+
+/// The bindings of `(scheme r5rs)`, for an R5RS environment of `version`
+/// (which must be 5).
+fn r5rs_bindings(heap: &GcHeap, args: &[GcRef], who: &str) -> Result<Vec<(GcRef, CellRef)>, String> {
+    match args {
+        [v] if matches!(gc_value!(*v), SchemeValue::Int(n) if *n == num_bigint::BigInt::from(5)) => {}
+        _ => return Err(format!("{}: the only version supported is 5", who)),
+    }
+    let name = vec!["scheme".to_string(), "r5rs".to_string()];
+    Ok(heap.libraries.get(&name).map(|l| l.exports.clone()).unwrap_or_default())
+}
+
+/// (scheme-report-environment 5)
+fn scheme_report_environment(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    let bindings = r5rs_bindings(heap, args, "scheme-report-environment")?;
+    Ok(environment_value(heap, bindings))
+}
+
+/// (null-environment 5): the syntactic keywords of (scheme r5rs) only.
+fn null_environment(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    let mut bindings = r5rs_bindings(heap, args, "null-environment")?;
+    bindings.retain(|(_, cell)| {
+        cell.get().is_some_and(|value| {
+            matches!(gc_value!(value), SchemeValue::Callable(c) if matches!(**c,
+                crate::gc::Callable::SpecialForm { .. } | crate::gc::Callable::SyntaxRules(_) | crate::gc::Callable::Macro { .. }))
+        })
+    });
+    Ok(environment_value(heap, bindings))
 }
 
 fn one_arg(args: &[GcRef], who: &str) -> Result<GcRef, String> {

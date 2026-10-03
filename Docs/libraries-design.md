@@ -2,7 +2,7 @@
 
 # Libraries and environments: design (phase 9)
 
-Status: in progress. Steps 9a and 9b are implemented; the rest is design.
+Status: in progress. Steps 9a to 9c are implemented; the rest is design.
 Built on the binding cells of commit 7300841 (`BindingCell` in `src/env.rs`).
 
 ## Goal

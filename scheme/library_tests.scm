@@ -76,11 +76,11 @@
 
 ;; What R7RS assigns the standard libraries that s1 doesn't define yet: the
 ;; checklist for the rest of phase 9 and the phase 11 audit.
-(test-equal '(((scheme base) ("..." "=>" "_" "cond-expand" "else" "features" "import" "include" "include-ci" "syntax-error"))
+(test-equal '(((scheme base) ("..." "=>" "_" "cond-expand" "else" "features" "include" "include-ci" "syntax-error"))
               ((scheme complex) ("angle" "imag-part" "magnitude" "make-polar" "make-rectangular" "real-part"))
               ((scheme cxr) ("caaaar" "caadar" "cadaar" "caddar" "cdaaar" "cdadar" "cddaar" "cdddar"))
               ((scheme process-context) ("command-line" "emergency-exit" "get-environment-variable" "get-environment-variables"))
-              ((scheme r5rs) ("angle" "caaaar" "caadar" "cadaar" "caddar" "cdaaar" "cdadar" "cddaar" "cdddar" "imag-part" "magnitude" "make-polar" "make-rectangular" "null-environment" "real-part" "scheme-report-environment"))
+              ((scheme r5rs) ("angle" "caaaar" "caadar" "cadaar" "caddar" "cdaaar" "cdadar" "cddaar" "cdddar" "imag-part" "magnitude" "make-polar" "make-rectangular" "real-part"))
               ((scheme time) ("current-jiffy" "current-second" "jiffies-per-second")))
     (let loop ((names (library-names)) (acc '()))
       (cond ((null? names) (reverse acc))
@@ -108,3 +108,51 @@
 (test-equal 'outer
     (let ((car (lambda (x) 'outer))) (set! car (lambda (x) 'outer)) (car 1))
     "set! of a local that shadows an import")
+
+(display "          === Testing import ===")
+(newline)
+
+(import (prefix (scheme char) c:))
+(test-equal #\A (c:char-upcase #\a) "import with prefix")
+(import (rename (only (scheme base) car cdr) (car first) (cdr rest-of)))
+(test-equal '(1 (2)) (list (first '(1 2)) (rest-of '(1 2))) "import with only and rename")
+(test-equal "set!: first is imported and can't be assigned"
+    (guard (e (#t (error-object-message e))) (set! first cdr))
+    "a name bound by import can't be assigned")
+(test-equal 'unbound
+    (guard (e (#t 'unbound)) (eval '(car '(1)) (environment '(except (scheme base) car))))
+    "environment with except")
+(test-equal '(1 #\B)
+    (eval '(list (head '(1)) (up #\b))
+          (environment '(rename (only (scheme base) car list) (car head))
+                       '(prefix (only (scheme char) char-upcase) x-)
+                       '(rename (prefix (only (scheme char) char-upcase) x-) (x-char-upcase up))))
+    "environment with combined import sets")
+(test-equal "environment: no-such is not in the import set (scheme base)"
+    (guard (e (#t (error-object-message e))) (environment '(only (scheme base) car no-such)))
+    "only of a missing name is an error")
+(test-equal "import: unknown library (no such)"
+    (guard (e (#t (error-object-message e)))
+      (eval '(import (scheme base) (no such)) (interaction-environment)))
+    "importing an unknown library is an error")
+(test-equal "import: only allowed at top level"
+    (guard (e (#t (error-object-message e))) (let () (import (scheme base)) 1))
+    "import isn't allowed in a body")
+(test-equal "import: this environment is immutable"
+    (guard (e (#t (error-object-message e))) (eval '(import (scheme char)) (environment '(scheme base))))
+    "import into an immutable environment")
+;; A REPL definition can be replaced by an import, and vice versa.
+(define local-then-imported 'local)
+(import (rename (only (scheme base) car) (car local-then-imported)))
+(test-equal 1 (local-then-imported '(1)) "import replaces a definition")
+(define local-then-imported 'local-again)
+(test-equal 'local-again local-then-imported "a definition replaces an import")
+
+(test-equal 21 (eval '(* 7 3) (scheme-report-environment 5)) "scheme-report-environment")
+(test-equal '(1 unbound)
+    (list (eval '(if #t 1 2) (null-environment 5))
+          (guard (e (#t 'unbound)) (eval '(car '(1)) (null-environment 5))))
+    "null-environment has only syntax")
+(test-equal "null-environment: the only version supported is 5"
+    (guard (e (#t (error-object-message e))) (null-environment 7))
+    "R5RS environments of other versions")

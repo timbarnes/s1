@@ -18,18 +18,43 @@ The R7RS standard libraries exist as export lists over the system environment: `
 * `(library-names)`: the registered libraries' names, such as `(scheme base)`. An s1 extension.
 * `(library-exports library-name)`: the names a library exports, as a list of symbols. An s1 extension.
 
+## `import`
+
+`(import import-set ...)`
+
+Binds the names the import sets denote in the current top-level environment. An import set is:
+
+* a library name, such as `(scheme base)`: all its exports;
+* `(only set identifier ...)`: just those names;
+* `(except set identifier ...)`: all but those names;
+* `(prefix set prefix)`: every name with `prefix` in front;
+* `(rename set (from to) ...)`: those names renamed.
+
+Naming an identifier the set doesn't contain is an error. Every set is checked before anything is bound, so an import that fails binds nothing.
+
+```scheme
+(import (prefix (scheme char) c:))
+(c:char-upcase #\a)                                    ; => #\A
+(import (rename (only (scheme base) car) (car first)))
+(first '(1 2))                                         ; => 1
+```
+
+An imported name shares the library's variable, and can't be `set!`. `import` is allowed only at the top level of an environment (the REPL, a loaded file, or `eval` in a mutable environment), not inside a body. At the REPL, importing a name replaces any binding it had, and a later `define` of it replaces the import.
+
 ## `environment`
 
-`(environment library-name ...)`
+`(environment import-set ...)`
 
-Returns a new environment containing exactly the exports of the named libraries. It is immutable: `define` and `set!` at its top level are errors (local definitions inside expressions are fine).
+Returns a new environment containing exactly the bindings of the import sets. It is immutable: `define`, `set!` and `import` at its top level are errors (local definitions inside expressions are fine).
 
 ```scheme
 (eval '(+ 1 2) (environment '(scheme base)))              ; => 3
 (eval '(char-upcase #\a) (environment '(scheme base)))   ; error: char-upcase is unbound
 ```
 
-Import sets (`only`, `except`, `prefix`, `rename`) as arguments come with `import` (phase 9c).
+## `scheme-report-environment` and `null-environment`
+
+`(scheme-report-environment 5)` returns an immutable environment of `(scheme r5rs)`, and `(null-environment 5)` one with only its syntactic keywords (`if`, `define`, `let`, ...). R5RS procedures; 5 is the only version supported.
 
 ## `interaction-environment`
 
