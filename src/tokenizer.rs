@@ -147,6 +147,21 @@ impl<'a> Tokenizer<'a> {
                 Some('#') => match self.read_char() {
                     Some('|') => self.skip_block_comment()?,
                     Some('!') => {
+                        // `#!/...` or `#! ...`, as in a script's first line
+                        // (`#!/usr/bin/env s1`), is a comment to the end of
+                        // the line. Any other `#!` is a directive.
+                        match self.read_char() {
+                            Some(c) if c == '/' || c == ' ' => {
+                                while let Some(c) = self.read_char() {
+                                    if c == '\n' {
+                                        break;
+                                    }
+                                }
+                                continue;
+                            }
+                            Some(c) => self.unread_char(c),
+                            None => {}
+                        }
                         let name = match self.read_char() {
                             Some(c) if !is_delimiter(c) => self.read_atom(c),
                             Some(c) => {
@@ -683,6 +698,7 @@ mod tests {
     #[test]
     fn test_comments_and_directives() {
         assert_eq!(tokens("a #| x #| nested |# y |# b"), vec![sym("a"), sym("b")]);
+        assert_eq!(tokens("#!/usr/bin/env s1 -x\na #! comment (\nb"), vec![sym("a"), sym("b")]);
         assert!(matches!(tokens("a #| never closed")[..], [Token::Symbol(_), Token::Error(_)]));
         assert_eq!(
             tokens("ABC #!fold-case ABC #\\SPACE |ABC| #!no-fold-case ABC"),

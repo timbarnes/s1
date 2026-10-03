@@ -134,9 +134,6 @@
         (newline)
         (for-each display args)))
 
-(display "s1-core loaded")
-(newline)
-
 (define load (lambda (f . env)
     "(load filename [env]) evaluates the forms in filename. Without env, the file is pushed onto the port stack so the interpreter reads and evaluates its contents next, in the interaction environment; with env, its forms are read and evaluated in env before load returns"
     (if (null? env)

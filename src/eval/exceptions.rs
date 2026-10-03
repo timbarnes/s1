@@ -117,7 +117,12 @@ fn uncaught(state: &mut CEKState, rt: &mut RunTime, obj: GcRef) {
     rt.dynamic_wind.clear();
     let nil = rt.heap.nil_s();
     *rt.handlers = nil;
-    let halt = Rc::clone(&state.halt);
+    // Running a script, an uncaught error ends it, once the thunks have run.
+    let halt = if crate::builtin::system::script_mode() {
+        Rc::new(crate::eval::Kont::Exit { code: crate::builtin::system::SCRIPT_ERROR_STATUS })
+    } else {
+        Rc::clone(&state.halt)
+    };
     state.control = Control::Value(rt.heap.void());
     if thunks.is_empty() {
         state.kont = halt;

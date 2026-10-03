@@ -40,3 +40,10 @@
     "(scheme time) exports current-jiffy")
 (test-true (string? (eval '(get-environment-variable "PATH") (environment '(scheme process-context))))
     "(scheme process-context) exports get-environment-variable")
+
+(display "          === Testing command-line ===")
+(newline)
+
+(test-true (let ((cl (command-line)))
+             (and (pair? cl) (let loop ((l cl)) (or (null? l) (and (string? (car l)) (loop (cdr l)))))))
+    "command-line is a non-empty list of strings")

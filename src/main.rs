@@ -47,11 +47,18 @@ struct Args {
     /// run regression tests
     #[argh(switch, short = 'r')]
     regression: bool,
+    /// a program to run after the -f files, then exit, and the arguments
+    /// `command-line` gives it
+    #[argh(positional, greedy)]
+    script: Vec<String>,
 }
 
 fn main() {
     // Process command-line arguments
     let args: Args = argh::from_env();
+    let script = args.script.first().cloned();
+    let command_line = if script.is_some() { args.script.clone() } else { vec!["s1".to_string()] };
+    crate::builtin::system::set_command_line(command_line, script.is_some());
     // Initialize the system environment and runtime
     let system = Rc::new(RefCell::new(Frame::new(None)));
     let mut runtime = RunTimeStruct::new();
@@ -66,13 +73,20 @@ fn main() {
     }
 
     let mut state = CEKState::new(system.clone());
-    println!("Welcome to the s1 Scheme REPL");
+    // A script's output is its own: no banner.
+    let banner = script.is_none();
+    if banner {
+        println!("Welcome to the s1 Scheme REPL");
+    }
 
     // s1-core.scm is part of the system: it loads, to completion, into the
     // system environment, before the interaction environment is made.
     if !args.no_core {
         run_startup_command("(push-port! (open-input-file \"scheme/s1-core.scm\"))", &mut state, &mut rt);
         repl(&mut rt, &mut state, true, system.clone());
+        if banner {
+            println!("s1-core loaded");
+        }
     }
 
     // The standard libraries are views of the system environment, and the
@@ -92,8 +106,8 @@ fn main() {
         ));
     }
 
-    // Load each file in order
-    for filename in &args.file {
+    // Load each file in order, then the script
+    for filename in args.file.iter().chain(script.iter()) {
         startup_commands.push(format!("(push-port! (open-input-file \"{}\"))", filename));
     }
 
@@ -103,7 +117,7 @@ fn main() {
     }
 
     // Drop into the REPL
-    repl(&mut rt, &mut state, args.quit, env);
+    repl(&mut rt, &mut state, args.quit || script.is_some(), env);
 }
 
 fn run_startup_command(command: &str, state: &mut CEKState, rt: &mut RunTime) {
@@ -178,7 +192,12 @@ fn repl(rt: &mut RunTime, state: &mut CEKState, quit_after_load: bool, global: E
                             }
                         }
                     }
-                    Err(e) => println!("Error: {}", e),
+                    Err(e) => {
+                        println!("Error: {}", e);
+                        if crate::builtin::system::script_mode() {
+                            crate::sys_builtins::exit_now(crate::builtin::system::SCRIPT_ERROR_STATUS);
+                        }
+                    }
                 }
             }
             Err(crate::parser::ParseError::Eof) => {
@@ -194,6 +213,9 @@ fn repl(rt: &mut RunTime, state: &mut CEKState, quit_after_load: bool, global: E
             }
             Err(crate::parser::ParseError::Syntax(e)) => {
                 println!("Parse error: {}", e);
+                if crate::builtin::system::script_mode() {
+                    crate::sys_builtins::exit_now(crate::builtin::system::SCRIPT_ERROR_STATUS);
+                }
                 continue;
             }
         }
