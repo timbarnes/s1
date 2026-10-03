@@ -73,7 +73,12 @@ fn run_cek(mut state: &mut CEKState, rt: &mut RunTime) -> Result<Vec<GcRef>, Str
             Control::Value(val) => match *state.kont {
                 // Fully evaluated: hand back each value of a (values ...)
                 // package separately.
-                Kont::Halt => return Ok(crate::gc::unpack_values(*val)),
+                Kont::Halt => {
+                    if state.hook {
+                        crate::debugger::trace_result(*val, rt);
+                    }
+                    return Ok(crate::gc::unpack_values(*val));
+                }
                 _ => continue, // Some continuation remains; continue loop
             },
             Control::Expr(_) => continue, // Still evaluating an expression; continue loop

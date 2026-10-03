@@ -98,13 +98,36 @@ For timing with standard procedures, use `current-jiffy` (see [System Interface]
 
 `(trace mode)` traces or single-steps the evaluator, and `(trace)` returns the current mode. Trace output and the debugger prompt go to standard error.
 
-* `(trace 'expr)`: prints each expression the machine evaluates and each value it returns, indented by continuation depth (the depth is shown as a number once it is past 40).
-* `(trace 'all)`: the same, with the top few continuation frames under each line.
+* `(trace 'expr)`: prints each expression the machine evaluates and each value it returns, indented by continuation depth (the depth is shown as a number once it is past 40). A value leaving a procedure is marked `<- return`, with the bindings of the call it leaves, and each top-level form's value is shown as `Result:`.
+* `(trace 'all)`: the same, and under a line, the frame its expression or value feeds, with that frame's local bindings, whenever that frame changes.
 * `(trace 'step)`: stops at the `debug>` prompt before every step.
 * `(trace 'off)`: no tracing, but an uncaught error opens the `debug>` prompt, so you can look at the state where it happened before the form is abandoned.
 * `(trace 'reset)`: the initial mode: no tracing, and uncaught errors are just reported.
 
 In the modes that trace or step, an uncaught error also opens the prompt. Arguments that need no machine step of their own, such as variables, constants and calls of built-in procedures on them, are evaluated without a step and so don't appear in the trace.
+
+```scheme
+(define (fact n) (if (zero? n) 1 (* (fact (- n 1)) n)))
+(trace 'all)
+(fact 2)
+; Expr:  (fact 2)
+; Expr:  (if (zero? n) 1 (* (fact (- n 1)) n))
+; Expr:  (* (fact (- n 1)) n)
+;  Expr:  (fact (- n 1))
+;      | in call  (* (fact (- n 1)) n)  [n=2]
+;   Expr:  (if (zero? n) 1 (* (fact (- n 1)) n))
+;   Expr:  (* (fact (- n 1)) n)
+;    Expr:  (fact (- n 1))
+;        | in call  (* (fact (- n 1)) n)  [n=1]
+;     Expr:  (if (zero? n) 1 (* (fact (- n 1)) n))
+;     Expr:  1
+;     Value: 1   <- return [n=0]
+;    Value: 1
+;   Value: 1   <- return [n=1]
+;       | in call  (* (fact (- n 1)) n)  [n=2]
+;  Value: 1
+; Result: 2
+```
 
 ### `break`
 
@@ -119,8 +142,8 @@ In the modes that trace or step, an uncaught error also opens the prompt. Argume
 | `f` | finish: run until the current procedure returns |
 | `c` | stop stepping and run on |
 | `q` | abandon the top-level form |
-| `bt` | backtrace: the current expression (frame 0) and the continuation frames waiting for it |
-| `u [n]`, `d [n]`, `fr n` | select a frame further up or down the backtrace, or by number |
+| `bt` | backtrace: the current expression (frame 0) and the continuation frames waiting for it, each call with its local bindings (`[n=2]`). A procedure return appears only when the value is on its way to it (`-- return value = 30 --`); the numbers skip the returns left out |
+| `u [n]`, `d [n]`, `fr n` | select a frame `n` lines up or down the backtrace, or by number |
 | `l` | the bindings in the selected frame's innermost environment |
 | `e` | all its local bindings |
 | `p expr` | evaluate `expr` in the selected frame's environment and print the value; an error in it comes back to the prompt |

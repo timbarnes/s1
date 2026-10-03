@@ -13,7 +13,7 @@
 //! whose parked state the GC could not see
 //! (see design/nested-evaluation.md).
 
-use crate::env::EnvRef;
+use crate::env::{EnvOps, EnvRef};
 use crate::eval::kont::DebugSaved;
 use crate::eval::{CEKState, Control, DebugState, Kont, KontRef, RunTime, TraceMode};
 use crate::gc::GcRef;
@@ -30,8 +30,10 @@ const LINE_LIMIT: usize = 120;
 const MAX_INDENT: usize = 40;
 /// How far to count frames for the depth shown on a trace line.
 const MAX_COUNT: usize = 1000;
-/// How many frames `(trace 'all)` shows under each line.
-const ALL_FRAMES: usize = 3;
+/// The most bindings a frame's summary shows, and the most characters of
+/// each value.
+const LOCALS: usize = 4;
+const LOCAL_LIMIT: usize = 30;
 /// How many frames `bt` lists before summarising the rest.
 const BT_FRAMES: usize = 40;
 
@@ -39,6 +41,7 @@ const BT_FRAMES: usize = 40;
 pub fn set_mode(state: &mut CEKState, debug: &mut DebugState, mode: TraceMode) {
     debug.mode = mode;
     debug.stop_at = None;
+    debug.last_frame.clear();
     state.hook = mode != TraceMode::Off;
 }
 
@@ -80,12 +83,24 @@ pub fn debugger(state: &mut CEKState, rt: &mut RunTime) {
         TraceMode::Expr => trace_line(state),
         TraceMode::All => {
             trace_line(state);
-            let (indent, _) = indentation(&state.kont);
+            // Under the line, the frame the expression or value feeds,
+            // unless it is the same as last time. Returns are on the trace
+            // line already, and the top level says nothing.
             let mut k = Some(&state.kont);
-            for _ in 0..ALL_FRAMES {
-                let Some(frame) = k else { break };
-                eprintln!("{indent}    | {}", frame_summary(frame));
-                k = frame.next();
+            while let Some(frame) = k {
+                match **frame {
+                    Kont::RestoreEnv { .. } => k = frame.next(),
+                    Kont::Halt => break,
+                    _ => {
+                        let summary = frame_summary(state, frame, false).unwrap_or_default();
+                        if summary != rt.debug.last_frame {
+                            let (indent, _) = indentation(&state.kont);
+                            eprintln!("{indent}    | {summary}");
+                            rt.debug.last_frame = summary;
+                        }
+                        break;
+                    }
+                }
             }
         }
         TraceMode::Step => {
@@ -108,7 +123,21 @@ pub fn post_mortem(state: &mut CEKState, rt: &mut RunTime) {
     prompt(state, rt, Where::PostMortem);
 }
 
-/// One line for the current control, indented by the continuation depth.
+/// With tracing on, report the value a top-level form (or a nested
+/// evaluation) finished with: it goes to `Halt` without another step, so
+/// no trace line shows it otherwise.
+#[cold]
+pub fn trace_result(val: GcRef, rt: &mut RunTime) {
+    if rt.debug.mode != TraceMode::Off {
+        io::stdout().flush().ok();
+        eprintln!("Result: {}", show_value(&val));
+        rt.debug.last_frame.clear();
+    }
+}
+
+/// One line for the current control, indented by the continuation depth. A
+/// value on its way out of a procedure is marked as a return, with the
+/// bindings of the call it leaves.
 fn trace_line(state: &CEKState) {
     // So the trace interleaves with the program's output in order.
     io::stdout().flush().ok();
@@ -118,7 +147,42 @@ fn trace_line(state: &CEKState) {
         Some(_) => String::new(),
         None => format!("[{MAX_COUNT}+] "),
     };
-    eprintln!("{indent}{depth}{}", describe_control(&state.control));
+    let ret = match (&state.control, &*state.kont) {
+        (Control::Value(_), Kont::RestoreEnv { .. }) => match locals(&state.env) {
+            Some(l) => format!("   <- return {l}"),
+            None => "   <- return".to_string(),
+        },
+        _ => String::new(),
+    };
+    eprintln!("{indent}{depth}{}{ret}", describe_control(&state.control));
+}
+
+/// The innermost bindings of `env`, as `[n=1, acc=6]`; `None` at top level
+/// (whose frame is every global) or for an empty frame.
+fn locals(env: &EnvRef) -> Option<String> {
+    env.parent()?;
+    let frame = env.borrow();
+    let mut bindings: Vec<(String, GcRef)> = frame
+        .bindings
+        .iter()
+        .map(|(k, v)| match crate::gc_value!(k) {
+            crate::gc::SchemeValue::Symbol(s) => (s.to_string(), v),
+            _ => (print_value(&k), v),
+        })
+        .collect();
+    if bindings.is_empty() {
+        return None;
+    }
+    bindings.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut parts: Vec<String> = bindings
+        .iter()
+        .take(LOCALS)
+        .map(|(k, v)| format!("{k}={}", print_value_limited(v, LOCAL_LIMIT)))
+        .collect();
+    if bindings.len() > LOCALS {
+        parts.push("...".to_string());
+    }
+    Some(format!("[{}]", parts.join(", ")))
 }
 
 /// The indent for a trace line under `kont`, and the frame count (`None`
@@ -155,13 +219,28 @@ fn show_value(v: &GcRef) -> String {
 }
 
 /// A one-line, user-level description of a frame, for `bt` and
-/// `(trace 'all)`.
-fn frame_summary(frame: &Kont) -> String {
+/// `(trace 'all)`; `top` says it is the top frame, the one the current
+/// control feeds. `None` for a frame not worth a line: a procedure return
+/// still waiting for its value, which is nearly every one on the stack.
+/// Only the top frame's value is known; the rest don't exist yet.
+fn frame_summary(state: &CEKState, frame: &Kont, top: bool) -> Option<String> {
     let p = |v: &GcRef| print_value_limited(v, LINE_LIMIT);
-    match frame {
-        Kont::EvalArg { original_call, .. } => format!("in call  {}", p(original_call)),
+    let with_locals = |s: String, env: &EnvRef| match locals(env) {
+        Some(l) => format!("{s}  {l}"),
+        None => s,
+    };
+    Some(match frame {
+        Kont::EvalArg { original_call, env, .. } => {
+            with_locals(format!("in call  {}", p(original_call)), env)
+        }
         Kont::ApplySpecial { original_call, .. } => format!("in form  {}", p(original_call)),
-        Kont::RestoreEnv { .. } => "-- return from procedure --".to_string(),
+        Kont::RestoreEnv { .. } => match (top, &state.control) {
+            // The value is still in the callee's environment.
+            (true, Control::Value(v)) => {
+                with_locals(format!("-- return value = {} --", show_value(v)), &state.env)
+            }
+            _ => return None,
+        },
         Kont::If { then_branch, else_branch, .. } => {
             format!("if test  then {} else {}", p(then_branch), p(else_branch))
         }
@@ -174,6 +253,15 @@ fn frame_summary(frame: &Kont) -> String {
         }
         Kont::Halt => "top level".to_string(),
         other => dbg_one_kont("", other).trim().to_string(),
+    })
+}
+
+/// Frame `n` as `bt` numbers it (0 is the current control), or `None` if
+/// `bt` leaves it out.
+fn numbered_summary(state: &CEKState, frames: &[KontRef], n: usize) -> Option<String> {
+    match n {
+        0 => Some(describe_control(&state.control)),
+        n => frame_summary(state, &frames[n - 1], n == 1),
     }
 }
 
@@ -220,14 +308,19 @@ fn enclosing_return(kont: &KontRef) -> Option<KontRef> {
     None
 }
 
+/// List the frames, leaving out those `frame_summary` skips; the numbers
+/// are the frames' places in the continuation, so they can skip too.
 fn backtrace(state: &CEKState, frames: &[KontRef], selected: usize) {
-    let mark = |i: usize| if i == selected { '*' } else { ' ' };
-    eprintln!("{}  0  {}", mark(0), describe_control(&state.control));
-    for (i, frame) in frames.iter().enumerate().take(BT_FRAMES) {
-        eprintln!("{} {:2}  {}", mark(i + 1), i + 1, frame_summary(frame));
-    }
-    if frames.len() > BT_FRAMES {
-        eprintln!("    ... {} more frames", frames.len() - BT_FRAMES);
+    let mut shown = 0;
+    for n in 0..=frames.len() {
+        let Some(summary) = numbered_summary(state, frames, n) else { continue };
+        if shown == BT_FRAMES {
+            eprintln!("    ... {} more frames", frames.len() + 1 - n);
+            break;
+        }
+        let mark = if n == selected { '*' } else { ' ' };
+        eprintln!("{mark} {n:2}  {summary}");
+        shown += 1;
     }
 }
 
@@ -316,16 +409,19 @@ fn prompt(state: &mut CEKState, rt: &mut RunTime, at: Where) {
                     eprintln!("{cmd}: expected a number");
                     continue;
                 };
+                // u and d count the frames bt shows; fr takes bt's number.
+                let shown = |i: usize| numbered_summary(state, &frames, i).is_some();
                 selected = match cmd {
-                    "u" | "up" => selected + n,
-                    "d" | "down" => selected.saturating_sub(n),
-                    _ => n,
-                }
-                .min(frames.len());
-                let summary = match selected {
-                    0 => describe_control(&state.control),
-                    i => frame_summary(&frames[i - 1]),
+                    "u" | "up" => (0..n).fold(selected, |i, _| {
+                        (i + 1..=frames.len()).find(|&j| shown(j)).unwrap_or(i)
+                    }),
+                    "d" | "down" => (0..n).fold(selected, |i, _| {
+                        (0..i).rev().find(|&j| shown(j)).unwrap_or(i)
+                    }),
+                    _ => n.min(frames.len()),
                 };
+                let summary = numbered_summary(state, &frames, selected)
+                    .unwrap_or_else(|| "-- return from procedure --".to_string());
                 eprintln!("* {selected:2}  {summary}");
             }
             "l" | "locals" => dbg_one_env(&env_of(state, &frames, selected), 0),

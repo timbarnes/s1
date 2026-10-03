@@ -69,11 +69,13 @@ fn backtrace_and_frame_selection() {
 (define (outer a) (+ 1 (inner (+ a 10))))
 (display (outer 5))
 "#;
-    // Frame 3 is the call (+ 1 (inner ...)), in outer's environment.
-    let (_, out, err) = run("bt", source, "bt\nup 3\np (list a)\nd 3\np z\nc\n");
+    // Two frames up from the break (past the hidden return from inner) is
+    // the call (+ 1 (inner ...)), in outer's environment.
+    let (_, out, err) = run("bt", source, "bt\nup 2\np (list a)\nd 2\np z\nc\n");
     assert_eq!(out, "31");
     assert!(err.contains("in call  (+ 1 (inner (+ a 10)))"), "{err}");
-    assert!(err.contains("-- return from procedure --"), "{err}");
+    // Returns still waiting for their values are left out.
+    assert!(!err.contains("-- return"), "{err}");
     assert!(err.lines().any(|l| l.ends_with("debug> (5)")), "{err}");
     assert!(err.lines().any(|l| l.ends_with("debug> 15")), "{err}");
 }
@@ -87,6 +89,20 @@ fn step_over_and_finish() {
     assert!(err.contains("Expr:  (sq y)"), "{err}");
     assert!(err.contains("Value: 16"), "{err}");
     assert!(err.contains("Value: 25"), "{err}");
+}
+
+#[test]
+fn backtrace_shows_the_value_being_returned() {
+    // Two steps after the break, (* z 2) has its value, 30, on its way to
+    // the frame that returns it from inner.
+    let source = r#"
+(define (inner z) (break) (* z 2))
+(define (outer a) (+ 1 (inner (+ a 10))))
+(display (outer 5))
+"#;
+    let (_, _, err) = run("bt-value", source, "n\nn\nbt\nc\n");
+    assert!(err.contains("-- return value = 30 --  [z=15]"), "{err}");
+    assert!(err.contains("in call  (+ 1 (inner (+ a 10)))  [a=5]"), "{err}");
 }
 
 #[test]
@@ -140,7 +156,29 @@ fn trace_modes() {
     let (_, out, err) = run("modes", source, "");
     assert_eq!(out, "(reset off off reset reset)");
     assert!(err.contains("Expr:  (* x x)"), "{err}");
-    assert!(err.contains("Value: 4"), "{err}");
+    // sq's value is marked as a return, with the call's bindings, and the
+    // form's value, which reaches the top level without a step, is shown.
+    assert!(err.contains("Value: 4   <- return [x=2]"), "{err}");
+    assert!(err.contains("Result: 5"), "{err}");
+}
+
+#[test]
+fn trace_all_shows_a_frame_when_it_changes() {
+    let source = r#"
+(define (fact n) (if (zero? n) 1 (* (fact (- n 1)) n)))
+(trace 'all)
+(fact 2)
+(trace 'reset)
+"#;
+    let (_, _, err) = run("trace-all", source, "");
+    // The pending (* ...) call, with its level's n: n=2 on the way down and
+    // again when n=1's value comes back to it; n=1 only on the way down,
+    // since nothing changes between its frame and the return to it.
+    assert_eq!(err.matches("| in call  (* (fact (- n 1)) n)  [n=2]").count(), 2, "{err}");
+    assert_eq!(err.matches("| in call  (* (fact (- n 1)) n)  [n=1]").count(), 1, "{err}");
+    assert!(!err.contains("top level"), "{err}");
+    assert!(err.contains("Value: 1   <- return [n=0]"), "{err}");
+    assert!(err.contains("Result: 2"), "{err}");
 }
 
 #[test]

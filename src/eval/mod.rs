@@ -126,6 +126,9 @@ pub struct DebugState {
     /// While stepping over or out (`o`, `f`): where it ends. Steps before
     /// then run without prompting.
     pub stop_at: Option<crate::debugger::StopAt>,
+    /// The frame line `(trace 'all)` printed last, so an unchanged one is
+    /// not repeated.
+    pub last_frame: String,
 }
 
 /// One dynamic-wind extent on `RunTime::dynamic_wind`.
