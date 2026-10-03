@@ -239,23 +239,21 @@
       (else
        (error "define: expected exactly one value expression")))))
 
-;; File I/O convenience functions
+;; File and port conveniences (R7RS 6.13.1)
 
-(define call-with-input-file
-  (lambda (filename proc)
-    "(call-with-input-file filename proc) opens filename for input, calls proc with the port, closes the port, and returns proc's result"
-    (let ((port (open-input-file filename)))
-      (let ((result (proc port)))
-        (close-input-port port)
-        result))))
+(define (call-with-port port proc)
+  "(call-with-port port proc) calls proc with port, closes the port, and returns proc's result"
+  (let ((result (proc port)))
+    (close-port port)
+    result))
 
-(define call-with-output-file
-  (lambda (filename proc)
-    "(call-with-output-file filename proc) opens filename for output, calls proc with the port, closes the port, and returns proc's result"
-    (let ((port (open-output-file filename)))
-      (let ((result (proc port)))
-        (close-output-port port)
-        result))))
+(define (call-with-input-file filename proc)
+  "(call-with-input-file filename proc) opens filename for input, calls proc with the port, closes it, and returns proc's result"
+  (call-with-port (open-input-file filename) proc))
+
+(define (call-with-output-file filename proc)
+  "(call-with-output-file filename proc) opens filename for output, calls proc with the port, closes it, and returns proc's result"
+  (call-with-port (open-output-file filename) proc))
 
 ;;; ---------------------------------------------------------------------------
 ;;; R7RS derived expression types (section 4.2) and related procedures.
@@ -340,9 +338,10 @@
 
 ;; --- Parameters (R7RS 4.2.6)
 ;; A parameter object is a procedure: called with no arguments it returns the
-;; current value. parameterize talks to it through two private markers.
-(define %param-set (list 'param-set))
-(define %param-converter (list 'param-converter))
+;; current value. parameterize talks to it through two private markers,
+;; which the built-in current-input-port and friends also understand.
+(define %param-set '%param-set)
+(define %param-converter '%param-converter)
 
 (define (make-parameter value . converter)
   "(make-parameter value [converter]) returns a parameter object whose value is (converter value)"
@@ -438,3 +437,18 @@
 (define (vector-for-each f v . vectors)
   "(vector-for-each f vector1 vector2 ...) calls f on corresponding elements, in order, for effect"
   (apply for-each f (map vector->list (cons v vectors))))
+
+;; Defined after parameterize: the current ports are parameter-like.
+(define (with-input-from-file filename thunk)
+  "(with-input-from-file filename thunk) calls thunk with the current input port reading filename"
+  (let ((port (open-input-file filename)))
+    (let ((result (parameterize ((current-input-port port)) (thunk))))
+      (close-port port)
+      result)))
+
+(define (with-output-to-file filename thunk)
+  "(with-output-to-file filename thunk) calls thunk with the current output port writing to filename"
+  (let ((port (open-output-file filename)))
+    (let ((result (parameterize ((current-output-port port)) (thunk))))
+      (close-port port)
+      result)))

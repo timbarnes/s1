@@ -404,7 +404,7 @@ impl GcHeap {
     pub fn collect_garbage(
         &mut self,
         state: &crate::eval::CEKState,
-        current_output_port: GcRef,
+        current_ports: &[GcRef],
         port_stack: &[GcRef],
         dynamic_wind: &[DynamicWind],
         arg_stack: &[GcRef],
@@ -423,14 +423,14 @@ impl GcHeap {
         // Mirror it for env::Frame's own visited-this-epoch tracking (F6);
         // see `crate::gc::GC_EPOCH`.
         crate::gc::GC_EPOCH.store(self.current_epoch, std::sync::atomic::Ordering::Relaxed);
-        self.mark_from(state, current_output_port, port_stack, dynamic_wind, arg_stack, handlers);
+        self.mark_from(state, current_ports, port_stack, dynamic_wind, arg_stack, handlers);
         self.sweep();
     }
 
     fn mark_from(
         &mut self,
         state: &crate::eval::CEKState,
-        current_output_port: GcRef,
+        current_ports: &[GcRef],
         port_stack: &[GcRef],
         dynamic_wind: &[DynamicWind],
         arg_stack: &[GcRef],
@@ -444,7 +444,9 @@ impl GcHeap {
         state.mark(&mut |gcref| mark_reachable(gcref, epoch, &mut self.worklist));
 
         // Runtime roots
-        mark_reachable(current_output_port, epoch, &mut self.worklist);
+        for port in current_ports {
+            mark_reachable(*port, epoch, &mut self.worklist);
+        }
         for port in port_stack {
             mark_reachable(*port, epoch, &mut self.worklist);
         }
@@ -554,10 +556,6 @@ impl GcHeap {
         self.allocations > self.threshold
     }
 
-    /// Update the position of a StringPortInput in a SchemeValue::Port
-    pub fn update_string_port_pos(&mut self, port_ref: &mut PortKind, new_pos: usize) -> bool {
-        crate::io::update_string_port_pos(port_ref, new_pos)
-    }
 }
 
 /// Mark-on-push: an object is marked the instant it's queued, not when it's

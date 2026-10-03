@@ -19,7 +19,9 @@ pub struct RunTimeStruct {
     pub heap: GcHeap,               // The global heap for scheme data
     pub port_stack: Vec<GcRef>,     // Stack of ports for input/output operations
     pub file_table: FileTable,      // Table of open files
-    pub current_output_port: GcRef, // The current output port
+    /// The current input, output and error ports (indexed by
+    /// `ports::INPUT`, `OUTPUT`, `ERROR`); GC roots.
+    pub current_ports: [GcRef; 3],
     pub dynamic_wind: Vec<DynamicWind>,
     pub dw_next: u32,
     pub trace: TraceType,
@@ -45,7 +47,7 @@ pub struct RunTime<'a> {
     pub heap: &'a mut GcHeap,
     pub port_stack: &'a mut Vec<GcRef>,
     pub file_table: &'a mut FileTable,
-    pub current_output_port: &'a mut GcRef,
+    pub current_ports: &'a mut [GcRef; 3],
     pub dynamic_wind: &'a mut Vec<DynamicWind>,
     pub dw_next: &'a mut u32,
     pub trace: &'a mut TraceType,
@@ -60,7 +62,7 @@ impl<'a> RunTime<'a> {
             heap: &mut eval.heap,
             port_stack: &mut eval.port_stack,
             file_table: &mut eval.file_table,
-            current_output_port: &mut eval.current_output_port,
+            current_ports: &mut eval.current_ports,
             dynamic_wind: &mut eval.dynamic_wind,
             dw_next: &mut eval.dw_next,
             trace: &mut eval.trace,
@@ -100,12 +102,13 @@ impl RunTimeStruct {
         let stdin_port = new_port(&mut heap, PortKind::Stdin);
         port_vec.push(stdin_port);
         let stdout_port = new_port(&mut heap, PortKind::Stdout);
+        let stderr_port = new_port(&mut heap, PortKind::Stderr);
         let handlers = heap.nil_s();
         Self {
             heap,
             port_stack: port_vec,
             file_table: FileTable::new(),
-            current_output_port: stdout_port,
+            current_ports: [stdin_port, stdout_port, stderr_port],
             dynamic_wind: Vec::new(),
             dw_next: 0,
             trace: TraceType::Reset,
@@ -120,11 +123,9 @@ impl RunTimeStruct {
 ///
 /// This should be called after creating the Evaluator, before loading files or starting the REPL.
 pub fn initialize_scheme_globals(rt: &mut RunTime, env: EnvRef) -> Result<(), String> {
-    // Create stdin and stdout ports
-    let stdin_port = new_port(rt.heap, PortKind::Stdin);
-    let stdout_port = new_port(rt.heap, PortKind::Stdout);
-    let stderr_port = new_port(rt.heap, PortKind::Stderr);
-    // Bind **stdin**, **stdout**, and **stderr** as Scheme globals
+    // Bind **stdin**, **stdout**, and **stderr** as Scheme globals: the same
+    // port objects that start out as the current ports.
+    let [stdin_port, stdout_port, stderr_port] = *rt.current_ports;
     let stdin_sym = rt.heap.intern_symbol("**stdin**");
     let stdout_sym = rt.heap.intern_symbol("**stdout**");
     let stderr_sym = rt.heap.intern_symbol("**stderr**");
@@ -136,6 +137,7 @@ pub fn initialize_scheme_globals(rt: &mut RunTime, env: EnvRef) -> Result<(), St
     crate::special_forms::register_special_forms(rt.heap, env.clone());
     crate::sys_builtins::register_sys_builtins(rt, env.clone());
     exceptions::register_exception_builtins(rt, env.clone());
+    crate::ports::register_port_builtins(rt, env.clone());
     Ok(())
 }
 

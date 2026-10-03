@@ -767,7 +767,7 @@ fn handle_restore_env(
     if ec.heap.needs_gc() {
         ec.heap.collect_garbage(
             state,
-            *ec.current_output_port,
+            &ec.current_ports[..],
             ec.port_stack,
             ec.dynamic_wind,
             ec.arg_stack,
@@ -1071,7 +1071,7 @@ pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> 
                     if ec.heap.needs_gc() {
                         ec.heap.collect_garbage(
                             state,
-                            *ec.current_output_port,
+                            &ec.current_ports[..],
                             ec.port_stack,
                             ec.dynamic_wind,
                             ec.arg_stack,

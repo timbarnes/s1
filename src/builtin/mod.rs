@@ -1,7 +1,5 @@
 pub mod bytevector;
 pub mod char;
-pub mod display;
-pub mod fileio;
 pub mod list;
 pub mod number;
 pub mod predicate;
@@ -40,9 +38,7 @@ pub fn range_args(args: &[GcRef], at: usize, len: usize, who: &str) -> Result<(u
 pub fn register_builtins(heap: &mut GcHeap, env: EnvRef) {
     bytevector::register_bytevector_builtins(heap, env.clone());
     char::register_char_builtins(heap, env.clone());
-    display::register_display_builtins(heap, env.clone());
     list::register_list_builtins(heap, env.clone());
-    fileio::register_fileio_builtins(heap, env.clone());
     number::register_number_builtins(heap, env.clone());
     predicate::register_predicate_builtins(heap, env.clone());
     record::register_record_builtins(heap, env.clone());

@@ -2,33 +2,24 @@ use rustc_hash::FxHashMap as HashMap;
 use std::fs::File;
 use std::io::{self, Read, Write};
 
-// use std::io::BufReader as StdBufReader;
-use crate::eval::RunTime;
-use crate::gc::GcRef;
 use std::cell::Cell;
 
-/// The different types of ports supported by the I/O system.
+/// What a port reads from or writes to (R7RS 6.13).
 ///
-/// Ports are used for input/output operations and can be:
-/// - Standard input/output streams
-/// - File-based ports for reading/writing files
-/// - String ports for in-memory string operations
+/// A port is a heap object (`SchemeValue::Port`) and port procedures change
+/// it in place, so every reference to the same port sees the same position,
+/// accumulated output and open/closed state. Textual input files are read
+/// whole into a `StringPortInput`, binary ones into a `BytevectorInput`;
+/// output files write through the `FileTable`.
 #[derive(Debug)]
 pub enum PortKind {
-    /// Standard input stream
+    /// Standard input
     Stdin,
-    /// Standard output stream
+    /// Standard output
     Stdout,
-    /// Standard error stream
+    /// Standard error
     Stderr,
-    /// File-based port with read/write mode and optional file ID
-    File {
-        name: String,
-        id: usize,        // ID from FileTable
-        write: bool,      // true if output, false if input
-        pos: Cell<usize>, // Current position in the file
-    },
-    /// In-memory string port for input with content and current position
+    /// Textual input from a string (also used for files being read or loaded)
     StringPortInput {
         content: String,
         pos: Cell<usize>,
@@ -37,82 +28,60 @@ pub enum PortKind {
         /// case for the rest of this port.
         fold_case: Cell<bool>,
     },
-    // In-memory string port for output with accumulating content
-    StringPortOutput {
-        content: String,
-    },
+    /// Textual output accumulated in a string (`open-output-string`)
+    StringPortOutput { content: String },
+    /// Binary input from bytes (`open-input-bytevector`, binary files)
+    BytevectorInput { bytes: Vec<u8>, pos: usize },
+    /// Binary output accumulated in bytes (`open-output-bytevector`)
+    BytevectorOutput { bytes: Vec<u8> },
+    /// Output to a file in the `FileTable`, textual or binary
+    FileOutput { name: String, id: usize, binary: bool },
+    /// A port after `close-port`. It keeps its direction and kind, so the
+    /// port predicates still answer as before; reading or writing it is an
+    /// error.
+    Closed { input: bool, output: bool, textual: bool },
 }
 
-impl Clone for PortKind {
-    fn clone(&self) -> Self {
+impl PortKind {
+    pub fn is_input(&self) -> bool {
         match self {
-            PortKind::Stdin => PortKind::Stdin,
-            PortKind::Stdout => PortKind::Stdout,
-            PortKind::Stderr => PortKind::Stderr,
-            PortKind::File {
-                name,
-                id,
-                write,
-                pos,
-            } => PortKind::File {
-                name: name.clone(),
-                id: *id,
-                write: *write,
-                pos: Cell::new(pos.get()),
-            },
-            PortKind::StringPortInput {
-                content,
-                pos,
-                fold_case,
-            } => PortKind::StringPortInput {
-                content: content.clone(),
-                pos: Cell::new(pos.get()),
-                fold_case: Cell::new(fold_case.get()),
-            },
-            PortKind::StringPortOutput { content } => PortKind::StringPortOutput {
-                content: content.clone(),
-            },
+            PortKind::Stdin | PortKind::StringPortInput { .. } | PortKind::BytevectorInput { .. } => true,
+            PortKind::Closed { input, .. } => *input,
+            _ => false,
         }
     }
-}
 
-impl PartialEq for PortKind {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (PortKind::Stdin, PortKind::Stdin) => true,
-            (PortKind::Stdout, PortKind::Stdout) => true,
-            (PortKind::Stderr, PortKind::Stderr) => true,
-            (
-                PortKind::File {
-                    name: n1,
-                    id: i1,
-                    write: w1,
-                    pos: p1,
-                },
-                PortKind::File {
-                    name: n2,
-                    id: i2,
-                    write: w2,
-                    pos: p2,
-                },
-            ) => n1 == n2 && i1 == i2 && w1 == w2 && p1.get() == p2.get(),
-            (
-                PortKind::StringPortInput {
-                    content: c1,
-                    pos: p1,
-                    ..
-                },
-                PortKind::StringPortInput {
-                    content: c2,
-                    pos: p2,
-                    ..
-                },
-            ) => c1 == c2 && p1.get() == p2.get(),
-            (
-                PortKind::StringPortOutput { content: c1 },
-                PortKind::StringPortOutput { content: c2 },
-            ) => c1 == c2,
+    pub fn is_output(&self) -> bool {
+        match self {
+            PortKind::Stdout
+            | PortKind::Stderr
+            | PortKind::StringPortOutput { .. }
+            | PortKind::BytevectorOutput { .. }
+            | PortKind::FileOutput { .. } => true,
+            PortKind::Closed { output, .. } => *output,
             _ => false,
+        }
+    }
+
+    pub fn is_textual(&self) -> bool {
+        match self {
+            PortKind::BytevectorInput { .. } | PortKind::BytevectorOutput { .. } => false,
+            PortKind::FileOutput { binary, .. } => !binary,
+            PortKind::Closed { textual, .. } => *textual,
+            _ => true,
+        }
+    }
+
+    pub fn is_open(&self) -> bool {
+        !matches!(self, PortKind::Closed { .. })
+    }
+
+    /// The closed form of this port.
+    pub fn closed(&self) -> PortKind {
+        PortKind::Closed {
+            input: self.is_input(),
+            output: self.is_output(),
+            textual: self.is_textual(),
         }
     }
 }
@@ -133,7 +102,7 @@ impl PortKind {
                 Some(ch)
             }
             PortKind::Stdin => stdin_next_char(),
-            _ => todo!("next_char_utf8 PortKind types"),
+            _ => None,
         }
     }
 
@@ -273,138 +242,6 @@ impl FileTable {
     }
 }
 
-/// Write a line to the current output port.
-///
-/// This function writes to the current port. For stdout ports,
-/// the line is printed to the console. For file ports, the line is written to
-/// the file.
-///
-pub fn write_line(port_kind: &mut PortKind, file_table: &mut FileTable, line: &str) -> bool {
-    match port_kind {
-        PortKind::Stdout => {
-            // No flush here: Stdout is line-buffered, so a newline flushes.
-            // Flushing per call cost one write(2) syscall per display. Partial
-            // lines are flushed before any stdin read and at exit.
-            print!("{}", line);
-            true
-        }
-        PortKind::File { id, .. } => {
-            if let Some(file) = file_table.get(*id) {
-                let mut writer = std::io::BufWriter::new(file);
-                writer.write_all(line.as_bytes()).is_ok()
-            } else {
-                eprintln!("write: failed to write to port");
-                false
-            }
-        }
-        PortKind::StringPortOutput { content } => {
-            content.push_str(line);
-            true
-        }
-        _ => false,
-    }
-}
-
-/// Read a single character from the current input port.
-///
-/// This function reads one character from the current port.
-/// For string ports, it advances the position pointer after reading.
-///
-pub fn read_char(port_kind: &PortKind, file_table: &mut FileTable) -> Option<char> {
-    match port_kind {
-        PortKind::Stdin => stdin_next_char(),
-        PortKind::Stdout => None,
-        PortKind::Stderr => None,
-        PortKind::File { id, pos, .. } => {
-            if let Some(file) = file_table.get(*id) {
-                let mut reader = std::io::BufReader::new(file);
-                let mut buf = [0u8; 1];
-                match reader.read_exact(&mut buf) {
-                    Ok(_) => {
-                        pos.set(pos.get() + 1);
-                        Some(buf[0] as char)
-                    }
-                    Err(_) => None,
-                }
-            } else {
-                None
-            }
-        }
-        PortKind::StringPortInput { content, pos, .. } => {
-            let current_pos = pos.get();
-            if current_pos < content.len() {
-                let ch = content[current_pos..].chars().next().unwrap();
-                pos.set(current_pos + ch.len_utf8());
-                Some(ch)
-            } else {
-                None
-            }
-        }
-        PortKind::StringPortOutput { .. } => None,
-    }
-}
-
-/// Write a single character to the current output port.
-///
-/// This function writes one character to the current port.
-/// For stdout ports, the character is printed to the console.
-/// For file ports, the character is written to the file.
-///
-pub fn write_char(port_kind: &PortKind, file_table: &mut FileTable, ch: char) -> bool {
-    match port_kind {
-        PortKind::Stdout => {
-            print!("{}", ch); // see write_line: no per-call flush
-            true
-        }
-        PortKind::File { id, .. } => {
-            if let Some(file) = file_table.get(*id) {
-                let mut writer = std::io::BufWriter::new(file);
-                writer.write_all(ch.to_string().as_bytes()).is_ok()
-            } else {
-                false
-            }
-        }
-        PortKind::StringPortOutput { .. } => {
-            // This will be fixed later by using RefCell
-            todo!()
-        }
-        _ => false,
-    }
-}
-
-/// Peek at the next character from the input port without consuming it.
-///
-/// This function returns the next character that would be read by `read_char`,
-/// but it does not advance the port's position.
-///
-/// Currently only supported for String ports.
-pub fn peek_char(port_kind: &PortKind, _file_table: &mut FileTable) -> Option<char> {
-    match port_kind {
-        PortKind::StringPortInput { content, pos, .. } => {
-            let p = pos.get();
-            if p >= content.len() {
-                None
-            } else {
-                content[p..].chars().next()
-            }
-        }
-        _ => None, // Not supported for other types yet
-    }
-}
-
-/// Check if a character is ready on the input port.
-///
-/// Returns `true` if a character is available for reading without blocking,
-/// and `false` otherwise.
-pub fn char_ready(port_kind: &PortKind) -> bool {
-    match port_kind {
-        PortKind::StringPortInput { content, pos, .. } => pos.get() < content.len(),
-        PortKind::File { .. } => true, // Assume file is always ready until EOF
-        PortKind::Stdin => false,      // Stdin blocking check not supported
-        _ => false,
-    }
-}
-
 /// Create a new string port for in-memory string I/O.
 ///
 /// String ports allow reading from a string as if it were a file, with
@@ -418,72 +255,3 @@ pub fn new_string_port_input(content: &str) -> PortKind {
     }
 }
 
-/// Create a new output string port for in-memory string output.
-///
-/// Output string ports allow writing to a string as if it were a file,
-/// accumulating content that can be retrieved later.
-///
-pub fn new_output_string_port() -> PortKind {
-    PortKind::StringPortOutput {
-        content: String::new(),
-    }
-}
-
-/// Get the content from an output string port.
-///
-/// This function retrieves the accumulated content from a string output port.
-/// It should only be called on ports that are output string ports.
-///
-pub fn get_output_string(port_kind: &mut PortKind) -> String {
-    match port_kind {
-        PortKind::StringPortOutput { content } => content.clone(),
-        _ => String::new(),
-    }
-}
-
-/// Update the position of a string port safely.
-/// This function should be called through the GC heap accessor.
-pub fn update_string_port_pos(port_kind: &mut PortKind, new_pos: usize) -> bool {
-    match port_kind {
-        PortKind::StringPortInput { pos, .. } => {
-            pos.set(new_pos);
-            true
-        }
-        _ => false,
-    }
-}
-
-/// Extract a PortKind from aScheme port
-pub fn port_kind_from_scheme_port(rt: &mut RunTime, scheme_port: GcRef) -> Result<PortKind, String> {
-    let s_p = rt.heap.get_value(scheme_port);
-    match s_p {
-        crate::gc::SchemeValue::Port(kind) => Ok((**kind).clone()),
-        _ => Err(format!(
-            "expected a port, got {}",
-            crate::printer::print_value(&scheme_port)
-        )),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_port_conversion() {
-        let mut runtime = crate::eval::RunTimeStruct::new();
-        let mut rt = RunTime::from_eval(&mut runtime);
-
-        let orig_port_kind = PortKind::StringPortInput {
-            content: "hello".to_string(),
-            pos: Cell::new(0),
-            fold_case: Cell::new(false),
-        };
-        //let original_port = crate::gc::new_port(&mut heap, port_kind);
-
-        let scheme_port = crate::gc::new_port(&mut rt.heap, orig_port_kind.clone());
-        let converted_port = port_kind_from_scheme_port(&mut rt, scheme_port).unwrap();
-
-        assert_eq!(&orig_port_kind, &converted_port);
-    }
-}

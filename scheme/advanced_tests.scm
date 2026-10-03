@@ -184,14 +184,14 @@
 
 (display "          === Testing read ===")
 (newline)
-(test-equal '(list a 2 3) (read) "Reading a list")
-(list a 2 3)
-(test-equal 22 (read) "Reading an integer")
-22
-(test-equal [1 2 3] (read) "Reading a vector")
-[1 2 3]
-(test-equal "a string" (read) "Reading a string")
-"a string"
+;; read takes its data from a string port: with no port it reads the
+;; current input port, which is standard input (not the file being loaded).
+(define read-source (open-input-string "(list a 2 3) 22 [1 2 3] \"a string\""))
+(test-equal '(list a 2 3) (read read-source) "Reading a list")
+(test-equal 22 (read read-source) "Reading an integer")
+(test-equal [1 2 3] (read read-source) "Reading a vector")
+(test-equal "a string" (read read-source) "Reading a string")
+(test-equal #t (eof-object? (read read-source)) "Reading at end of input")
 
 (display "          === Testing delay and force ===")
 (newline)

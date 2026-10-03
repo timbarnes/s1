@@ -260,7 +260,7 @@ mod tests {
         let alias = rt.heap.make_alias(z, def_env);
 
         let collect = |rt: &mut RunTime, roots: &[GcRef]| {
-            rt.heap.collect_garbage(&state, *rt.current_output_port, rt.port_stack, &[], roots, *rt.handlers);
+            rt.heap.collect_garbage(&state, &rt.current_ports[..], rt.port_stack, &[], roots, *rt.handlers);
         };
 
         // Alias rooted: the entry, its environment and the value survive.

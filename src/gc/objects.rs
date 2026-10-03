@@ -37,7 +37,6 @@ pub fn eq(heap: &GcHeap, a: GcRef, b: GcRef) -> bool {
             (SchemeValue::Symbol(a), SchemeValue::Symbol(b)) => a == b,
             (SchemeValue::Bool(a), SchemeValue::Bool(b)) => a == b,
             (SchemeValue::Char(a), SchemeValue::Char(b)) => a == b,
-            (SchemeValue::Port(a), SchemeValue::Port(b)) => a == b,
             (SchemeValue::Nil, SchemeValue::Nil) => true,
             (SchemeValue::Eof, SchemeValue::Eof) => true,
             (SchemeValue::Void, SchemeValue::Void) => true,

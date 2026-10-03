@@ -946,7 +946,7 @@ mod tests {
 
         let collect = |rt: &mut RunTime, roots: &[GcRef]| {
             rt.heap
-                .collect_garbage(&state, *rt.current_output_port, rt.port_stack, &[], roots, *rt.handlers);
+                .collect_garbage(&state, &rt.current_ports[..], rt.port_stack, &[], roots, *rt.handlers);
         };
         // Only the use form is rooted: the entry keeps transformer and
         // expansion (and the expansion's aliases) alive.

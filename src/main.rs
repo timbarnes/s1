@@ -5,6 +5,7 @@ mod gc;
 mod io;
 mod number_syntax;
 mod parser;
+mod ports;
 mod printer;
 mod special_forms;
 mod syntax_rules;
@@ -154,7 +155,7 @@ fn repl(rt: &mut RunTime, state: &mut CEKState, quit_after_load: bool, global: E
                                 println!("=> {}", print_value(&v));
                                 rt.heap.collect_garbage(
                                     &state,
-                                    *rt.current_output_port,
+                                    &rt.current_ports[..],
                                     &rt.port_stack,
                                     &rt.dynamic_wind,
                                     &rt.arg_stack,
