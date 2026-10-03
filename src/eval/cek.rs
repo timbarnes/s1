@@ -776,18 +776,8 @@ fn handle_eval_arg(
     }
     match gc_value!(remaining_exprs) {
         Nil => {
-            let evaluated_args = Rc::new(ec.arg_stack.split_off(args_base as usize + 1));
-            let proc = ec
-                .arg_stack
-                .pop()
-                .expect("EvalArg: operator missing from arg_stack");
-            state.kont = Rc::new(Kont::ApplyProc {
-                proc,
-                evaluated_args,
-                next,
-            });
             state.tail = tail;
-            apply_proc(state, ec)?;
+            apply_from_stack(state, ec, args_base as usize, next)?;
         }
         Pair(head, rest) => {
             state.control = Control::Expr(*head);
@@ -1139,6 +1129,51 @@ pub fn enter_closure(state: &mut CEKState, ec: &mut RunTime, new_env: EnvRef, bo
         // their own. (Forms inside the body inherit this.)
         state.tail = true;
     }
+}
+
+/// Apply the procedure at `arg_stack[base]` to the arguments above it,
+/// continuing to `next`, and pop them all. Closures and built-ins, nearly
+/// every call, are applied straight from the stack; that saves an
+/// `ApplyProc` frame and a copy of the arguments per call. Anything else
+/// goes through `apply_proc`.
+fn apply_from_stack(
+    state: &mut CEKState,
+    ec: &mut RunTime,
+    base: usize,
+    next: KontRef,
+) -> Result<(), String> {
+    let proc = ec.arg_stack[base];
+    match gc_value!(proc).as_callable() {
+        Some(Callable::Closure { params, body, env, .. }) => {
+            let bound = bind_params(&params[..], &ec.arg_stack[base + 1..], env, ec.heap);
+            ec.arg_stack.truncate(base);
+            enter_closure(state, ec, bound?, *body, next);
+        }
+        Some(Callable::Builtin { func, .. }) => {
+            let result = func(ec.heap, &ec.arg_stack[base + 1..]);
+            ec.arg_stack.truncate(base);
+            // On error, post_error has already halted the machine; setting
+            // `next` here as well would resume the caller with a void value.
+            match result {
+                Err(err) => post_error(state, ec, &err),
+                Ok(value) => {
+                    state.control = Control::Value(value);
+                    state.kont = next;
+                }
+            }
+        }
+        _ => {
+            let evaluated_args = Rc::new(ec.arg_stack.split_off(base + 1));
+            ec.arg_stack.truncate(base);
+            state.kont = Rc::new(Kont::ApplyProc {
+                proc,
+                evaluated_args,
+                next,
+            });
+            apply_proc(state, ec)?;
+        }
+    }
+    Ok(())
 }
 
 /// Process Builtin, SysBuiltin, and Closure applications. Arguments are already evaluated.

@@ -17,7 +17,6 @@ use crate::gc::{
 use crate::gc_value;
 use crate::register_special_form;
 use crate::utilities::post_error;
-use rustc_hash::FxHashMap as HashMap;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -150,17 +149,8 @@ fn create_lambda_or_macro(
     // Transform internal defines to letrec
     let wrapped_body = transform_internal_defines(body_forms, ec.heap)?;
 
-    // Intern and preserve parameter symbols
-    let mut param_map = HashMap::default();
-    for param in params {
-        match &ec.heap.get_value(*param) {
-            SchemeValue::Symbol(name) => {
-                param_map.insert(name.clone(), *param);
-            }
-            _ => {
-                return Err("lambda: parameter must be a symbol".to_string());
-            }
-        }
+    if !params.iter().all(|p| is_symbol(*p)) {
+        return Err("lambda: parameter must be a symbol".to_string());
     }
 
     let captured_frame = env;

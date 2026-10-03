@@ -230,10 +230,11 @@ pub fn bind_params(
                 new_env.define(params[i + 1], args[i]);
             }
 
-            // Bind the rest parameter.
-            let rest_args = &args[num_required..];
-            let arglist = list_from_slice(rest_args, heap);
-            new_env.define(params[0], arglist);
+            // Bind the rest parameter, if there is one.
+            if !matches!(heap.get_value(params[0]), SchemeValue::Nil) {
+                let arglist = list_from_slice(&args[num_required..], heap);
+                new_env.define(params[0], arglist);
+            }
         }
     }
     Ok(new_env)
