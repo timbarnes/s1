@@ -48,6 +48,8 @@ pub fn register_port_builtins(rt: &mut RunTime, env: EnvRef) {
         "newline" => newline_sp,
         "write-char" => write_char_sp,
         "write-string" => write_string_sp,
+        "write-u8" => write_u8_sp,
+        "write-bytevector" => write_bytevector_sp,
         "flush-output-port" => flush_output_port_sp,
         "flush-output" => flush_output_port_sp,
         "push-port!" => push_port_sp,
@@ -66,6 +68,14 @@ pub fn register_port_builtins(rt: &mut RunTime, env: EnvRef) {
         "open-input-string" => (open_input_string, "(open-input-string string) Returns a textual input port reading string"),
         "open-output-string" => (open_output_string, "(open-output-string) Returns a textual output port that accumulates a string"),
         "get-output-string" => (get_output_string, "(get-output-string port) Returns the string written to an open-output-string port so far"),
+        "open-input-bytevector" => (open_input_bytevector, "(open-input-bytevector bytevector) Returns a binary input port reading the bytes"),
+        "open-output-bytevector" => (open_output_bytevector, "(open-output-bytevector) Returns a binary output port that accumulates bytes"),
+        "get-output-bytevector" => (get_output_bytevector, "(get-output-bytevector port) Returns the bytes written to an open-output-bytevector port so far"),
+        "read-u8" => (read_u8, "(read-u8 port) Returns the next byte from a binary input port, or the eof object"),
+        "peek-u8" => (peek_u8, "(peek-u8 port) Returns the next byte without consuming it, or the eof object"),
+        "u8-ready?" => (u8_ready, "(u8-ready? port) Returns #t if a byte can be read without waiting"),
+        "read-bytevector" => (read_bytevector, "(read-bytevector k port) Returns up to k bytes as a bytevector, or the eof object"),
+        "read-bytevector!" => (read_bytevector_into, "(read-bytevector! bv port [start [end]]) Reads bytes into bv; returns the count, or the eof object"),
         "file-exists?" => (file_exists_q, "(file-exists? filename) Returns #t if the file exists"),
         "%check-input-port" => (check_input_port, "(%check-input-port obj) Internal: current-input-port's parameter converter"),
         "%check-output-port" => (check_output_port, "(%check-output-port obj) Internal: the output port parameters' converter"),
@@ -512,6 +522,49 @@ fn flush_output_port_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, 
 }
 
 // ---------------------------------------------------------------------------
+// Binary output (needs the file table, so these are sys-builtins)
+// ---------------------------------------------------------------------------
+
+/// Write bytes to a binary output port.
+fn put_bytes(rt: &mut RunTime, port: GcRef, bytes: &[u8], who: &str) -> Result<(), String> {
+    match port_mut(port, who)? {
+        PortKind::BytevectorOutput { bytes: out } => out.extend_from_slice(bytes),
+        PortKind::FileOutput { id, binary: true, name } => {
+            let file = rt.file_table.get(*id).ok_or_else(|| format!("{}: file {} is not open", who, name))?;
+            file.write_all(bytes)
+                .map_err(|e| format!("{}: could not write to {}: {}", who, name, e))?;
+        }
+        PortKind::Closed { .. } => return Err(closed_error(who)),
+        _ => return Err(format!("{}: not a binary output port", who)),
+    }
+    Ok(())
+}
+
+fn write_u8_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: KontRef) -> Result<(), String> {
+    arity(args, 1, 2, "write-u8")?;
+    let byte = match gc_value!(args[0]) {
+        SchemeValue::Int(i) => num_traits::ToPrimitive::to_u8(i),
+        _ => None,
+    }
+    .ok_or("write-u8: expected a byte (exact integer 0-255)")?;
+    put_bytes(rt, port_or_current(rt, args, 1, OUTPUT), &[byte], "write-u8")?;
+    done(state, rt.heap.void(), next)
+}
+
+/// (write-bytevector bv [port [start [end]]])
+fn write_bytevector_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: KontRef) -> Result<(), String> {
+    arity(args, 1, 4, "write-bytevector")?;
+    let bv = match gc_value!(args[0]) {
+        SchemeValue::Bytevector(b) => b,
+        _ => return Err("write-bytevector: expected a bytevector".to_string()),
+    };
+    let (start, end) = crate::builtin::range_args(args, 2, bv.len(), "write-bytevector")?;
+    let bytes = bv[start..end].to_vec();
+    put_bytes(rt, port_or_current(rt, args, 1, OUTPUT), &bytes, "write-bytevector")?;
+    done(state, rt.heap.void(), next)
+}
+
+// ---------------------------------------------------------------------------
 // Loading support: the REPL reads forms from the port on top of this stack
 // ---------------------------------------------------------------------------
 
@@ -596,4 +649,120 @@ fn file_exists_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     arity(args, 1, 1, "file-exists?")?;
     let name = string_arg(args[0], "file-exists?")?;
     Ok(new_bool(heap, std::path::Path::new(name).exists()))
+}
+
+// ---------------------------------------------------------------------------
+// Bytevector ports and binary input
+// ---------------------------------------------------------------------------
+
+fn open_input_bytevector(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 1, 1, "open-input-bytevector")?;
+    let bytes = match gc_value!(args[0]) {
+        SchemeValue::Bytevector(b) => b.clone(),
+        _ => return Err("open-input-bytevector: expected a bytevector".to_string()),
+    };
+    Ok(new_port(heap, PortKind::BytevectorInput { bytes, pos: 0 }))
+}
+
+fn open_output_bytevector(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 0, 0, "open-output-bytevector")?;
+    Ok(new_port(heap, PortKind::BytevectorOutput { bytes: Vec::new() }))
+}
+
+fn get_output_bytevector(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 1, 1, "get-output-bytevector")?;
+    match port_mut(args[0], "get-output-bytevector")? {
+        PortKind::BytevectorOutput { bytes } => {
+            let copy = bytes.clone();
+            Ok(crate::gc::new_bytevector(heap, copy))
+        }
+        _ => Err("get-output-bytevector: not a port made by open-output-bytevector".to_string()),
+    }
+}
+
+/// The unread bytes of a binary input port, and its position to advance.
+fn binary_input(port: GcRef, who: &str) -> Result<(&'static [u8], &'static mut usize), String> {
+    match port_mut(port, who)? {
+        PortKind::BytevectorInput { bytes, pos } => Ok((&bytes[..], pos)),
+        PortKind::Closed { .. } => Err(closed_error(who)),
+        _ => Err(format!("{}: not a binary input port", who)),
+    }
+}
+
+fn byte_or_eof(heap: &mut GcHeap, b: Option<u8>) -> GcRef {
+    match b {
+        Some(b) => crate::gc::new_int(heap, num_bigint::BigInt::from(b)),
+        None => heap.eof(),
+    }
+}
+
+/// The port argument of a binary input procedure. There is no binary
+/// current input port, so it is required.
+fn binary_port_arg(args: &[GcRef], i: usize, who: &str) -> Result<GcRef, String> {
+    args.get(i).copied().ok_or_else(|| format!("{}: expects a binary input port", who))
+}
+
+fn read_u8(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 0, 1, "read-u8")?;
+    let (bytes, pos) = binary_input(binary_port_arg(args, 0, "read-u8")?, "read-u8")?;
+    let b = bytes.get(*pos).copied();
+    if b.is_some() {
+        *pos += 1;
+    }
+    Ok(byte_or_eof(heap, b))
+}
+
+fn peek_u8(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 0, 1, "peek-u8")?;
+    let (bytes, pos) = binary_input(binary_port_arg(args, 0, "peek-u8")?, "peek-u8")?;
+    let b = bytes.get(*pos).copied();
+    Ok(byte_or_eof(heap, b))
+}
+
+fn u8_ready(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 0, 1, "u8-ready?")?;
+    binary_input(binary_port_arg(args, 0, "u8-ready?")?, "u8-ready?")?;
+    Ok(new_bool(heap, true))
+}
+
+/// (read-bytevector k port)
+fn read_bytevector(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 1, 2, "read-bytevector")?;
+    let k = match gc_value!(args[0]) {
+        SchemeValue::Int(i) => num_traits::ToPrimitive::to_usize(i),
+        _ => None,
+    }
+    .ok_or("read-bytevector: the count must be a non-negative exact integer")?;
+    let (bytes, pos) = binary_input(binary_port_arg(args, 1, "read-bytevector")?, "read-bytevector")?;
+    let available = bytes.len() - *pos;
+    if available == 0 && k > 0 {
+        return Ok(heap.eof());
+    }
+    let n = k.min(available);
+    let out = bytes[*pos..*pos + n].to_vec();
+    *pos += n;
+    Ok(crate::gc::new_bytevector(heap, out))
+}
+
+/// (read-bytevector! bv port [start [end]]): the number of bytes read into
+/// bv starting at start, or the eof object if none were available.
+fn read_bytevector_into(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    arity(args, 1, 4, "read-bytevector!")?;
+    let target_len = match gc_value!(args[0]) {
+        SchemeValue::Bytevector(b) => b.len(),
+        _ => return Err("read-bytevector!: expected a bytevector".to_string()),
+    };
+    let (start, end) = crate::builtin::range_args(args, 2, target_len, "read-bytevector!")?;
+    let (bytes, pos) = binary_input(binary_port_arg(args, 1, "read-bytevector!")?, "read-bytevector!")?;
+    let available = bytes.len() - *pos;
+    if available == 0 && end > start {
+        return Ok(heap.eof());
+    }
+    let n = (end - start).min(available);
+    let src = bytes[*pos..*pos + n].to_vec();
+    *pos += n;
+    if let SchemeValue::Bytevector(target) = gc_value_mut!(args[0]) {
+        target[start..start + n].copy_from_slice(&src);
+    }
+    Ok(crate::gc::new_int(heap, num_bigint::BigInt::from(n)))
 }
