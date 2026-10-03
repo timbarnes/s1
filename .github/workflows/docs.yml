@@ -1,0 +1,47 @@
+# Build the internal docs with `cargo doc` and publish them on GitHub Pages
+# at https://timbarnes.github.io/s1/ on every push to main.
+# .cargo/config.toml turns on --document-private-items.
+name: Docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a newer push waits rather than cancelling.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build docs
+        run: cargo doc --no-deps
+      - name: Add a root page that redirects to the crate
+        run: |
+          echo '<meta http-equiv="refresh" content="0; url=s1/index.html">' > target/doc/index.html
+          # rustdoc's lock file isn't readable by the artifact upload.
+          rm -f target/doc/.lock
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/doc
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
