@@ -37,6 +37,8 @@ pub struct Library {
 #[derive(Default)]
 pub struct Libraries {
     table: HashMap<LibraryName, Library>,
+    /// Library files already loaded: each is loaded at most once per run.
+    loaded: HashSet<std::path::PathBuf>,
 }
 
 impl Libraries {
@@ -46,6 +48,14 @@ impl Libraries {
 
     pub fn insert(&mut self, name: LibraryName, library: Library) {
         self.table.insert(name, library);
+    }
+
+    pub fn is_loaded(&self, path: &std::path::Path) -> bool {
+        self.loaded.contains(path)
+    }
+
+    pub fn mark_loaded(&mut self, path: std::path::PathBuf) {
+        self.loaded.insert(path);
     }
 
     pub fn names(&self) -> Vec<LibraryName> {
@@ -325,6 +335,9 @@ pub fn import_sf(expr: GcRef, ec: &mut crate::eval::RunTime, state: &mut crate::
         return Err("import: this environment is immutable".to_string());
     }
     let sets = crate::gc::list_to_vec(ec.heap, crate::gc::cdr(expr)?)?;
+    if load_then_retry(ec, state, &sets, expr, "import")? {
+        return Ok(());
+    }
     let mut bindings = Vec::new();
     for set in sets {
         bindings.extend(resolve_import_set(ec.heap, set, "import")?);
@@ -586,6 +599,9 @@ pub fn define_library_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) ->
     library_name(parts[1], who)?;
     let mut decls = Declarations::default();
     collect_declarations(ec.heap, &parts[2..], &mut decls)?;
+    if load_then_retry(ec, state, &decls.imports, expr, who)? {
+        return Ok(());
+    }
 
     // Imports. Importing one name with two different bindings is an error.
     let env = Frame::new_top_level(true);
@@ -670,4 +686,148 @@ fn register_library_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState, n
     state.control = Control::Value(ec.heap.unspecified());
     state.kont = next;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Library files
+
+/// The directories searched for library files: those in `S1_LIBRARY_PATH`
+/// (colon separated), then the current directory, then `scheme/lib`.
+fn search_path() -> Vec<std::path::PathBuf> {
+    let mut dirs: Vec<std::path::PathBuf> = std::env::var("S1_LIBRARY_PATH")
+        .map(|p| p.split(':').filter(|d| !d.is_empty()).map(std::path::PathBuf::from).collect())
+        .unwrap_or_default();
+    dirs.push(".".into());
+    dirs.push("scheme/lib".into());
+    dirs
+}
+
+/// The file a library is looked for in: its name parts joined by `/`, with
+/// `.sld` appended.
+fn library_file(name: &LibraryName) -> String {
+    format!("{}.sld", name.join("/"))
+}
+
+fn find_library_file(name: &LibraryName) -> Option<std::path::PathBuf> {
+    let file = library_file(name);
+    search_path().into_iter().map(|dir| dir.join(&file)).find(|path| path.is_file())
+}
+
+/// The library name an import set ultimately refers to.
+fn import_set_library(heap: &GcHeap, set: GcRef) -> Option<GcRef> {
+    let mut set = set;
+    loop {
+        let SchemeValue::Pair(head, rest) = gc_value!(set) else { return None };
+        let modifier = matches!(identifier_name(heap, *head).as_str(), "only" | "except" | "prefix" | "rename");
+        match gc_value!(*rest) {
+            SchemeValue::Pair(inner, _) if modifier => set = *inner,
+            _ => return Some(set),
+        }
+    }
+}
+
+/// If any library the import sets name is unregistered but has a file on
+/// the search path that hasn't been loaded, arrange to load those files and
+/// then evaluate `expr` again, returning true. A library whose file was
+/// loaded without defining it is an error. Libraries with no file are left
+/// for the caller to report as unknown.
+fn load_then_retry(ec: &mut RunTime, state: &mut CEKState, sets: &[GcRef], expr: GcRef, who: &str) -> Result<bool, String> {
+    let mut to_load = Vec::new();
+    for set in sets {
+        let Some(name_datum) = import_set_library(ec.heap, *set) else { continue };
+        let Ok(name) = library_name(name_datum, who) else { continue };
+        if ec.heap.libraries.get(&name).is_some() {
+            continue;
+        }
+        let Some(path) = find_library_file(&name) else { continue };
+        if ec.heap.libraries.is_loaded(&path) {
+            return Err(format!("{}: {} does not define {}", who, path.display(), format_name(&name)));
+        }
+        if !to_load.contains(&path) {
+            to_load.push(path);
+        }
+    }
+    if to_load.is_empty() {
+        return Ok(false);
+    }
+    // (begin (%load-library "path") ... expr)
+    let load = crate::gc::new_sys_builtin(ec, "%load-library", load_library_sp, "%load-library: sys-builtin".to_string());
+    let mut forms = Vec::new();
+    for path in to_load {
+        let path = new_string(ec.heap, &path.to_string_lossy());
+        forms.push(list_from_slice(&[load, path], ec.heap));
+    }
+    forms.push(expr);
+    let begin = ec.heap.core_form("begin");
+    let body = list_from_slice(&forms, ec.heap);
+    let begin_form = crate::gc::new_pair(ec.heap, begin, body);
+    crate::eval::insert_eval(state, begin_form, state.tail);
+    Ok(true)
+}
+
+/// (%load-library "path"): evaluate a library file's forms in the
+/// interaction environment, marking it loaded first so that it is loaded at
+/// most once (and a library that imports itself can't loop). Relative file
+/// names in the `include` declarations of its `define-library` forms are
+/// made relative to the file's directory.
+fn load_library_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: KontRef) -> Result<(), String> {
+    let [path] = args else {
+        return Err("%load-library: expects a file name".to_string());
+    };
+    let SchemeValue::Str(path) = gc_value!(*path) else {
+        return Err("%load-library: expects a file name".to_string());
+    };
+    let path = std::path::PathBuf::from(path);
+    ec.heap.libraries.mark_loaded(path.clone());
+    let dir = path.parent().map(|d| d.to_path_buf()).unwrap_or_default();
+    let forms = read_file_forms(ec.heap, &path.to_string_lossy(), false, "import")?;
+    let mut rewritten = Vec::with_capacity(forms.len());
+    for form in forms {
+        rewritten.push(relocate_includes(ec.heap, form, &dir));
+    }
+    let env = ec.heap.interaction_env().ok_or("%load-library: no interaction environment")?;
+    state.kont = std::rc::Rc::new(Kont::RestoreEnv { old_env: state.env.clone(), next });
+    state.env = env;
+    state.tail = false;
+    if rewritten.is_empty() {
+        state.control = Control::Value(ec.heap.unspecified());
+    } else {
+        let begin = ec.heap.core_form("begin");
+        let body = list_from_slice(&rewritten, ec.heap);
+        state.control = Control::Expr(crate::gc::new_pair(ec.heap, begin, body));
+    }
+    Ok(())
+}
+
+/// `form`, if it is a `define-library`, with the relative file names in its
+/// include, include-ci and include-library-declarations declarations joined
+/// to `dir`; otherwise `form` itself.
+fn relocate_includes(heap: &mut GcHeap, form: GcRef, dir: &std::path::Path) -> GcRef {
+    let Ok(parts) = crate::gc::list_to_vec(heap, form) else { return form };
+    if parts.len() < 2 || identifier_name(heap, parts[0]) != "define-library" {
+        return form;
+    }
+    let mut new_parts = parts[..2].to_vec();
+    for decl in &parts[2..] {
+        let decl_parts = crate::gc::list_to_vec(heap, *decl).unwrap_or_default();
+        let is_include = decl_parts.first().is_some_and(|k| {
+            matches!(identifier_name(heap, *k).as_str(), "include" | "include-ci" | "include-library-declarations")
+        });
+        if !is_include {
+            new_parts.push(*decl);
+            continue;
+        }
+        let mut relocated = vec![decl_parts[0]];
+        for file in &decl_parts[1..] {
+            match gc_value!(*file) {
+                SchemeValue::Str(name) if std::path::Path::new(name).is_relative() => {
+                    let joined = dir.join(name).to_string_lossy().into_owned();
+                    relocated.push(new_string(heap, &joined));
+                }
+                _ => relocated.push(*file),
+            }
+        }
+        new_parts.push(list_from_slice(&relocated, heap));
+    }
+    list_from_slice(&new_parts, heap)
 }

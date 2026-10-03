@@ -2,7 +2,7 @@
 
 # Libraries and environments: design (phase 9)
 
-Status: in progress. Steps 9a to 9d are implemented; the rest is design.
+Status: in progress. Steps 9a to 9e are implemented; the rest is design.
 Built on the binding cells of commit 7300841 (`BindingCell` in `src/env.rs`).
 
 ## Goal
@@ -215,6 +215,12 @@ not define (foo bar)"). A file is loaded at most once per run.
 
 Because `import` runs inside the machine, loading the file before binding is
 done by rewriting the import: `(begin (%load-library "path") (import ...))`.
+`define-library`'s own imports are handled the same way. A file is marked
+loaded before it is evaluated, so a library that imports itself can't loop.
+As built, `include` file names in a library file's `define-library` are made
+relative to the file's directory by rewriting them as the file is read, which
+needs no "current file" state. `environment`, a plain procedure, doesn't
+search for files.
 
 ## Steps
 

@@ -257,3 +257,28 @@
 (delete-file include-test-file)
 (delete-file include-ci-file)
 (delete-file include-decl-file)
+
+(display "          === Testing library files ===")
+(newline)
+
+;; The fixtures are in tests/libs, found through the current directory.
+(import (tests libs uses-greet))
+(test-equal '("hello, a" "hello, a") (greet-twice "a")
+    "a library file found on the search path, importing another")
+(import (tests libs greet))
+(test-equal "hello, b" (greet "b") "the library it imported was loaded too")
+(test-equal #t (and (member '(tests libs greet) (library-names)) #t) "and registered")
+
+;; A file loaded without defining its library is an error, and isn't loaded
+;; again. (The count survives this file being run twice, under GC stress.)
+(define sld-load-count (guard (e (#t 0)) sld-load-count))
+(test-equal "import: ./tests/libs/wrong-name.sld does not define (tests libs wrong-name)"
+    (guard (e (#t (error-object-message e))) (eval '(import (tests libs wrong-name)) (interaction-environment)))
+    "a library file that doesn't define its library")
+(test-equal "import: ./tests/libs/wrong-name.sld does not define (tests libs wrong-name)"
+    (guard (e (#t (error-object-message e))) (eval '(import (tests libs wrong-name)) (interaction-environment)))
+    "the same error again")
+(test-equal 1 sld-load-count "the file was loaded once")
+(test-equal "import: unknown library (tests libs no-such-file)"
+    (guard (e (#t (error-object-message e))) (eval '(import (tests libs no-such-file)) (interaction-environment)))
+    "a library with no file")

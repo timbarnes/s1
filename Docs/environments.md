@@ -71,9 +71,21 @@ count                 ; => 1: importers see the library's assignments
 * An exported `syntax-rules` macro may use the library's unexported definitions, and may assign the library's variables.
 * Exporting a name the body never defines is an error, and a library whose body raises an error isn't registered, so it can be corrected and evaluated again.
 * `define-library` is allowed only at top level. Evaluating it again replaces the library for later imports; existing importers keep the variables they imported.
-* Files named in `include` declarations are relative to the current directory.
+* Files named in `include` declarations are relative to the library file's directory when the library was loaded from a file (below), and otherwise to the current directory.
 
-`cond-expand` declarations, and finding libraries in files, come in phase 9e and 9f.
+`cond-expand` declarations come in phase 9f.
+
+## Library files
+
+When `import` (or a library's `import` declaration) names a library that isn't registered, s1 looks for a file named after it: the name's parts joined by `/`, with `.sld` added, so `(foo bar)` is `foo/bar.sld`. It searches, in order:
+
+1. the directories in the environment variable `S1_LIBRARY_PATH`, separated by colons;
+2. the current directory;
+3. `scheme/lib`.
+
+The first file found is evaluated in the interaction environment, normally defining the library with `define-library`, and the import goes ahead. A library file may itself import libraries from files.
+
+Each file is loaded at most once per run. If it doesn't define the library its name implies, the import is an error (`import: ./foo/bar.sld does not define (foo bar)`), and importing again gives the same error without reloading. After fixing such a file, `(load "foo/bar.sld")` loads it again. `environment` uses only registered libraries; it doesn't search for files.
 
 ## `include` and `include-ci`
 
