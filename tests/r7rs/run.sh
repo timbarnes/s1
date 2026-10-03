@@ -39,6 +39,16 @@ if [[ -z "${S1_BIN:-}" ]]; then
     S1_BIN="$root/target/release/s1"
 fi
 
+# GNU timeout, or gtimeout (Homebrew coreutils) on macOS; without either,
+# sections run with no time limit.
+if command -v timeout >/dev/null; then
+    with_timeout() { timeout "$timeout_secs" "$@"; }
+elif command -v gtimeout >/dev/null; then
+    with_timeout() { gtimeout "$timeout_secs" "$@"; }
+else
+    with_timeout() { "$@"; }
+fi
+
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 echo '(%r7rs-summary)' > "$work/summary.scm"
@@ -82,7 +92,7 @@ for f in "$work"/section-*.scm; do
     expected="$(expected_tests "$f")"
     echo ";;;; ==== $name" >> "$log"
     status=0
-    out="$(timeout "$timeout_secs" "$S1_BIN" -f "$work/header.scm" -f "$shim" -f "$f" -f "$work/summary.scm" -q 2>&1 </dev/null)" \
+    out="$(with_timeout "$S1_BIN" -f "$work/header.scm" -f "$shim" -f "$f" -f "$work/summary.scm" -q 2>&1 </dev/null)" \
         || status=$?
     printf '%s\n' "$out" >> "$log"
 

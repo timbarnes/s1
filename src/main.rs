@@ -173,7 +173,7 @@ fn main() {
 
     // Load each file in order, then the script
     for filename in args.file.iter().chain(script.iter()) {
-        startup_commands.push(format!("(push-port! (open-input-file \"{}\"))", filename));
+        startup_commands.push(format!("(push-port! (open-input-file {}))", string_literal(filename)));
     }
 
     // Execute startup commands in reverse to build the port stack correctly
@@ -183,6 +183,12 @@ fn main() {
 
     // Drop into the REPL
     repl(&mut rt, &mut state, args.quit || script.is_some(), env);
+}
+
+/// `s` as a Scheme string literal, so that a file name with backslashes (as
+/// on Windows) or quotes reads back unchanged.
+fn string_literal(s: &str) -> String {
+    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 /// Evaluate a command needed at startup; exit if it fails.

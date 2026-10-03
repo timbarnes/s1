@@ -12,8 +12,7 @@ fn script(name: &str, source: &str) -> PathBuf {
     path
 }
 
-/// Run s1 with `args`, from the package root (s1 loads scheme/s1-core.scm
-/// relative to the current directory), with standard input closed.
+/// Run s1 with `args`, from the package root, with standard input closed.
 fn s1(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_s1"))
         .args(args)
