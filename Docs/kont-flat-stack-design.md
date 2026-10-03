@@ -1,5 +1,9 @@
 # F10(3): Replacing the `Rc<Kont>` Chain with a Flat Stack
 
+**Status, 2026-10-03: shelved.** See "Re-evaluation, 2026-10-03" at the end:
+the problem that motivated it is fixed another way, what it would still
+gain is small, and this design's premise no longer holds.
+
 Designed 2026-09-18, not yet implemented. Written before touching code, per
 this project's own practice (see nested-evaluation.md, gc-nursery-removal.md).
 Companion question answered at the end: is the current test suite adequate
@@ -329,3 +333,39 @@ dynamic-wind's extent (re-running both `before` and `after`, not just
 the same file. Full suite verified at 795/795 (up from 698) at the default
 threshold and at `gc-threshold` 1/5/20/200/2000 with `S1_GC_POISON=1`.
 F10(3) implementation itself has not started.
+
+## Re-evaluation, 2026-10-03
+
+Reviewed before starting the implementation, after the precompilation steps
+and phases 9-11. Measured on linux/x86-64.
+
+* **The premise is out of date.** This design assumes `call/cc` is
+  escape-only and filters frames at capture (`capture_call_site_kont`).
+  It no longer does. `call/cc` now captures the whole chain by sharing it,
+  with an `arg_stack` snapshot, and continuations can be re-entered
+  (`call_cc_tests.scm`). `%call/ec` is the escape-only form; it checks that
+  its frame is still live by walking the chain and comparing `Rc`s. With a
+  flat stack, capturing and invoking a re-entrant continuation would both
+  copy the whole stack. Generator-style code would then get slower in
+  proportion to its depth, where today capture is constant-time. `%call/ec`
+  would need a marker frame to keep its liveness check.
+* **The motivating problem is fixed.** Deep non-tail recursion was
+  quadratic because a collection ran every 20,000 allocations and marked
+  everything live each time. A flat stack wouldn't have fixed that: every
+  collection would still mark every frame. Collections now wait for as many
+  allocations as objects survived the last one (`GcHeap::needs_gc`,
+  performance.md), and a million-deep recursion went from 1.94 s to 0.64 s
+  and is linear.
+* **What's left to gain is small.** Measured by duplication: allocating and
+  freeing one extra frame-sized block per continuation frame added 6% to
+  `bench/fib.scm` (8.7M frames, about four per call), 3% to the typical
+  program and the let loop, and nothing measurable to the macro loop. A flat
+  stack recovers part of that, less the cost of pushing onto a growable
+  `Vec`. The precompilation steps had already removed the `ApplyProc` frame,
+  and most `EvalArg` frames, from each call.
+
+Revisit only if continuation frames become a larger share of the run time,
+or if the evaluator moves to pre-analysed code (precompilation-design.md,
+technique D), where the frame set would be redesigned anyway. Option 2
+above (a chunked spine shared per chunk) is then the variant to start from,
+since it keeps `call/cc` capture cheap.
