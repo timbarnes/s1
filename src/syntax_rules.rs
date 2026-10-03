@@ -3,7 +3,7 @@
 //!
 //! This is plain Rust over heap data: expanding a use runs no Scheme code.
 //! Hygiene comes from renaming every identifier a template introduces to an
-//! alias (see `eval::identifiers` and Docs/hygiene-design.md); the evaluator
+//! alias (see `eval::identifiers` and design/hygiene-design.md); the evaluator
 //! then evaluates the expansion in the use environment.
 
 use crate::env::{EnvOps, EnvRef};

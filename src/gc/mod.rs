@@ -187,7 +187,7 @@ pub enum SchemeValue {
     /// An instance of a record type
     Record(Box<Record>),
     /// A top-level environment, from `interaction-environment` or
-    /// `environment`, for `eval` and `load` (Docs/libraries-design.md)
+    /// `environment`, for `eval` and `load` (design/libraries-design.md)
     Environment(crate::env::EnvRef),
     Eof,
     Void,

@@ -236,7 +236,7 @@ suites must pass after each.
 | 9d | `define-library`; `include`, `include-ci`, `include-library-declarations`; export checking | largest |
 | 9e | Library files and the search path | small |
 | 9f | `cond-expand` and `features` | small |
-| 9g | Conformance: drop the `import` stub, enable 6.12; `Docs/libraries.md`; `todo.md` | small |
+| 9g | Conformance: drop the `import` stub, enable 6.12; `docs/libraries.md`; `todo.md` | small |
 
 ### Tests
 

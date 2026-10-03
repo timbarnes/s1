@@ -14,7 +14,7 @@ guaranteed that nothing allocated in the current epoch could be collected
 even if it was already garbage by the time a collection ran, delaying
 reclamation by at least one cycle.
 
-Per `Docs/nested-evaluation.md`, this wasn't a deliberate design choice: it
+Per `design/nested-evaluation.md`, this wasn't a deliberate design choice: it
 was flagged retrospectively as the reason a real rooting bug (nested
 `eval_main` calls parking the outer continuation/environment in Rust locals
 invisible to `Mark`) was hard to reproduce for a long time — *"recently
@@ -40,7 +40,7 @@ allocated" as a separate rooting category. The change:
 - Remove the `nursery: Vec<GcRef>` field entirely (its push in `alloc()` and
   `clear()` in `collect_garbage`), since it has no remaining reader once the
   rooting loop is gone — matching this project's practice of deleting dead
-  fields outright rather than leaving them to rot (see `Docs/performance.md`
+  fields outright rather than leaving them to rot (see `design/performance.md`
   F2 on the removed `free_list` field).
 
 ## Validation: the poisoning sweep
@@ -71,7 +71,7 @@ original bugs (its SIGSEGV reproduced at threshold ≤20):
 | 200 | 698/698 pass | 0 |
 | 500 | 698/698 pass | 0 |
 
-Also re-ran the exact historical repro from `Docs/performance.md` (which used
+Also re-ran the exact historical repro from `design/performance.md` (which used
 to `SIGSEGV`, exit 139, before `4498ecf`):
 
 ```
@@ -86,8 +86,8 @@ No corruption found at any tested threshold. `cargo test`: 98/98 pass.
 ## Performance
 
 Same-machine before/after (this machine's absolute numbers don't match
-`Docs/performance.md`'s darwin/arm64 baseline, so only relative comparison
-is meaningful — see `Docs/gc-tail-loop.md`'s note on the same issue),
+`design/performance.md`'s darwin/arm64 baseline, so only relative comparison
+is meaningful — see `design/gc-tail-loop.md`'s note on the same issue),
 `/usr/bin/time -p`, 3 runs each:
 
 - `regression 1x` (`s1 -r -q`): no clear difference — both before and after

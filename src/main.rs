@@ -28,7 +28,7 @@ use argh::FromArgs;
 
 // Measured ~15% on the GC-heavy regression suite, where sweep frees objects
 // en masse; roughly neutral on the call-heavy micro benchmarks. See
-// Docs/performance.md, F11.
+// design/performance.md, F11.
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
@@ -91,7 +91,7 @@ fn main() {
 
     // The standard libraries are views of the system environment, and the
     // interaction environment, where everything else runs, imports all of it
-    // (Docs/libraries-design.md).
+    // (design/libraries-design.md).
     crate::libraries::register_standard_libraries(rt.heap, &system);
     let env = crate::libraries::make_interaction_env(&system);
     rt.heap.set_interaction_env(env.clone());

@@ -1,5 +1,5 @@
 ;; syntax_rules_tests.scm: define-syntax, let-syntax, letrec-syntax and
-;; syntax-rules, especially hygiene (Docs/hygiene-design.md). Also re-run under
+;; syntax-rules, especially hygiene (design/hygiene-design.md). Also re-run under
 ;; gc-threshold 1 by gc_stress_tests.scm.
 
 (display "          === Testing syntax-rules ===")

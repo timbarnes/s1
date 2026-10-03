@@ -5,7 +5,7 @@ Re-run the numbers with `bench/bench.sh [reps]`.
 
 **Status, 2026-09-18: Phases 1-3 all done.** Everything below is done except
 F3 (skipped by decision) and F10(3) (deferred by decision, full design in
-`Docs/kont-flat-stack-design.md`) — see "Suggested order" at the end for the
+`design/kont-flat-stack-design.md`) — see "Suggested order" at the end for the
 final per-item status table.
 
 ## Single-list `map` (2026-10-03, linux/x86-64)
@@ -500,7 +500,7 @@ Fixes, cheapest first:
 2. **DONE** (commit f5b9894, bundled with F5/F9, 18-22 % together). `EvalArg`
    no longer carries `remaining`/`evaluated` `Vec`s at all — see F9 above.
 3. **DEFERRED**, 2026-09-18. (a) needs a `Vec<Kont>` stack with indices rather
-   than an `Rc` chain — full design in `Docs/kont-flat-stack-design.md`
+   than an `Rc` chain — full design in `design/kont-flat-stack-design.md`
    (written before any code was touched, per this project's usual practice).
    Test gaps that design identified were closed first (commit 8adbd2a: no
    `call/cc`/`dynamic-wind` test ran under GC pressure; nothing captured from
@@ -590,7 +590,7 @@ measured payoff, with final status:
 | F10(2) + F9 shared argument stack | ~8-10 % | medium | **DONE**, bundled with F5, measured 18-22 % |
 | F5 small-vec frames | ~3-4 % | medium | **DONE**, see above |
 | F3 fixnums (+ optional small-int cache) | ~4-6 % | medium; needs bignum tests first | **SKIPPED** |
-| F10(3) `Vec<Kont>` stack instead of `Rc` chain | rest of the ~30 % | large, touches call/cc | **DEFERRED** — see F10 above, `Docs/kont-flat-stack-design.md` |
+| F10(3) `Vec<Kont>` stack instead of `Rc` chain | rest of the ~30 % | large, touches call/cc | **DEFERRED** — see F10 above, `design/kont-flat-stack-design.md` |
 | F2 slab allocator | ~1 % | skip unless doing it for GC pressure | not started |
 
 Also fixed along the way, not originally in this table: the redundant

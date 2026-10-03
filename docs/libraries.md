@@ -2,7 +2,7 @@
 
 # Libraries
 
-R7RS sections 5.2 (`import`), 5.6 (libraries) and 4.2.1 (`cond-expand`). Programs run in the interaction environment, which already has every standard binding (see [Environments and Evaluation](./environments.md)), so a program needs `import` only for its own libraries or to rename. A program that starts with the usual R7RS `(import (scheme base) ...)` runs unchanged. The implementation is described in [libraries-design.md](./libraries-design.md).
+R7RS sections 5.2 (`import`), 5.6 (libraries) and 4.2.1 (`cond-expand`). Programs run in the interaction environment, which already has every standard binding (see [Environments and Evaluation](./environments.md)), so a program needs `import` only for its own libraries or to rename. A program that starts with the usual R7RS `(import (scheme base) ...)` runs unchanged. The implementation is described in [libraries-design.md](../design/libraries-design.md).
 
 ## Standard libraries
 

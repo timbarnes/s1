@@ -1,5 +1,3 @@
-[Home](s1-docs.md)
-
 # Regression suite CPU profile at the default `gc-threshold` (20,000)
 
 Measured 2026-09-18 on linux/x86_64, `--release` (`debug = true`), commit
@@ -124,4 +122,3 @@ property of the stress test, not of ordinary use.
 `flamegraph*.svg` gitignore pattern used for prior profiling sessions — not
 committed, regenerate with the recipe above).
 
-[Home](s1-docs.md)

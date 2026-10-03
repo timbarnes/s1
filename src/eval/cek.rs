@@ -200,7 +200,7 @@ pub enum Immediate {
 /// would.
 ///
 /// About half of all evaluator steps used to be spent on such expressions;
-/// see Docs/precompilation-design.md.
+/// see design/precompilation-design.md.
 #[inline]
 pub fn immediate(rt: &mut RunTime, state: &mut CEKState, expr: GcRef) -> Immediate {
     immediate_at(rt, state, expr, IMMEDIATE_DEPTH)

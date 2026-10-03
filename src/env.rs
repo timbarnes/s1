@@ -14,7 +14,7 @@ use std::rc::Rc;
 pub type EnvRef = Rc<RefCell<Frame>>;
 
 /// A top-level variable: the binding itself, with an identity separate from
-/// its name and its value (Docs/precompilation-design.md). `define` and
+/// its name and its value (design/precompilation-design.md). `define` and
 /// `set!` change a cell's contents, never replace the cell, so anything
 /// holding the cell sees every later assignment. That is what lets two names
 /// share one variable (a library's export and an importer's import) and lets
@@ -73,7 +73,7 @@ pub enum Bindings {
 /// A top-level name's binding: its cell, and whether the name was imported
 /// (bound to another environment's cell by `bind_cell`). `define` of an
 /// imported name gives it a fresh cell of its own, leaving the exporter's
-/// variable alone, and `set!` of one is an error (Docs/libraries-design.md).
+/// variable alone, and `set!` of one is an error (design/libraries-design.md).
 #[derive(Debug, PartialEq)]
 pub struct TopBinding {
     pub cell: CellRef,

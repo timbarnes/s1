@@ -1,4 +1,4 @@
-//! Identifiers and aliases, the basis of hygiene (Docs/hygiene-design.md).
+//! Identifiers and aliases, the basis of hygiene (design/hygiene-design.md).
 //!
 //! `syntax-rules` expansion renames each identifier a template introduces to
 //! an *alias*: a fresh uninterned symbol recorded in the heap's alias table

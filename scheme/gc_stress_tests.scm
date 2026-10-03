@@ -1,6 +1,6 @@
 ;; gc_stress_tests.scm
 ;;
-;; Regression coverage for Docs/nested-evaluation.md: five places used to
+;; Regression coverage for design/nested-evaluation.md: five places used to
 ;; evaluate Scheme code by re-entering eval_main and parking the outer
 ;; machine state (kont/env) in Rust locals, which are invisible to the GC's
 ;; mark phase. At a low gc-threshold, a collection during that nested
@@ -11,12 +11,12 @@
 ;; "interpreter state held in a Rust local is not a GC root" class described
 ;; there.
 ;;
-;; Also covers Docs/gc-tail-loop.md: a purely tail-recursive loop never
+;; Also covers design/gc-tail-loop.md: a purely tail-recursive loop never
 ;; pushed a RestoreEnv frame, which used to be the only place automatic GC
 ;; was checked, so such a loop never triggered a collection no matter how
 ;; much garbage it produced.
 ;;
-;; Also covers a gap identified while designing Docs/kont-flat-stack-design.md
+;; Also covers a gap identified while designing design/kont-flat-stack-design.md
 ;; (F10(3), replacing the Rc<Kont> chain with a flat stack, not yet
 ;; implemented): advanced_tests.scm has substantial call/cc and dynamic-wind
 ;; coverage, but none of it used to run under GC pressure, unlike the macro
@@ -42,7 +42,7 @@
 ;; inside a dynamic-wind thunk and invokes it long after that whole
 ;; top-level form (and others) already ran -- precisely the shape a flat,
 ;; reused Kont stack has to get right when it replaces today's persistent
-;; Rc chain. See Docs/kont-flat-stack-design.md.
+;; Rc chain. See design/kont-flat-stack-design.md.
 (load "scheme/advanced_tests.scm")
 
 ;; Exceptions add continuation frames (RestoreHandlers, RaiseReturn) and a
@@ -99,7 +99,7 @@
 ;; non-tail call chain -- the shape most likely to expose a snapshot-copy
 ;; bug (wrong order, truncation, off-by-one) in a flat-stack capture/invoke
 ;; implementation, as opposed to today's O(1) Rc::clone share. See
-;; Docs/kont-flat-stack-design.md.
+;; design/kont-flat-stack-design.md.
 ;;
 ;; deep-capture recurses non-tail, so at the point call/cc fires (n = 0),
 ;; none of the 500 pending "increment then return" frames above it have run
@@ -108,7 +108,7 @@
 ;; full and in order, landing back on the original `first-result` binding
 ;; (this evaluator's continuations are escape-only: invoking one resumes at
 ;; its capture site, not at the new call site -- see the "re-entrant" test
-;; above and Docs/kont-flat-stack-design.md).
+;; above and design/kont-flat-stack-design.md).
 (define deep-depth 500)
 (define deep-exit-count 0)
 (define deep-k #f)

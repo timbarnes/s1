@@ -43,10 +43,10 @@ pub struct GcHeap {
     // unmarked object's value with a "<<FREED>>" sentinel and leaks the box
     // instead of freeing it, turning a premature free into a visible marker
     // in printed output instead of silent corruption or a use-after-free.
-    // See Docs/nested-evaluation.md's "Tooling worth keeping".
+    // See design/nested-evaluation.md's "Tooling worth keeping".
     poison_sweep: bool,
     /// Identifiers renamed by `syntax-rules` expansion (see
-    /// Docs/hygiene-design.md). Each key is an uninterned symbol; its entry
+    /// design/hygiene-design.md). Each key is an uninterned symbol; its entry
     /// says which identifier it renames and in which environment that
     /// identifier is resolved when the alias isn't bound locally. An entry
     /// keeps `original` and `env` alive only while the alias itself is
@@ -67,7 +67,7 @@ pub struct GcHeap {
     /// `syntax-rules` expansions, keyed by the macro-use form (the pair), so
     /// a use evaluated repeatedly is expanded once. Another ephemeron table:
     /// an entry keeps its transformer and expansion alive only while the use
-    /// form is reachable. See Docs/hygiene-design.md section 7.
+    /// form is reachable. See design/hygiene-design.md section 7.
     expansions: HashMap<GcRef, CachedExpansion>,
     /// Forms evaluated once by a special form that caches its rewrite in
     /// `expansions` from the second evaluation on (see `first_sight`).
@@ -99,7 +99,7 @@ impl GcHeap {
         // Was 100,000: the shipped regression suite allocates ~55,848
         // objects, so GC never fired during a normal `-r` run and any bug or
         // inefficiency in collection itself stayed invisible (see
-        // Docs/performance.md, Docs/nested-evaluation.md staging item 4).
+        // design/performance.md, design/nested-evaluation.md staging item 4).
         // Lowered below that so a standard regression run exercises a
         // handful of ordinary collections without resorting to the
         // artificially extreme thresholds (1, 500) already used for

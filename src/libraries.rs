@@ -1,5 +1,5 @@
 //! Libraries: the registry, the standard libraries, and `environment`
-//! (R7RS 5.6 and 6.12; Docs/libraries-design.md).
+//! (R7RS 5.6 and 6.12; design/libraries-design.md).
 //!
 //! A library is an export table: external names mapped to binding cells.
 //! Importing binds names in the importing environment to those same cells
@@ -348,7 +348,7 @@ pub fn import_sf(expr: GcRef, ec: &mut crate::eval::RunTime, state: &mut crate::
 }
 
 /// Make the interaction environment: a new top-level environment with every
-/// system binding imported (Docs/libraries-design.md, "The environments").
+/// system binding imported (design/libraries-design.md, "The environments").
 pub fn make_interaction_env(system: &EnvRef) -> EnvRef {
     let env = Frame::new_top_level(true);
     for (name, cell) in system.top_level_cells() {
@@ -590,7 +590,7 @@ fn collect_declarations(heap: &mut GcHeap, decls: &[GcRef], out: &mut Declaratio
 /// there, through the machine, with the caller's environment restored after.
 /// The body's last step is a call to `%register-library`, which checks that
 /// every export is defined and only then registers the library, so a
-/// library whose body fails isn't registered (Docs/libraries-design.md).
+/// library whose body fails isn't registered (design/libraries-design.md).
 pub fn define_library_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let who = "define-library";
     let parts = crate::gc::list_to_vec(ec.heap, expr)?;

@@ -745,7 +745,7 @@ fn quasiquote_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
 /// lexical shadowing at the quasiquote's call site) and embedded into the
 /// lowered code as literal `Callable` values rather than symbols. This makes
 /// expansion immune to a user rebinding `append` (etc.) — see
-/// `Docs/nested-evaluation.md`.
+/// `design/nested-evaluation.md`.
 struct QqProcs {
     cons: GcRef,
     append: GcRef,
@@ -1039,7 +1039,7 @@ fn rewrite_guard(expr: GcRef, env: &EnvRef, ec: &mut RunTime) -> Result<GcRef, S
 /// (syntax-rules [ellipsis] (literal ...) (pattern template) ...)
 ///
 /// Evaluates to a hygienic transformer closed over the current environment
-/// (see src/syntax_rules.rs and Docs/hygiene-design.md). `define-syntax`
+/// (see src/syntax_rules.rs and design/hygiene-design.md). `define-syntax`
 /// is `define` (it binds whatever its expression evaluates to), and
 /// `let-syntax` / `letrec-syntax` are `let` / `letrec`: transformers are
 /// ordinary values in the environment, applied when the evaluator meets a

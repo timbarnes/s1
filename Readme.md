@@ -29,7 +29,7 @@ A comprehensive Scheme interpreter written in Rust that aims to closely follow t
 - `quote` - Prevent evaluation
 - `lambda` - Function definition
 - `define-syntax`, `let-syntax`, `letrec-syntax`, `syntax-rules` - Hygienic macros
-- `when`, `unless`, `case`, `do`, named `let`, `let*`, `letrec`, `letrec*`, `let-values`, `let*-values`, `define-values`, `case-lambda`, `parameterize`, `delay`, `delay-force`, `guard` - R7RS derived forms (see [Docs/derived-expressions.md](Docs/derived-expressions.md))
+- `when`, `unless`, `case`, `do`, named `let`, `let*`, `letrec`, `letrec*`, `let-values`, `let*-values`, `define-values`, `case-lambda`, `parameterize`, `delay`, `delay-force`, `guard` - R7RS derived forms (see [docs/derived-expressions.md](docs/derived-expressions.md))
 - `macro` - Procedural (non-hygienic) macro definition, an s1 extension
 - `define` - Variable and function binding
 - `set!` - Variable assignment
@@ -45,7 +45,7 @@ A comprehensive Scheme interpreter written in Rust that aims to closely follow t
 - `+`, `-`, `*`, `/` - Arithmetic; exact operands give exact results (`(/ 1 2)` is `1/2`)
 - `quotient`, `remainder`, `modulo`, `floor/`, `truncate/` - Integer division
 - `=`, `<`, `>`, `<=`, `>=` - Numeric comparison operators
-- See [Docs/numbers.md](Docs/numbers.md) for the full numeric library
+- See [docs/numbers.md](docs/numbers.md) for the full numeric library
 
 #### List Operations
 - `car`, `cdr` - List accessors
@@ -101,7 +101,7 @@ Extensible I/O system supporting:
 - Port stack management for nested file loading
 
 #### Macro Expansion
-R7RS `syntax-rules` macros are hygienic: identifiers a macro introduces can't capture, or be captured by, the user's. s1's own `macro` form instead runs Scheme code on the unevaluated arguments to compute the expansion. See [Docs/macros.md](Docs/macros.md).
+R7RS `syntax-rules` macros are hygienic: identifiers a macro introduces can't capture, or be captured by, the user's. s1's own `macro` form instead runs Scheme code on the unevaluated arguments to compute the expansion. See [docs/macros.md](docs/macros.md).
 
 #### Debug Support
 - `trace` function for debugging evaluation
@@ -159,7 +159,7 @@ cargo run --release -- -r -q
 - `-q` - Quit after loading files (batch mode)
 - `-n` - Skip loading `scheme/s1-core.scm`
 - `-r` - Run the regression suite
-- `script [arg ...]` - Run a script after the `-f` files, then exit; everything after it is passed to the program (see [Docs/system-interface.md](Docs/system-interface.md))
+- `script [arg ...]` - Run a script after the `-f` files, then exit; everything after it is passed to the program (see [docs/system-interface.md](docs/system-interface.md))
 
 ### REPL Usage
 

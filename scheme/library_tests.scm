@@ -1,5 +1,5 @@
 ;; library_tests.scm: environments, eval, and (from phase 9b on) libraries.
-;; See Docs/libraries-design.md.
+;; See design/libraries-design.md.
 
 (display "          === Testing environments and eval ===")
 (newline)
