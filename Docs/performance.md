@@ -8,6 +8,49 @@ F3 (skipped by decision) and F10(3) (deferred by decision, full design in
 `Docs/kont-flat-stack-design.md`) — see "Suggested order" at the end for the
 final per-item status table.
 
+## R7RS phases 9-11 (2026-10-03, linux/x86-64)
+
+`bench/bench.sh 7` after phase 11, on a different machine from the tables
+below, so compare within a table, not across:
+
+| Workload | Time |
+|---|---|
+| `regression 1x` (`s1 -r -q`, 1657 tests, includes the gc-threshold-1 reruns) | 1.41 s |
+| `fib 25` | 0.16 s |
+| `list/map` | 0.54 s |
+| `tail loop 300k` | 0.13 s |
+
+The regression suite has grown roughly threefold since the tables below,
+so its rows aren't comparable with them.
+
+Interleaved A/B runs (7 each) showed no change from phases 9, 10 and 11 on
+fib, a typical program (`bench/program.scm`) and the macro loop
+(`bench/macro-loop.scm`): each step was within run-to-run noise of the one
+before.
+
+The phase 11 audit found and fixed three scaling problems:
+
+| Problem | Before | After |
+|---|---|---|
+| Nested `guard`, 8000 levels | > 60 s (cubic) | 0.4 s |
+| `guard` in argument position, 8000 levels | (the above), 632 MB | 0.4 s, 71 MB |
+| `string-ref` walk of an ASCII string | 0.8 s for 80,000 chars (quadratic) | 0.4 s for 320,000 (linear) |
+
+* Nested guards: GC marking re-walked every captured continuation's whole
+  frame chain, though continuations share their chains, and `guard`
+  captured a full continuation (copying the argument stack) on every entry.
+  Fixed by marking shared frames once per cycle (`KONT_SEEN` in
+  `eval/kont.rs`) and by `%call/ec`, an escape-only continuation.
+* `string-ref`: strings are UTF-8, so finding character k scanned from the
+  start. Strings now record whether they are all ASCII (`gc/sstring.rs`);
+  non-ASCII strings still scan.
+
+Still open: each collection walks the whole live continuation chain, so
+deep non-tail recursion is quadratic in its depth: `(count 1000000)` with
+`(+ 1 (count (- n 1)))` takes 3.8 s, against 0.8 s for the same loop
+written with a tail call. A flat continuation stack (F10(3),
+`Docs/kont-flat-stack-design.md`) or generational marking would fix it.
+
 ## Results
 
 | Workload | Baseline | Phase 1 | + F10(1) | total |

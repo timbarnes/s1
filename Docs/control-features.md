@@ -2,6 +2,14 @@
 
 # Control Features
 
+## Proper tail calls
+
+s1 is properly tail-recursive (R7RS 3.5): a procedure call in tail position reuses the caller's continuation, so a loop written as a tail call runs in constant space however many times it repeats. The tail positions are the last expression of a `lambda` or `case-lambda` body; the branches of `if`, `cond` (including `=>`), `case`, `when` and `unless`; the last expression of `and`, `or` and `begin`; the bodies of every `let` form, named `let`, `let-values`, `let-syntax` and `letrec-syntax`; a `do` loop's result expressions; and macro uses in any of these. `apply` and `call/cc` call their procedure, and `call-with-values` its consumer, in tail position.
+
+Calls inside `guard`, `parameterize`, `dynamic-wind` and `with-exception-handler` bodies aren't tail calls, since those forms must do something after the body returns. Neither is `eval`.
+
+`(%kont-depth)`, an internal procedure, returns the number of continuation frames waiting for its value; the regression suite's `scheme/tail_tests.scm` uses it to check every tail context.
+
 ## `procedure?`
 
 `(procedure? obj)`

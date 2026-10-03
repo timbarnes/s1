@@ -21,12 +21,18 @@ Standard features s1 doesn't provide yet, and known issues. The R7RS conformance
 *   Done in phase 10: `command-line`, `exit` with a status and `dynamic-wind` unwinding, `emergency-exit`, `get-environment-variable(s)`, `current-second`, `current-jiffy`, `jiffies-per-second`, and running scripts (`s1 script arg ...`). See [System Interface](./system-interface.md).
 *   s1 finds `scheme/s1-core.scm` relative to the current directory, so a `#!/usr/bin/env s1` script only works when run from the s1 directory. A configured or compiled-in location would fix it.
 
+## Audit (R7RS phase 11, done)
+
+*   Proper tail calls in the last expression of `and` and `or`, and in `apply` and `call/cc`; `scheme/tail_tests.scm` checks all 31 tail contexts (see [Control Features](./control-features.md#proper-tail-calls)). Nested `guard`s no longer cubic. O(1) indexing of ASCII strings. `syntax-error`; `else`, `=>`, `_` and `...` bound, so they can be imported and renamed; the last eight `c...r` procedures; the `full-unicode` feature.
+*   Every standard library now exports all its names except the complex-number procedures, and the conformance suite fails only on complex numbers. A sweep of about 90 R7RS behaviours the suite doesn't test found nothing else.
+
 ## Development tools
 
 *   A pretty printer for source code and other data (indentation, line breaking, `'x` for `(quote x)`), for use with `procedure-source`. Wanted, not a priority.
 
 ## Known issues
 
-None outstanding. (Explicit-port reads now share the port, and `write` labels cycles, since phase 8.)
+*   Deep non-tail recursion is quadratic in its depth, because every collection walks the whole live continuation chain: a million-deep `(+ 1 (count (- n 1)))` takes 3.8 s. Tail-recursive loops are unaffected. See [performance.md](./performance.md).
+*   Indexing a string that contains non-ASCII characters (`string-ref`, `string-set!`, `substring`) scans from the start; ASCII strings are O(1).
 
 [Home](s1-docs.md)

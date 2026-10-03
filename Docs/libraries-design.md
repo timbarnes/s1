@@ -114,7 +114,7 @@ becomes an export table of the system cells for those names.
 
 * A name s1 doesn't implement (`make-rectangular`, for example) is
   left out of the table rather than failing the import. A regression test
-  lists the missing names, which is also the checklist for the phase 11 audit.
+  lists the missing names. After the phase 11 audit only the complex-number procedures remain.
 * `(s1)` exports every system binding that no standard library exports: s1's
   extensions (`macro`, `help`, `push!`, `type-of`, ...).
 * Syntax is exported the same way as procedures. In s1, special forms and
@@ -204,7 +204,7 @@ documented, not changed.
   `ieee-float`, `ratios`, `s1`, and the OS, OS family (plus `posix` on
   unix), architecture and byte order (`linux`, `unix`, `posix`, `x86-64`,
   `little-endian`). Not `exact-complex`, since s1 has no complex numbers;
-  `full-unicode` waits for the phase 11 audit to confirm it.
+  `full-unicode` was added by the phase 11 audit, which confirmed it.
 
 ## Library files
 
