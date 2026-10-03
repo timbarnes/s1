@@ -138,6 +138,7 @@ pub fn initialize_scheme_globals(rt: &mut RunTime, env: EnvRef) -> Result<(), St
     crate::sys_builtins::register_sys_builtins(rt, env.clone());
     exceptions::register_exception_builtins(rt, env.clone());
     crate::ports::register_port_builtins(rt, env.clone());
+    crate::libraries::register_library_builtins(rt.heap, env.clone());
     Ok(())
 }
 

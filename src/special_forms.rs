@@ -229,6 +229,9 @@ pub fn define_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
     if args.len() < 3 {
         return Err("define: requires at least 2 arguments".to_string());
     }
+    if !state.env.is_mutable() {
+        return Err("define: this environment is immutable".to_string());
+    }
 
     match ec.heap.get_value(args[1]) {
         SchemeValue::Symbol(_) => {
@@ -281,6 +284,14 @@ pub fn define_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
     }
 }
 
+/// The name an identifier (perhaps an alias) is written as, for messages.
+fn identifier_name(heap: &GcHeap, id: GcRef) -> String {
+    match gc_value!(crate::eval::identifiers::strip(heap, id)) {
+        SchemeValue::Symbol(name) => name.clone(),
+        _ => "?".to_string(),
+    }
+}
+
 /// (set! sym expr)
 /// sym must have been previously defined.
 pub fn set_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
@@ -291,6 +302,14 @@ pub fn set_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(),
     // `counter` its definition environment sees, under the key bound there.
     match crate::eval::identifiers::resolve(ec.heap, args[1], &state.env) {
         Some(r) => {
+            // An imported variable belongs to its library, and the
+            // environments `environment` makes are immutable.
+            if r.frame.is_imported(r.key) || !r.frame.is_mutable() {
+                return Err(format!(
+                    "set!: {} is imported and can't be assigned",
+                    identifier_name(ec.heap, args[1])
+                ));
+            }
             // A value that needs no machine step is assigned here, without
             // a Bind frame.
             match crate::eval::cek::immediate(ec, state, args[2]) {

@@ -3,6 +3,7 @@ mod env;
 mod eval;
 mod gc;
 mod io;
+mod libraries;
 mod number_syntax;
 mod parser;
 mod ports;
@@ -51,30 +52,38 @@ struct Args {
 fn main() {
     // Process command-line arguments
     let args: Args = argh::from_env();
-    // Initialize environment and runtime
-    let env = Rc::new(RefCell::new(Frame::new(None)));
+    // Initialize the system environment and runtime
+    let system = Rc::new(RefCell::new(Frame::new(None)));
     let mut runtime = RunTimeStruct::new();
     let mut rt = RunTime::from_eval(&mut runtime);
     // Set up ports and builtin functions and variables
-    match initialize_scheme_globals(&mut rt, env.clone()) {
+    match initialize_scheme_globals(&mut rt, system.clone()) {
         Ok(_val) => {} // Ignore success value
         Err(msg) => {
             println!("Runtime initialization failed: {}", msg);
             std::process::exit(1);
         }
     }
-    //crate::utilities::dbg_one_env(&env);
 
-    let mut state = CEKState::new(env.clone());
+    let mut state = CEKState::new(system.clone());
+    println!("Welcome to the s1 Scheme REPL");
+
+    // s1-core.scm is part of the system: it loads, to completion, into the
+    // system environment, before the interaction environment is made.
+    if !args.no_core {
+        run_startup_command("(push-port! (open-input-file \"scheme/s1-core.scm\"))", &mut state, &mut rt);
+        repl(&mut rt, &mut state, true, system.clone());
+    }
+
+    // The standard libraries are views of the system environment, and the
+    // interaction environment, where everything else runs, imports all of it
+    // (Docs/libraries-design.md).
+    crate::libraries::register_standard_libraries(rt.heap, &system);
+    let env = crate::libraries::make_interaction_env(&system);
+    rt.heap.set_interaction_env(env.clone());
+    state.env = env.clone();
 
     let mut startup_commands = Vec::new();
-
-    // Load core file unless --no-core
-    if !args.no_core {
-        startup_commands.push(format!(
-            "(push-port! (open-input-file \"scheme/s1-core.scm\"))"
-        ));
-    }
 
     // Run regression tests if --regression is specified
     if args.regression {
@@ -90,23 +99,28 @@ fn main() {
 
     // Execute startup commands in reverse to build the port stack correctly
     for command in startup_commands.into_iter().rev() {
-        if let Err(e) = eval_string(&command, &mut state, &mut rt) {
-            eprintln!("Error executing startup command '{}': {}", command, e);
-            std::process::exit(1);
-        }
+        run_startup_command(&command, &mut state, &mut rt);
     }
 
     // Drop into the REPL
     repl(&mut rt, &mut state, args.quit, env);
 }
 
+fn run_startup_command(command: &str, state: &mut CEKState, rt: &mut RunTime) {
+    if let Err(e) = eval_string(command, state, rt) {
+        eprintln!("Error executing startup command '{}': {}", command, e);
+        std::process::exit(1);
+    }
+}
+
+/// Read and evaluate forms from the port stack in `global` until it is
+/// empty, or, with `quit_after_load`, until only standard input is left.
 fn repl(rt: &mut RunTime, state: &mut CEKState, quit_after_load: bool, global: EnvRef) {
     use crate::io::PortKind;
     use std::io as stdio;
     use stdio::Write;
 
     let mut interactive;
-    println!("Welcome to the s1 Scheme REPL");
 
     loop {
         *rt.depth = 0;

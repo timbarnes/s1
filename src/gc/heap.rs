@@ -51,6 +51,8 @@ pub struct GcHeap {
     /// The environment the REPL and loaded files run in, returned by
     /// `interaction-environment`; a GC root.
     interaction_env: Option<crate::env::EnvRef>,
+    /// The registered libraries (src/libraries.rs); their exports are roots.
+    pub libraries: crate::libraries::Libraries,
     /// One cached alias per core name (see `core_id`); GC roots.
     core_ids: HashMap<&'static str, GcRef>,
     /// Cached special-form objects (see `core_form`); GC roots.
@@ -111,6 +113,7 @@ impl GcHeap {
             aliases: HashMap::default(),
             global_env: None,
             interaction_env: None,
+            libraries: Default::default(),
             core_ids: HashMap::default(),
             core_forms: HashMap::default(),
             expansions: HashMap::default(),
@@ -294,14 +297,18 @@ impl GcHeap {
         alias
     }
 
-    /// Record the global environment, where `core_id` identifiers resolve.
-    /// It is also the interaction environment, for now (until the system
-    /// and interaction environments are separated, phase 9b).
+    /// Record the system environment, where `core_id` identifiers resolve.
+    /// It is also the interaction environment until `set_interaction_env`
+    /// (`main` makes a separate one once `s1-core.scm` has loaded).
     pub fn set_global_env(&mut self, env: crate::env::EnvRef) {
         self.interaction_env = Some(env.clone());
         self.global_env = Some(env);
         self.core_ids.clear();
         self.core_forms.clear();
+    }
+
+    pub fn set_interaction_env(&mut self, env: crate::env::EnvRef) {
+        self.interaction_env = Some(env);
     }
 
     pub fn interaction_env(&self) -> Option<crate::env::EnvRef> {
@@ -484,6 +491,7 @@ impl GcHeap {
         for env in [&self.global_env, &self.interaction_env].into_iter().flatten() {
             env.mark(&mut |gcref| mark_reachable(gcref, epoch, &mut self.worklist));
         }
+        self.libraries.mark(&mut |gcref| mark_reachable(gcref, epoch, &mut self.worklist));
 
         // Singleton objects
         for &obj in [

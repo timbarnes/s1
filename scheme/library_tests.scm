@@ -45,3 +45,66 @@
       (list loaded-value loaded-twice))
     "load with an environment evaluates the file before returning")
 (delete-file library-test-file)
+
+(display "          === Testing standard libraries and environment ===")
+(newline)
+
+(test-equal 3 (eval '(+ 1 2) (environment '(scheme base))) "eval in an environment of (scheme base)")
+(test-equal #\A (eval '(char-upcase #\a) (environment '(scheme base) '(scheme char)))
+    "an environment of two libraries")
+(test-equal 'unbound
+    (guard (e (#t 'unbound)) (eval '(char-upcase #\a) (environment '(scheme base))))
+    "an environment holds only what its libraries export")
+(test-equal 'unbound
+    (guard (e (#t 'unbound)) (eval '(type-of 1) (environment '(scheme base))))
+    "s1's extensions aren't in (scheme base)")
+(test-equal 'integer (eval '(type-of 1) (environment '(s1))) "(s1) exports s1's extensions")
+(test-equal "define: this environment is immutable"
+    (guard (e (#t (error-object-message e))) (eval '(define x 1) (environment '(scheme base))))
+    "an environment from environment is immutable")
+(test-equal "set!: car is imported and can't be assigned"
+    (guard (e (#t (error-object-message e))) (eval '(set! car cdr) (environment '(scheme base))))
+    "set! in an environment from environment")
+(test-equal 6 (eval '(let () (define x 6) x) (environment '(scheme base)))
+    "local definitions in an immutable environment")
+(test-equal "environment: unknown library (no such library)"
+    (guard (e (#t (error-object-message e))) (environment '(no such library)))
+    "an unknown library")
+(test-equal '(case-lambda) (library-exports '(scheme case-lambda)) "library-exports")
+(test-equal '(#t #t) (list (and (member '(scheme base) (library-names)) #t) (and (member '(s1) (library-names)) #t))
+    "library-names")
+
+;; What R7RS assigns the standard libraries that s1 doesn't define yet: the
+;; checklist for the rest of phase 9 and the phase 11 audit.
+(test-equal '(((scheme base) ("..." "=>" "_" "cond-expand" "else" "features" "import" "include" "include-ci" "syntax-error"))
+              ((scheme complex) ("angle" "imag-part" "magnitude" "make-polar" "make-rectangular" "real-part"))
+              ((scheme cxr) ("caaaar" "caadar" "cadaar" "caddar" "cdaaar" "cdadar" "cddaar" "cdddar"))
+              ((scheme process-context) ("command-line" "emergency-exit" "get-environment-variable" "get-environment-variables"))
+              ((scheme r5rs) ("angle" "caaaar" "caadar" "cadaar" "caddar" "cdaaar" "cdadar" "cddaar" "cdddar" "imag-part" "magnitude" "make-polar" "make-rectangular" "null-environment" "real-part" "scheme-report-environment"))
+              ((scheme time) ("current-jiffy" "current-second" "jiffies-per-second")))
+    (let loop ((names (library-names)) (acc '()))
+      (cond ((null? names) (reverse acc))
+            ((null? (%library-unimplemented (car names))) (loop (cdr names) acc))
+            (else (loop (cdr names) (cons (list (car names) (%library-unimplemented (car names))) acc)))))
+    "standard names s1 doesn't define yet")
+
+(display "          === Testing the interaction environment's imports ===")
+(newline)
+
+;; The REPL's names are imported from the system: defining one shadows it
+;; without changing the system's, which s1-core's procedures keep using.
+(define saved-empty? empty?)
+(define (empty? s) 'shadowed)
+(test-equal '(shadowed 1) (list (empty? '(1)) (top '(1)))
+    "a REPL define shadows a built-in without affecting s1-core")
+(define empty? saved-empty?)
+(test-equal "set!: car is imported and can't be assigned"
+    (guard (e (#t (error-object-message e))) (set! car cdr))
+    "set! of an imported name is an error")
+(test-equal 1 (car '(1 2)) "and leaves it unchanged")
+(define repl-defined 1)
+(set! repl-defined 2)
+(test-equal 2 repl-defined "set! of a REPL definition")
+(test-equal 'outer
+    (let ((car (lambda (x) 'outer))) (set! car (lambda (x) 'outer)) (car 1))
+    "set! of a local that shadows an import")

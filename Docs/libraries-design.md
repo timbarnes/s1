@@ -2,8 +2,8 @@
 
 # Libraries and environments: design (phase 9)
 
-Status: design for review. Nothing here is implemented yet except the binding
-cells it builds on (`BindingCell` in `src/env.rs`, commit 7300841).
+Status: in progress. Steps 9a and 9b are implemented; the rest is design.
+Built on the binding cells of commit 7300841 (`BindingCell` in `src/env.rs`).
 
 ## Goal
 
@@ -90,12 +90,19 @@ reconsidered, not the decision, unless it reveals something unexpected.
 * **Environment values.** A new `SchemeValue::Environment(EnvRef)` holds a
   top-level frame. It prints as `#<environment>`, `type-of` gives
   `environment`, and the GC marks its frame.
-* **Libraries.** A registry in `RunTimeStruct`, keyed by library name (the
+* **Libraries.** A registry (`src/libraries.rs`), keyed by library name (the
   name list as a key such as `["scheme", "base"]`; numbers allowed as
   parts), holds for each library its export table (external name to cell)
-  and, for a `define-library`, its environment. The registry is a GC root.
-  A standard library has no environment of its own: its export table holds
-  system cells.
+  and, for a `define-library`, its environment. A standard library has no
+  environment of its own: its export table holds system cells. The registry
+  lives in the heap, beside the system environment, so built-in procedures
+  such as `environment` can reach it.
+* **GC.** The system environment, the interaction environment and each
+  library environment are roots. Marking skips imported bindings (only
+  their names are marked), because an imported cell always belongs to one of
+  those root environments, which marks it. Without this, every collection
+  would walk the interaction environment's several hundred imports a second
+  time, which cost about 6% on the regression suite.
 
 ## Standard libraries
 

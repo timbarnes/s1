@@ -67,14 +67,24 @@ impl BindingCell {
 #[derive(Debug, PartialEq)]
 pub enum Bindings {
     Small(Vec<(GcRef, GcRef)>),
-    Large(HashMap<GcRef, CellRef>),
+    Large(HashMap<GcRef, TopBinding>),
+}
+
+/// A top-level name's binding: its cell, and whether the name was imported
+/// (bound to another environment's cell by `bind_cell`). `define` of an
+/// imported name gives it a fresh cell of its own, leaving the exporter's
+/// variable alone, and `set!` of one is an error (Docs/libraries-design.md).
+#[derive(Debug, PartialEq)]
+pub struct TopBinding {
+    pub cell: CellRef,
+    pub imported: bool,
 }
 
 impl Bindings {
     fn get(&self, symbol: GcRef) -> Option<GcRef> {
         match self {
             Bindings::Small(v) => v.iter().find(|(k, _)| *k == symbol).map(|(_, v)| *v),
-            Bindings::Large(m) => m.get(&symbol).and_then(|cell| cell.get()),
+            Bindings::Large(m) => m.get(&symbol).and_then(|b| b.cell.get()),
         }
     }
 
@@ -88,9 +98,9 @@ impl Bindings {
                 }
             }
             Bindings::Large(m) => match m.get(&symbol) {
-                Some(cell) => cell.set(val),
-                None => {
-                    m.insert(symbol, BindingCell::new(val));
+                Some(b) if !b.imported => b.cell.set(val),
+                _ => {
+                    m.insert(symbol, TopBinding { cell: BindingCell::new(val), imported: false });
                 }
             },
         }
@@ -101,7 +111,7 @@ impl Bindings {
     pub fn iter(&self) -> Box<dyn Iterator<Item = (GcRef, GcRef)> + '_> {
         match self {
             Bindings::Small(v) => Box::new(v.iter().copied()),
-            Bindings::Large(m) => Box::new(m.iter().filter_map(|(k, cell)| cell.get().map(|v| (*k, v)))),
+            Bindings::Large(m) => Box::new(m.iter().filter_map(|(k, b)| b.cell.get().map(|v| (*k, v)))),
         }
     }
 }
@@ -118,6 +128,9 @@ pub struct Frame {
     /// of re-walking a chain shared by many closures (typically all the
     /// way to the global frame) once per closure.
     gc_mark_epoch: Cell<u64>,
+    /// False for the environments `environment` makes, in which `define`
+    /// and `set!` are errors.
+    pub mutable: bool,
 }
 
 impl Frame {
@@ -134,7 +147,15 @@ impl Frame {
             bindings,
             parent,
             gc_mark_epoch: Cell::new(0),
+            mutable: true,
         }
+    }
+
+    /// A new, empty top-level environment.
+    pub fn new_top_level(mutable: bool) -> EnvRef {
+        let mut frame = Frame::new(None);
+        frame.mutable = mutable;
+        Rc::new(RefCell::new(frame))
     }
 }
 
@@ -143,10 +164,12 @@ pub trait EnvOps {
     fn lookup_local(&self, symbol: GcRef) -> Option<GcRef>; // Search only this frame
     fn lookup_with_frame(&self, symbol: GcRef) -> Option<(GcRef, EnvRef)>; // Search all frames and return the frame where the binding was found
     fn define(&self, symbol: GcRef, val: GcRef); // Define a binding in this frame
-    #[allow(dead_code)] // for libraries (phase 9) and pre-analysis
+    #[allow(dead_code)] // for define-library (phase 9d) and pre-analysis
     fn cell(&self, symbol: GcRef) -> Option<CellRef>; // The cell for a top-level name, made unbound if new
-    #[allow(dead_code)] // for libraries (phase 9)
-    fn bind_cell(&self, symbol: GcRef, cell: CellRef); // Make a top-level name denote an existing cell
+    fn bind_cell(&self, symbol: GcRef, cell: CellRef); // Import: make a top-level name denote an existing cell
+    fn top_level_cells(&self) -> Vec<(GcRef, CellRef)>; // A top-level frame's bound names and their cells
+    fn is_imported(&self, symbol: GcRef) -> bool; // Whether this frame's binding of symbol is imported
+    fn is_mutable(&self) -> bool;
     fn extend(&self) -> EnvRef; // Create a new frame with this frame as parent
     fn parent(&self) -> Option<EnvRef>;
 }
@@ -194,20 +217,49 @@ impl EnvOps for EnvRef {
     /// same cell. `None` for a local frame, which has no cells.
     fn cell(&self, symbol: GcRef) -> Option<CellRef> {
         match &mut self.borrow_mut().bindings {
-            Bindings::Large(m) => Some(Rc::clone(m.entry(symbol).or_insert_with(BindingCell::unbound))),
+            Bindings::Large(m) => Some(Rc::clone(
+                &m.entry(symbol)
+                    .or_insert_with(|| TopBinding { cell: BindingCell::unbound(), imported: false })
+                    .cell,
+            )),
             Bindings::Small(_) => None,
         }
     }
 
     /// Make `symbol` in this top-level frame denote `cell`, replacing any
-    /// binding it had: how an import will share a library's variable.
+    /// binding it had, and mark it imported: how an import shares a
+    /// library's variable. `cell` must belong to an environment the GC
+    /// treats as a root (the system environment or a registered library's),
+    /// since marking skips imported bindings.
     fn bind_cell(&self, symbol: GcRef, cell: CellRef) {
         match &mut self.borrow_mut().bindings {
             Bindings::Large(m) => {
-                m.insert(symbol, cell);
+                m.insert(symbol, TopBinding { cell, imported: true });
             }
             Bindings::Small(_) => panic!("bind_cell: not a top-level frame"),
         }
+    }
+
+    fn top_level_cells(&self) -> Vec<(GcRef, CellRef)> {
+        match &self.borrow().bindings {
+            Bindings::Large(m) => m
+                .iter()
+                .filter(|(_, b)| b.cell.get().is_some())
+                .map(|(k, b)| (*k, Rc::clone(&b.cell)))
+                .collect(),
+            Bindings::Small(_) => Vec::new(),
+        }
+    }
+
+    fn is_imported(&self, symbol: GcRef) -> bool {
+        match &self.borrow().bindings {
+            Bindings::Large(m) => m.get(&symbol).is_some_and(|b| b.imported),
+            Bindings::Small(_) => false,
+        }
+    }
+
+    fn is_mutable(&self) -> bool {
+        self.borrow().mutable
     }
 
     // Add a new frame with this frame as parent
@@ -236,9 +288,27 @@ impl crate::gc::Mark for EnvRef {
                 break;
             }
             frame.gc_mark_epoch.set(epoch);
-            for (key, val) in frame.bindings.iter() {
-                visit(key); // Mark the symbol key
-                visit(val); // Mark the bound value
+            match &frame.bindings {
+                Bindings::Small(v) => {
+                    for (key, val) in v {
+                        visit(*key);
+                        visit(*val);
+                    }
+                }
+                // Imported bindings are skipped: an imported cell always
+                // belongs to an environment that is itself a root (the
+                // system environment, or a registered library's), which
+                // marks it. Only the import's name needs marking here.
+                Bindings::Large(m) => {
+                    for (key, b) in m {
+                        visit(*key);
+                        if !b.imported {
+                            if let Some(val) = b.cell.get() {
+                                visit(val);
+                            }
+                        }
+                    }
+                }
             }
             current = frame.parent.clone();
         }
@@ -494,13 +564,20 @@ mod tests {
         global.define(x, one);
         assert_eq!(cell.get(), Some(one));
 
-        // Another frame's name bound to the cell shares the variable both ways.
+        // Another frame's name bound to the cell shares the variable: it
+        // sees the owner's later assignments.
         other.bind_cell(y, Rc::clone(&cell));
+        assert!(other.is_imported(y) && !global.is_imported(x));
         assert_eq!(other.lookup(y), Some(one));
         global.define(x, two);
         assert_eq!(other.lookup(y), Some(two));
+
+        // Defining an imported name gives it its own cell, leaving the
+        // owner's variable alone.
         other.define(y, one);
-        assert_eq!(global.lookup(x), Some(one));
+        assert!(!other.is_imported(y));
+        assert_eq!(other.lookup(y), Some(one));
+        assert_eq!(global.lookup(x), Some(two));
 
         // Local frames have no cells.
         assert!(global.extend().cell(x).is_none());
