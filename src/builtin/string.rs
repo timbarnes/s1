@@ -3,7 +3,7 @@
 //
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{
-    GcHeap, GcRef, SchemeValue, get_integer, get_string, new_bool, new_char, new_int, new_pair,
+    GcHeap, GcRef, SString, SchemeValue, get_integer, get_string, new_bool, new_char, new_int, new_pair,
     new_string,
 };
 use super::char::fold_string;
@@ -139,8 +139,8 @@ fn substring(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
 /// slicing a Rust `String` by them directly would panic on a bad range or a
 /// multi-byte character.
 fn copy_range(heap: &mut GcHeap, args: &[GcRef], name: &str) -> Result<GcRef, String> {
-    let s = get_string(heap, args[0]).map_err(|e| format!("{}: {}", name, e))?;
-    let len = s.chars().count();
+    let s = sstr_of(args[0], name)?;
+    let len = s.char_len();
     let index = |heap: &mut GcHeap, i: usize, default: usize| -> Result<usize, String> {
         match args.get(i) {
             None => Ok(default),
@@ -158,7 +158,7 @@ fn copy_range(heap: &mut GcHeap, args: &[GcRef], name: &str) -> Result<GcRef, St
             name, start, end, len
         ));
     }
-    let result: String = s.chars().skip(start).take(end - start).collect();
+    let result = s.substring(start, end).expect("range checked above").to_string();
     Ok(new_string(heap, &result))
 }
 
@@ -191,11 +191,10 @@ fn string_copy(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
 /// Returns the length of the given string.
 fn string_length(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() == 1 {
-        let arg = get_string(heap, args[0])?;
-        let result = new_int(heap, BigInt::from(arg.chars().count()));
-        Ok(result)
+        let len = sstr_of(args[0], "string-length")?.char_len();
+        Ok(new_int(heap, BigInt::from(len)))
     } else {
-        Err("to-string expects exactly one argument".to_string())
+        Err("string-length expects exactly one argument".to_string())
     }
 }
 
@@ -203,13 +202,11 @@ fn string_length(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
 /// Returns the character at the given index in the string.
 fn string_ref(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() == 2 {
-        let s = get_string(heap, args[0]).unwrap();
-        let k = get_integer(heap, args[1]).unwrap() as usize;
-        if k < s.chars().count() {
-            let result = new_char(heap, s.chars().nth(k).unwrap());
-            Ok(result)
-        } else {
-            Err("index out of bounds".to_string())
+        let s = sstr_of(args[0], "string-ref")?;
+        let k = index_arg(heap, args[1], "string-ref")?;
+        match s.char_at(k) {
+            Some(c) => Ok(new_char(heap, c)),
+            None => Err("string-ref: index out of bounds".to_string()),
         }
     } else {
         Err("string-ref expects exactly two arguments".to_string())
@@ -246,20 +243,12 @@ fn make_string(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
 /// Stores char in element k of string and returns an unspecified value.
 fn string_set(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() == 3 {
-        let str_ref = args[0];
-        let k = get_integer(heap, args[1])? as usize;
-        let c = get_char(heap, args[2])?;
-
-        match heap.get_value_mut(str_ref) {
-            SchemeValue::Str(s) => {
-                if let Some((byte_index, old_char)) = s.char_indices().nth(k) {
-                    s.replace_range(byte_index..byte_index + old_char.len_utf8(), &c.to_string());
-                    Ok(heap.unspecified())
-                } else {
-                    Err("string-set!: index out of bounds".to_string())
-                }
-            }
-            _ => Err("string-set!: not a string".to_string()),
+        let k = index_arg(heap, args[1], "string-set!")?;
+        let c = get_char(heap, args[2]).map_err(|_| "string-set!: expected a character".to_string())?;
+        if str_mut(args[0], "string-set!")?.set_char(k, c) {
+            Ok(heap.unspecified())
+        } else {
+            Err("string-set!: index out of bounds".to_string())
         }
     } else {
         Err("string-set! expects three arguments".to_string())
@@ -271,14 +260,26 @@ fn string_set(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
 // R7RS 6.7 procedures over whole strings and ranges
 // ---------------------------------------------------------------------------
 
-fn str_of(v: GcRef, who: &str) -> Result<&'static String, String> {
+fn str_of(v: GcRef, who: &str) -> Result<&'static str, String> {
+    sstr_of(v, who).map(|s| s.as_str())
+}
+
+fn sstr_of(v: GcRef, who: &str) -> Result<&'static SString, String> {
     match gc_value!(v) {
         SchemeValue::Str(s) => Ok(s),
         _ => Err(format!("{}: expected a string, got {}", who, print_value(&v))),
     }
 }
 
-fn str_mut(v: GcRef, who: &str) -> Result<&'static mut String, String> {
+/// A string index argument: a non-negative exact integer.
+fn index_arg(heap: &mut GcHeap, v: GcRef, who: &str) -> Result<usize, String> {
+    get_integer(heap, v)
+        .ok()
+        .and_then(|n| usize::try_from(n).ok())
+        .ok_or_else(|| format!("{}: index must be a non-negative integer", who))
+}
+
+fn str_mut(v: GcRef, who: &str) -> Result<&'static mut SString, String> {
     match gc_value_mut!(v) {
         SchemeValue::Str(s) => Ok(s),
         _ => Err(format!("{}: expected a string, got {}", who, print_value(&v))),
@@ -293,7 +294,7 @@ fn compare(heap: &mut GcHeap, args: &[GcRef], who: &str, fold: bool, ok: fn(Orde
     }
     let strs = args
         .iter()
-        .map(|a| str_of(*a, who).map(|s| if fold { fold_string(s) } else { s.clone() }))
+        .map(|a| str_of(*a, who).map(|s| if fold { fold_string(s) } else { s.to_string() }))
         .collect::<Result<Vec<String>, String>>()?;
     let result = strs.windows(2).all(|w| ok(w[0].cmp(&w[1])));
     Ok(new_bool(heap, result))
@@ -394,12 +395,9 @@ fn string_fill(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     arity(args, 2, 4, "string-fill!")?;
     let fill = get_char(heap, args[1]).map_err(|_| "string-fill!: expected a character".to_string())?;
     let target = str_mut(args[0], "string-fill!")?;
-    let mut chars: Vec<char> = target.chars().collect();
-    let (start, end) = range_args(args, 2, chars.len(), "string-fill!")?;
-    for c in &mut chars[start..end] {
-        *c = fill;
-    }
-    *target = chars.into_iter().collect();
+    let (start, end) = range_args(args, 2, target.char_len(), "string-fill!")?;
+    let fills = vec![fill; end - start];
+    target.replace_chars(start, &fills);
     Ok(heap.unspecified())
 }
 
@@ -408,13 +406,12 @@ fn string_copy_to(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     // Copy the source characters out first: `to` and `from` may be the same.
     let src = char_range(&args[2..], 1, "string-copy!")?;
     let target = str_mut(args[0], "string-copy!")?;
-    let mut chars: Vec<char> = target.chars().collect();
-    let at = match gc_value!(args[1]) {
-        SchemeValue::Int(i) => num_traits::ToPrimitive::to_usize(i).filter(|a| a + src.len() <= chars.len()),
-        _ => None,
+    let fits = match gc_value!(args[1]) {
+        SchemeValue::Int(i) => num_traits::ToPrimitive::to_usize(i).is_some_and(|at| target.replace_chars(at, &src)),
+        _ => false,
+    };
+    if !fits {
+        return Err("string-copy!: the copied characters don't fit at that index".to_string());
     }
-    .ok_or("string-copy!: the copied characters don't fit at that index")?;
-    chars[at..at + src.len()].copy_from_slice(&src);
-    *target = chars.into_iter().collect();
     Ok(heap.unspecified())
 }

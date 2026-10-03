@@ -101,6 +101,31 @@
     (list (let ((s (string-copy "abcde"))) (string-copy! s 1 s 0 2) s)
           (let ((s (string-copy "abcde"))) (string-copy! s 3 s 0 2) s))
     "overlapping string-copy! in both directions")
+
+;; Strings record whether they are all ASCII, which makes indexing O(1);
+;; mutations that bring in other characters must turn that off.
+(define mixed (string-copy "abcdef"))
+(string-set! mixed 2 #\λ)
+(test-equal '(#\λ #\d 6 "abλdef") (list (string-ref mixed 2) (string-ref mixed 3) (string-length mixed) mixed)
+    "string-set! of a non-ASCII character into an ASCII string")
+(string-set! mixed 2 #\c)
+(test-equal '(#\c #\f 6 "abcdef") (list (string-ref mixed 2) (string-ref mixed 5) (string-length mixed) mixed)
+    "string-set! back to ASCII")
+(define filled (make-string 5 #\a))
+(string-fill! filled #\𝄞 1 3)
+(test-equal '("a𝄞𝄞aa" 5 #\a) (list filled (string-length filled) (string-ref filled 3))
+    "string-fill! of a range with a non-ASCII character")
+(define copied (make-string 4 #\-))
+(string-copy! copied 1 "λx")
+(test-equal '("-λx-" #\x) (list copied (string-ref copied 2)) "string-copy! of non-ASCII characters")
+(test-equal '("bλd" "λ𝄞") (list (substring "abλde" 1 4) (string-copy "aλ𝄞" 1)) "substring and string-copy across non-ASCII")
+(test-equal "string-ref: index out of bounds" (guard (e (#t (error-object-message e))) (string-ref "abc" 3))
+    "string-ref past the end")
+(test-equal "string-ref: expected a string, got 5" (guard (e (#t (error-object-message e))) (string-ref 5 0))
+    "string-ref of a non-string")
+(test-equal "string-copy!: the copied characters don't fit at that index"
+    (guard (e (#t (error-object-message e))) (string-copy! (make-string 2 #\a) 1 "xy"))
+    "string-copy! past the end")
 (test-equal "aλc" (let ((s (string-copy "abc"))) (string-copy! s 1 "λ") s) "string-copy! with a multi-byte character")
 
 (display "          === Testing vectors and mapping ===")

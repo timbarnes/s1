@@ -140,7 +140,7 @@ fn create_lambda_or_macro(
     // a body expression to evaluate.
     let (doc, body_forms) = if form.len() > 3 {
         match &ec.heap.get_value(form[2]) {
-            SchemeValue::Str(s) => (Some(s.clone()), &form[3..]),
+            SchemeValue::Str(s) => (Some(s.to_string()), &form[3..]),
             _ => (None, &form[2..]),
         }
     } else {
@@ -304,7 +304,7 @@ pub fn define_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
 fn syntax_error_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let form = list_to_vec(ec.heap, expr).map_err(|_| "syntax-error: expected (syntax-error message arg ...)".to_string())?;
     let message = match form.get(1).map(|m| gc_value!(*m)) {
-        Some(SchemeValue::Str(s)) => s.clone(),
+        Some(SchemeValue::Str(s)) => s.to_string(),
         _ => return Err("syntax-error: the message must be a string".to_string()),
     };
     let irritants = list_from_slice(&form[2..], ec.heap);

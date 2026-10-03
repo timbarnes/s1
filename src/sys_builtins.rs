@@ -65,7 +65,7 @@ fn eval_string_sp(
         return Err("eval-string: expected exactly 1 argument".to_string());
     }
     let string = match &rt.heap.get_value(args[0]) {
-        SchemeValue::Str(string) => string.clone(),
+        SchemeValue::Str(string) => string.to_string(),
         _ => return Err("eval-string: argument must be a string".to_string()),
     };
 

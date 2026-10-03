@@ -1,11 +1,13 @@
 pub mod heap;
 pub mod objects;
+pub mod sstring;
 
 use crate::eval::{CEKState, DynamicWind, KontRef, RunTime};
 use crate::io::PortKind;
 pub use heap::GcHeap;
 use num_bigint::BigInt;
 pub use objects::*;
+pub use sstring::SString;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::atomic::AtomicU64;
@@ -162,7 +164,7 @@ pub enum SchemeValue {
     Float(f64),
     Symbol(String),
     Pair(GcRef, GcRef),
-    Str(String),
+    Str(SString),
     Vector(Vec<GcRef>),
     Bytevector(Vec<u8>),
     /// The result of `(values ...)` with zero or two-plus values. A single

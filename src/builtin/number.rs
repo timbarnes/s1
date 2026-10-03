@@ -1003,7 +1003,7 @@ pub fn string_to_number_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, St
     }
     let radix = radix_arg(args, 1, "string->number")?;
     let text = match gc_value!(args[0]) {
-        SchemeValue::Str(s) => s.clone(),
+        SchemeValue::Str(s) => s.to_string(),
         _ => return Err("string->number: expected a string".to_string()),
     };
     Ok(match parse_number(&text, radix) {

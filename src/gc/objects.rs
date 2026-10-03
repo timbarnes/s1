@@ -285,7 +285,7 @@ pub fn get_symbol(heap: &mut GcHeap, name: &str) -> GcRef {
 /// Create a new string value.
 pub fn new_string(heap: &mut GcHeap, s: &str) -> GcRef {
     let obj = GcObject {
-        value: SchemeValue::Str(s.to_string()),
+        value: SchemeValue::Str(super::SString::from(s)),
         marked: 0,
     };
     heap.alloc(obj)

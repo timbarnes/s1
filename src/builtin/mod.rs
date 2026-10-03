@@ -98,7 +98,7 @@ fn add_doc(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
         return Err("add-doc: first argument must be a symbol".to_string());
     }
     let doc = match &heap.get_value(args[1]) {
-        SchemeValue::Str(s) => s.clone(),
+        SchemeValue::Str(s) => s.to_string(),
         _ => return Err("add-doc: second argument must be a string".to_string()),
     };
     heap.set_doc(args[0], doc);

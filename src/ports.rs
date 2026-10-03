@@ -181,7 +181,7 @@ pub fn raise_file_error(rt: &mut RunTime, state: &mut CEKState, msg: &str, filen
     Ok(())
 }
 
-fn string_arg(v: GcRef, who: &str) -> Result<&'static String, String> {
+fn string_arg(v: GcRef, who: &str) -> Result<&'static str, String> {
     match gc_value!(v) {
         SchemeValue::Str(s) => Ok(s),
         _ => Err(format!("{}: expected a string, got {}", who, print_value(&v))),
@@ -291,7 +291,7 @@ fn open_output(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: Kon
     let name = string_arg(args[0], who)?;
     match rt.file_table.open_file(name, true) {
         Ok(id) => {
-            let port = new_port(rt.heap, PortKind::FileOutput { name: name.clone(), id, binary });
+            let port = new_port(rt.heap, PortKind::FileOutput { name: name.to_string(), id, binary });
             done(state, port, next)
         }
         Err(e) => raise_file_error(rt, state, &format!("{}: could not open file: {}", who, e), args[0]),
@@ -641,8 +641,8 @@ fn eof_object_q(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
 
 fn open_input_string(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     arity(args, 1, 1, "open-input-string")?;
-    let s = string_arg(args[0], "open-input-string")?.clone();
-    Ok(new_port(heap, crate::io::new_string_port_input(&s)))
+    let s = string_arg(args[0], "open-input-string")?;
+    Ok(new_port(heap, crate::io::new_string_port_input(s)))
 }
 
 fn open_output_string(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {

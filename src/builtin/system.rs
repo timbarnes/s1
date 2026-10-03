@@ -55,7 +55,7 @@ fn no_args(args: &[GcRef], who: &str) -> Result<(), String> {
 fn get_environment_variable(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     let name = match args {
         [name] => match gc_value!(*name) {
-            SchemeValue::Str(s) => s.clone(),
+            SchemeValue::Str(s) => s.to_string(),
             _ => return Err("get-environment-variable: name must be a string".to_string()),
         },
         _ => return Err("get-environment-variable: expected 1 argument".to_string()),
