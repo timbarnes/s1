@@ -173,7 +173,7 @@ fn apply_sp(
                 state.tail = true;
                 return Ok(());
             }
-            Callable::CaseLambda { clauses } => {
+            Callable::CaseLambda { clauses, .. } => {
                 let count = list_to_vec(ec.heap, arglist)?.len();
                 let chosen = crate::eval::select_clause(clauses, count)?;
                 return apply_sp(ec, &[chosen, arglist], state, nxt);
@@ -310,6 +310,7 @@ fn call_cc_sp(
     let sym_lambda = get_symbol(ec.heap, "lambda");
     let escape_values = new_sys_builtin(
         ec,
+        "escape-values",
         escape_values_sp,
         "escape-values: sys-builtin".to_string(),
     );

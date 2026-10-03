@@ -218,17 +218,18 @@ fn print_into(out: &mut String, obj: GcRef, ctx: &mut Ctx) {
         Void => {}
         Undefined => out.push_str("#<undefined>"),
         Eof => out.push_str("#<eof>"),
+        // Procedures and syntax have no external representation (R7RS), so
+        // they print as opaque #<...> forms; `procedure-source` gives a
+        // closure's source as data.
         Callable(variant) => out.push_str(&match &**variant {
-            Callable::Builtin { func: _, doc } => format!("Primitive {} ", doc),
-            Callable::SpecialForm { doc, .. } => format!("SpecialForm {} ", doc),
-            Callable::Closure { params, body, .. } => print_callable("Closure", params, *body),
-            Callable::Macro { params, body, .. } => print_callable("Macro", params, *body),
+            Callable::Builtin { name, .. } | Callable::SysBuiltin { name, .. } => format!("#<procedure {}>", name),
+            Callable::SpecialForm { name, .. } => format!("#<syntax {}>", name),
+            Callable::Closure { name, .. } | Callable::CaseLambda { name, .. } => opaque("procedure", name),
+            Callable::Macro { name, .. } => opaque("macro", name),
             Callable::SyntaxRules(_) => "#<syntax-rules>".to_string(),
-            Callable::CaseLambda { .. } => "#<case-lambda>".to_string(),
-            Callable::SysBuiltin { func: _, doc } => format!("SysBuiltin {}", doc),
         }),
-        Port(port) => out.push_str(&format!("Port<{:?}>", port)),
-        Continuation(k) => out.push_str(&format!("Continuation<{:?}>", k.kont)),
+        Port(port) => out.push_str(&describe_port(port)),
+        Continuation(_) => out.push_str("#<continuation>"),
         RecordType(t) => {
             out.push_str("#<record-type ");
             print_into(out, t.name, ctx);
@@ -371,36 +372,28 @@ fn write_char(out: &mut String, c: char) {
     }
 }
 
-fn print_callable(callable_type: &str, params: &Vec<GcRef>, body: GcRef) -> String {
-    let mut s = callable_type.to_string();
-    match params.len() {
-        0 => s.push_str(" () "),
-        1 => {
-            s.push(' ');
-            s.push_str(print_value(&params[0]).as_str());
-            s.push(' ');
-        }
-        _ => {
-            // two cases: list and dotted, depending on the value of params[0]
-            s.push_str(" (");
-            for arg in params[1..].iter() {
-                s.push_str(print_value(arg).as_str());
-                s.push(' ');
-            }
-            match &gc_value!(params[0]) {
-                Symbol(name) => {
-                    s.push_str(". ");
-                    s.push_str(name.as_str());
-                    s.push(' ');
-                }
-                _ => (),
-            }
-            s.pop();
-            s.push_str(") ");
-        }
+/// `#<kind name>`, or `#<kind>` for an anonymous object.
+fn opaque(kind: &str, name: &Option<String>) -> String {
+    match name {
+        Some(name) => format!("#<{} {}>", kind, name),
+        None => format!("#<{}>", kind),
     }
-    s.push_str(print_value(&body).as_str());
-    s
+}
+
+fn describe_port(port: &crate::io::PortKind) -> String {
+    use crate::io::PortKind::*;
+    match port {
+        Stdin => "#<input-port stdin>".to_string(),
+        Stdout => "#<output-port stdout>".to_string(),
+        Stderr => "#<output-port stderr>".to_string(),
+        StringPortInput { .. } => "#<input-port string>".to_string(),
+        StringPortOutput { .. } => "#<output-port string>".to_string(),
+        BytevectorInput { .. } => "#<binary-input-port bytevector>".to_string(),
+        BytevectorOutput { .. } => "#<binary-output-port bytevector>".to_string(),
+        FileOutput { name, binary: false, .. } => format!("#<output-port {:?}>", name),
+        FileOutput { name, binary: true, .. } => format!("#<binary-output-port {:?}>", name),
+        Closed { .. } => "#<closed-port>".to_string(),
+    }
 }
 
 #[cfg(test)]

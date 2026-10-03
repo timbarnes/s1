@@ -350,6 +350,7 @@ mod tests {
         //let hp = ec.heap;
         plus = new_builtin(
             ec.heap,
+            "plus",
             |heap, args| {
                 let a = match &heap.get_value(args[0]) {
                     SchemeValue::Int(i) => i.clone(),
@@ -397,8 +398,8 @@ mod tests {
         let star_sym;
         let star_args;
         let expr;
-        plus = new_builtin(ec.heap, plus_b, "plus".to_string());
-        times = new_builtin(ec.heap, times_b, "times".to_string());
+        plus = new_builtin(ec.heap, "plus", plus_b, "plus".to_string());
+        times = new_builtin(ec.heap, "times", times_b, "times".to_string());
         two = new_int(ec.heap, num_bigint::BigInt::from(2));
         three = new_int(ec.heap, num_bigint::BigInt::from(3));
         four = new_int(ec.heap, num_bigint::BigInt::from(4));
@@ -475,8 +476,8 @@ mod tests {
         let star_sym;
         let star_args;
         let expr;
-        times = new_builtin(ec.heap, times_b, "times".to_string());
-        plus = new_builtin(ec.heap, plus_b, "plus".to_string());
+        times = new_builtin(ec.heap, "times", times_b, "times".to_string());
+        plus = new_builtin(ec.heap, "plus", plus_b, "plus".to_string());
         two = new_int(ec.heap, num_bigint::BigInt::from(2));
         two2 = new_int(ec.heap, num_bigint::BigInt::from(2));
         three = new_int(ec.heap, num_bigint::BigInt::from(3));
@@ -522,9 +523,9 @@ mod tests {
         let plus_sym;
         let plus_args;
         let expr;
-        plus = new_builtin(ec.heap, plus_b, "plus".to_string());
-        times = new_builtin(ec.heap, times_b, "times".to_string());
-        minus = new_builtin(ec.heap, minus_b, "minus".to_string());
+        plus = new_builtin(ec.heap, "plus", plus_b, "plus".to_string());
+        times = new_builtin(ec.heap, "times", times_b, "times".to_string());
+        minus = new_builtin(ec.heap, "minus", minus_b, "minus".to_string());
         two = new_int(ec.heap, num_bigint::BigInt::from(2));
         three = new_int(ec.heap, num_bigint::BigInt::from(3));
         four = new_int(ec.heap, num_bigint::BigInt::from(4));
@@ -790,7 +791,7 @@ mod tests {
         let mut state = CEKState::new(env);
 
         // Set up the + function in the environment
-        let plus = new_builtin(ec.heap, crate::builtin::number::plus_b, "plus".to_string());
+        let plus = new_builtin(ec.heap, "plus", crate::builtin::number::plus_b, "plus".to_string());
         let plus_sym = ec.heap.intern_symbol("+");
         state.env.define(plus_sym, plus);
 
@@ -814,6 +815,7 @@ mod tests {
             plus_expr,
             captured_env,
             None,
+            nil,
         );
 
         // Apply the closure: (closure 3 4)
@@ -886,7 +888,7 @@ mod tests {
 
         // Create a symbol and bind it to the environment
         let plus_sym = ec.heap.intern_symbol("+");
-        let plus_func = new_builtin(ec.heap, crate::builtin::number::plus_b, "plus".to_string());
+        let plus_func = new_builtin(ec.heap, "plus", crate::builtin::number::plus_b, "plus".to_string());
         state.env.define(plus_sym, plus_func);
 
         // Now create a lambda that uses the + symbol
@@ -916,6 +918,7 @@ mod tests {
             deduplicated_body,
             captured_env,
             None,
+            nil,
         );
 
         // Apply the closure: (closure 5)

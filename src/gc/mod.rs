@@ -25,7 +25,7 @@ macro_rules! register_builtin_family {
     ($heap:expr, $env:expr, $($name:expr => ($func:expr, $doc:expr)),* $(,)?) => {
         $(
             $env.define($heap.intern_symbol($name),
-                crate::gc::new_builtin($heap, $func, $doc.to_string()));
+                crate::gc::new_builtin($heap, $name, $func, $doc.to_string()));
         )*
     };
 }
@@ -35,7 +35,7 @@ macro_rules! register_special_form {
     ($rt:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
         $(
             $env.define($rt.intern_symbol($name),
-                new_special_form($rt, $func,
+                new_special_form($rt, $name, $func,
                     concat!($name, ": special form").to_string()));
         )*
     };
@@ -44,7 +44,7 @@ macro_rules! register_special_form {
 #[macro_export]
 macro_rules! register_sys_builtins {
     ($rt:expr, $env:expr, $($name:expr => $func:expr),* $(,)?) => {
-        $( $env.define($rt.heap.intern_symbol($name), new_sys_builtin($rt, $func,
+        $( $env.define($rt.heap.intern_symbol($name), new_sys_builtin($rt, $name, $func,
             concat!($name, ": sys-builtin").to_string()));
         )*
     };
@@ -100,16 +100,19 @@ pub enum Callable {
     // Standard library / core functions
     Builtin {
         func: fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>,
+        name: String,
         doc: String,
     },
     // Privileged system procedures with access to the evaluator
     SysBuiltin {
         func: fn(&mut RunTime, &[GcRef], &mut CEKState, KontRef) -> Result<(), String>,
+        name: String,
         doc: String,
     },
     // Syntax procedures called with unevaluated arguments
     SpecialForm {
         func: fn(GcRef, &mut RunTime, &mut CEKState) -> Result<(), String>,
+        name: String,
         doc: String,
     },
     // Scheme-implemented procedures
@@ -119,11 +122,16 @@ pub enum Callable {
         env: Rc<RefCell<crate::env::Frame>>,
         // Extracted from a leading string literal in the lambda/define body, if present.
         doc: Option<String>,
+        // The name it was first bound to (see `name_procedure`), for printing.
+        name: Option<String>,
+        // The (lambda ...) form it was made from, for `procedure-source`.
+        source: GcRef,
     },
     // A `case-lambda` procedure: one closure per clause, applied according
     // to the number of arguments (the first clause that accepts them)
     CaseLambda {
         clauses: Vec<GcRef>,
+        name: Option<String>,
     },
     // A hygienic `syntax-rules` transformer (src/syntax_rules.rs)
     SyntaxRules(Box<crate::syntax_rules::SyntaxRules>),
@@ -134,6 +142,8 @@ pub enum Callable {
         env: Rc<RefCell<crate::env::Frame>>,
         // Extracted from a leading string literal in the macro body, if present.
         doc: Option<String>,
+        name: Option<String>,
+        source: GcRef,
     },
 }
 

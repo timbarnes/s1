@@ -77,7 +77,7 @@ pub fn register_special_forms(heap: &mut GcHeap, env: EnvRef) {
 pub fn create_callable(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let form = expect_at_least_n_args(&ec.heap, expr, 3)?;
     let (params, ptype) = params_to_vec(&mut ec.heap, form[1]);
-    let closure = create_lambda_or_macro(&form, &params, ptype, ec, state.env.clone());
+    let closure = create_lambda_or_macro(expr, &form, &params, ptype, ec, state.env.clone());
     match closure {
         Ok(closure) => {
             insert_value(state, closure);
@@ -87,7 +87,10 @@ pub fn create_callable(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> R
     }
 }
 
+/// `source` is the form as written, kept for `procedure-source`; `form` is
+/// its elements.
 fn create_lambda_or_macro(
+    source: GcRef,
     form: &Vec<GcRef>,
     params: &Vec<GcRef>,
     ptype: Ptype,
@@ -158,6 +161,7 @@ fn create_lambda_or_macro(
                     //deduplicated_body,
                     captured_frame,
                     doc,
+                    source,
                 );
                 Ok(new_closure)
             } else if name == "macro" {
@@ -168,6 +172,7 @@ fn create_lambda_or_macro(
                     //deduplicated_body,
                     captured_frame,
                     doc,
+                    source,
                 );
                 Ok(new_macro)
             } else {
@@ -238,6 +243,7 @@ pub fn define_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
             // Bind frame.
             match crate::eval::cek::immediate(ec, state, value_expr) {
                 crate::eval::cek::Immediate::Value(v) => {
+                    crate::eval::cek::name_procedure(ec.heap, v, sym);
                     state.env.define(sym, v);
                     insert_value(state, sym);
                     return Ok(());
@@ -289,6 +295,7 @@ pub fn set_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(),
             // a Bind frame.
             match crate::eval::cek::immediate(ec, state, args[2]) {
                 crate::eval::cek::Immediate::Value(v) => {
+                    crate::eval::cek::name_procedure(ec.heap, v, r.key);
                     r.frame.define(r.key, v);
                     insert_value(state, ec.heap.unspecified());
                     return Ok(());
@@ -459,7 +466,7 @@ pub fn let_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(),
             }
             let (params, ptype) = params_to_vec(&mut ec.heap, vars);
             let lambda_expr =
-                create_lambda_or_macro(&formvec, &params, ptype, ec, state.env.clone())?;
+                create_lambda_or_macro(expr, &formvec, &params, ptype, ec, state.env.clone())?;
             // cons the lambda to the list of values
             let call = cons(lambda_expr, exprs, ec.heap)?;
 
@@ -915,10 +922,11 @@ fn case_lambda_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result
         let mut form = vec![lambda];
         form.extend_from_slice(&parts);
         let (params, ptype) = params_to_vec(ec.heap, parts[0]);
-        clauses.push(create_lambda_or_macro(&form, &params, ptype, ec, state.env.clone())?);
+        let source = cons(lambda, clause, ec.heap)?;
+        clauses.push(create_lambda_or_macro(source, &form, &params, ptype, ec, state.env.clone())?);
     }
     let procedure = ec.heap.alloc(crate::gc::GcObject {
-        value: SchemeValue::Callable(Box::new(crate::gc::Callable::CaseLambda { clauses })),
+        value: SchemeValue::Callable(Box::new(crate::gc::Callable::CaseLambda { clauses, name: None })),
         marked: 0,
     });
     insert_value(state, procedure);
@@ -1158,9 +1166,13 @@ fn transform_internal_defines(body_exprs: &[GcRef], heap: &mut GcHeap) -> Result
                 let body = &def_vec[2..];
                 let name = car(signature)?;
                 let params = cdr(signature)?;
+                // The body forms go in unwrapped, as for a top-level
+                // define, so docstrings and internal defines are handled
+                // the same way (see define_sf).
                 let lambda_sym = heap.core_id("lambda");
-                let lambda_body = wrap_body_in_begin(body, heap);
-                let lambda_expr = list_from_slice(&[lambda_sym, params, lambda_body], heap);
+                let mut lambda_form = vec![lambda_sym, params];
+                lambda_form.extend_from_slice(body);
+                let lambda_expr = list_from_slice(&lambda_form, heap);
                 bindings.push(list2(name, lambda_expr, heap)?);
             }
             _ => return Err("define: invalid syntax".to_string()),

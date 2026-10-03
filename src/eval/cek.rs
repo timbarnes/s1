@@ -472,6 +472,23 @@ fn handle_apply_special(
     Ok(())
 }
 
+/// Give an anonymous procedure the name it is being bound to, for printing.
+/// Called when `define`, `set!` (and so `letrec`, named `let` and internal
+/// definitions) bind a value; a procedure keeps the first name it gets.
+pub fn name_procedure(heap: &crate::gc::GcHeap, value: GcRef, symbol: GcRef) {
+    if let crate::gc::SchemeValue::Callable(c) = crate::gc_value_mut!(value) {
+        if let Callable::Closure { name, .. } | Callable::Macro { name, .. } | Callable::CaseLambda { name, .. } =
+            &mut **c
+        {
+            if name.is_none() {
+                if let Symbol(s) = gc_value!(identifiers::strip(heap, symbol)) {
+                    *name = Some(s.clone());
+                }
+            }
+        }
+    }
+}
+
 fn handle_bind(
     state: &mut CEKState,
     ec: &mut RunTime,
@@ -486,6 +503,7 @@ fn handle_bind(
         // state.env here would bind into whatever frame happens to be current,
         // which is the wrong one after a non-local exit through this frame.
         // For set! the frame already holds the binding, so insert overwrites it.
+        name_procedure(ec.heap, val, symbol);
         env.define(symbol, val);
         state.control = if is_define {
             Control::Value(symbol)
@@ -1210,7 +1228,7 @@ pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> 
                     Ok(())
                 }
             }
-            Callable::CaseLambda { clauses } => {
+            Callable::CaseLambda { clauses, .. } => {
                 // Apply the first clause that accepts this many arguments.
                 let chosen = crate::eval::select_clause(clauses, evaluated_args.len())?;
                 state.kont = Rc::new(Kont::ApplyProc {

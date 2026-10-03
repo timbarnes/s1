@@ -9,7 +9,7 @@
 //! and failing that its original is looked up in the definition environment.
 
 use crate::env::{EnvOps, EnvRef};
-use crate::gc::{GcHeap, GcRef, SchemeValue, new_pair, new_vector};
+use crate::gc::{Callable, GcHeap, GcRef, SchemeValue, new_pair, new_vector};
 use crate::gc_value;
 use rustc_hash::FxHashSet as HashSet;
 use std::rc::Rc;
@@ -133,6 +133,61 @@ fn copy_stripped(heap: &mut GcHeap, datum: GcRef) -> GcRef {
             new_vector(heap, copied)
         }
         _ => datum,
+    }
+}
+
+/// `datum` as source to show a person: aliases replaced by `strip` of them,
+/// and the special-form objects the interpreter embeds in code it builds
+/// replaced by their names. Cyclic data is returned unchanged.
+pub fn source_datum(heap: &mut GcHeap, datum: GcRef) -> GcRef {
+    copy_source(heap, datum, &mut HashSet::default()).unwrap_or(datum)
+}
+
+/// `active` holds the pairs and vectors being copied on the current path;
+/// meeting one again means a cycle, and the copy is abandoned (`None`).
+/// Shared, acyclic structure is simply copied each time it is met.
+fn copy_source(heap: &mut GcHeap, datum: GcRef, active: &mut HashSet<GcRef>) -> Option<GcRef> {
+    match gc_value!(datum) {
+        SchemeValue::Symbol(_) => Some(strip(heap, datum)),
+        SchemeValue::Callable(c) => match &**c {
+            Callable::SpecialForm { name, .. } => Some(heap.intern_symbol(name)),
+            _ => Some(datum),
+        },
+        SchemeValue::Pair(..) => {
+            let mut spine = Vec::new();
+            let mut items = Vec::new();
+            let mut rest = datum;
+            while let SchemeValue::Pair(car, cdr) = gc_value!(rest) {
+                if !active.insert(rest) {
+                    return None;
+                }
+                spine.push(rest);
+                items.push(*car);
+                rest = *cdr;
+            }
+            let mut result = copy_source(heap, rest, active)?;
+            for item in items.into_iter().rev() {
+                let item = copy_source(heap, item, active)?;
+                result = new_pair(heap, item, result);
+            }
+            for pair in spine {
+                active.remove(&pair);
+            }
+            Some(result)
+        }
+        SchemeValue::Vector(items) => {
+            if !active.insert(datum) {
+                return None;
+            }
+            let items = items.clone();
+            let mut copied = Vec::with_capacity(items.len());
+            for item in items {
+                copied.push(copy_source(heap, item, active)?);
+            }
+            active.remove(&datum);
+            Some(new_vector(heap, copied))
+        }
+        _ => Some(datum),
     }
 }
 

@@ -5,6 +5,7 @@ use crate::register_builtin_family;
 
 pub fn register_predicate_builtins(heap: &mut crate::gc::GcHeap, env: EnvRef) {
     register_builtin_family!(heap, env,
+        "procedure-source" => (procedure_source, "(procedure-source proc) The lambda (or macro, or case-lambda) form proc was made from, or #f for a built-in procedure"),
         "type-of" => (type_of, "(type-of <value>) Returns a symbol representing the type of the value"),
         "equal?" => (equal_q, "(equal? <value1> <value2>) Returns true if the values are equal"),
         "eq?" => (eq_q, "(eq? <value1> <value2>) Returns true if the values are the same object"),
@@ -80,6 +81,39 @@ pub fn symbol_to_string(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, Stri
             _ => Err("symbol->string: expected a symbol".to_string()),
         },
         _ => Err("symbol->string: expects 1 argument".to_string()),
+    }
+}
+
+pub fn procedure_source(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
+    if args.len() != 1 {
+        return Err("procedure-source: expected 1 argument".to_string());
+    }
+    let SchemeValue::Callable(c) = gc_value!(args[0]) else {
+        return Err("procedure-source: not a procedure".to_string());
+    };
+    match &**c {
+        Callable::Closure { source, .. } | Callable::Macro { source, .. } => {
+            Ok(crate::eval::identifiers::source_datum(heap, *source))
+        }
+        Callable::CaseLambda { clauses, .. } => {
+            // (case-lambda (formals body ...) ...), from each clause's (lambda formals body ...)
+            let mut result = heap.nil_s();
+            for clause in clauses.iter().rev() {
+                let lambda = match gc_value!(*clause) {
+                    SchemeValue::Callable(c) => match &**c {
+                        Callable::Closure { source, .. } => *source,
+                        _ => return Ok(new_bool(heap, false)),
+                    },
+                    _ => return Ok(new_bool(heap, false)),
+                };
+                let lambda = crate::eval::identifiers::source_datum(heap, lambda);
+                let clause = crate::gc::cdr(lambda)?;
+                result = crate::gc::new_pair(heap, clause, result);
+            }
+            let head = heap.intern_symbol("case-lambda");
+            Ok(crate::gc::new_pair(heap, head, result))
+        }
+        _ => Ok(new_bool(heap, false)),
     }
 }
 

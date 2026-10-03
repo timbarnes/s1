@@ -588,11 +588,12 @@ fn mark_reachable(start: GcRef, epoch: u64, worklist: &mut Vec<GcRef>) {
                 }
             }
             SchemeValue::Callable(c) => match &**c {
-                Callable::Closure { body, env, .. } | Callable::Macro { body, env, .. } => {
+                Callable::Closure { body, env, source, .. } | Callable::Macro { body, env, source, .. } => {
                     push_if_unmarked(*body, epoch, worklist);
+                    push_if_unmarked(*source, epoch, worklist);
                     env.mark(&mut |gcref| push_if_unmarked(gcref, epoch, worklist));
                 }
-                Callable::CaseLambda { clauses } => {
+                Callable::CaseLambda { clauses, .. } => {
                     for c in clauses {
                         push_if_unmarked(*c, epoch, worklist);
                     }

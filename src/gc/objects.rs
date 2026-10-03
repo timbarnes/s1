@@ -387,10 +387,11 @@ pub fn new_continuation(
 /// Create a new primitive function.
 pub fn new_builtin(
     heap: &mut GcHeap,
+    name: &str,
     f: fn(&mut GcHeap, &[GcRef]) -> Result<GcRef, String>,
     doc: String,
 ) -> GcRef {
-    let primitive = SchemeValue::Callable(Box::new(Callable::Builtin { func: f, doc }));
+    let primitive = SchemeValue::Callable(Box::new(Callable::Builtin { func: f, name: name.to_string(), doc }));
     let obj = GcObject {
         value: primitive,
         marked: 0,
@@ -400,10 +401,11 @@ pub fn new_builtin(
 
 pub fn new_sys_builtin(
     rt: &mut RunTime,
+    name: &str,
     f: fn(&mut RunTime, &[GcRef], &mut CEKState, KontRef) -> Result<(), String>,
     doc: String,
 ) -> GcRef {
-    let primitive = SchemeValue::Callable(Box::new(Callable::SysBuiltin { func: f, doc }));
+    let primitive = SchemeValue::Callable(Box::new(Callable::SysBuiltin { func: f, name: name.to_string(), doc }));
     let obj = GcObject {
         value: primitive,
         marked: 0,
@@ -414,10 +416,11 @@ pub fn new_sys_builtin(
 /// Create a new special form.
 pub fn new_special_form(
     heap: &mut GcHeap,
+    name: &str,
     f: fn(GcRef, &mut RunTime, &mut CEKState) -> Result<(), String>,
     doc: String,
 ) -> GcRef {
-    let primitive = SchemeValue::Callable(Box::new(Callable::SpecialForm { func: f, doc }));
+    let primitive = SchemeValue::Callable(Box::new(Callable::SpecialForm { func: f, name: name.to_string(), doc }));
     let obj = GcObject {
         value: primitive,
         marked: 0,
@@ -432,12 +435,15 @@ pub fn new_closure(
     body: GcRef,
     env: Rc<RefCell<crate::env::Frame>>,
     doc: Option<String>,
+    source: GcRef,
 ) -> GcRef {
     let closure = SchemeValue::Callable(Box::new(Callable::Closure {
         params,
         body,
         env,
         doc,
+        name: None,
+        source,
     }));
     let obj = GcObject {
         value: closure,
@@ -453,12 +459,15 @@ pub fn new_macro(
     body: GcRef,
     env: Rc<RefCell<crate::env::Frame>>,
     doc: Option<String>,
+    source: GcRef,
 ) -> GcRef {
     let new_macro = SchemeValue::Callable(Box::new(Callable::Macro {
         params,
         body,
         env,
         doc,
+        name: None,
+        source,
     }));
     let obj = GcObject {
         value: new_macro,
