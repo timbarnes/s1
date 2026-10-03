@@ -5,6 +5,7 @@ pub mod number;
 pub mod predicate;
 pub mod record;
 pub mod string;
+pub mod system;
 pub mod vector;
 
 use crate::env::{EnvOps, EnvRef};
@@ -43,6 +44,7 @@ pub fn register_builtins(heap: &mut GcHeap, env: EnvRef) {
     predicate::register_predicate_builtins(heap, env.clone());
     record::register_record_builtins(heap, env.clone());
     string::register_string_builtins(heap, env.clone());
+    system::register_system_builtins(heap, env.clone());
     vector::register_vector_builtins(heap, env.clone());
     register_builtin_family!(heap, env.clone(),
         "exit" => (exit, "(exit) Exit the interpreter"),
