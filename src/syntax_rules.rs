@@ -17,6 +17,7 @@ use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 pub struct SyntaxRules {
     /// The custom ellipsis identifier, if one was given
     pub ellipsis: Option<GcRef>,
+    /// The literal identifiers, matched by identity
     pub literals: Vec<GcRef>,
     /// (pattern, template) pairs, in order
     pub rules: Vec<(GcRef, GcRef)>,
@@ -49,16 +50,21 @@ impl crate::gc::Mark for SyntaxRules {
 /// What a pattern variable matched: one form, or a sequence per ellipsis.
 #[derive(Clone, Debug)]
 enum Binding {
+    /// A variable at ellipsis depth 0: the form it matched.
     One(GcRef),
+    /// A variable under an ellipsis: one binding per repetition.
     Many(Vec<Binding>),
 }
 
+/// The pattern variables of a successful match.
 type Bindings = HashMap<GcRef, Binding>;
 
+/// Whether `v` is an identifier: a symbol or an alias.
 fn is_identifier(v: GcRef) -> bool {
     matches!(gc_value!(v), SchemeValue::Symbol(_))
 }
 
+/// A symbol's name.
 fn symbol_name(v: GcRef) -> Option<&'static str> {
     match gc_value!(v) {
         SchemeValue::Symbol(s) => Some(s.as_str()),
@@ -78,6 +84,7 @@ fn list_parts(list: GcRef) -> (Vec<GcRef>, GcRef) {
 }
 
 impl SyntaxRules {
+    /// Whether `id` is one of the literals.
     fn is_literal(&self, id: GcRef) -> bool {
         self.literals.contains(&id)
     }
@@ -96,6 +103,7 @@ impl SyntaxRules {
         }
     }
 
+    /// Whether `id` is the wildcard `_` (and not a literal).
     fn is_underscore(&self, heap: &GcHeap, id: GcRef) -> bool {
         !self.is_literal(id) && symbol_name(strip(heap, id)) == Some("_")
     }
@@ -125,6 +133,10 @@ impl SyntaxRules {
         Err(format!("no syntax rule matches {}", print_value(&form)))
     }
 
+    /// Match `input` against `pattern`, adding the pattern variables'
+    /// bindings to `binds`. Literals match an input identifier that means
+    /// the same binding in `use_env` as the literal in the definition
+    /// environment.
     fn match_pattern(
         &self,
         heap: &GcHeap,
@@ -270,6 +282,8 @@ impl SyntaxRules {
         vars
     }
 
+    /// Call `out` with each pattern variable in `pattern` and its ellipsis
+    /// depth (`depth` at the top).
     fn collect_pattern_vars(&self, heap: &GcHeap, pattern: GcRef, depth: usize, out: &mut dyn FnMut(GcRef, usize)) {
         match gc_value!(pattern) {
             SchemeValue::Symbol(_) => {
@@ -478,6 +492,7 @@ pub fn parse(heap: &GcHeap, form: GcRef, env: EnvRef) -> Result<SyntaxRules, Str
     Ok(sr)
 }
 
+/// The cdr of a pair; anything else is returned unchanged.
 fn cdr_of(pair: GcRef) -> GcRef {
     match gc_value!(pair) {
         SchemeValue::Pair(_, cdr) => *cdr,
@@ -520,6 +535,7 @@ impl SyntaxRules {
         walk(cdr_of(pattern))
     }
 
+    /// `check_pattern` for a subpattern, where every position counts.
     fn check_pattern_inner(&self, heap: &GcHeap, p: GcRef) -> Result<(), String> {
         match gc_value!(p) {
             SchemeValue::Pair(..) | SchemeValue::Vector(_) => {
@@ -636,9 +652,13 @@ fn special_form(heap: &mut GcHeap, env: &EnvRef, name: &str) -> Option<GcRef> {
     global.lookup_local(sym)
 }
 
+/// The walk behind `strip_literal_data`.
 struct Stripper<'a> {
+    /// The environment the expansion runs in.
     env: &'a EnvRef,
+    /// The `quote` special form, if bound.
     quote: Option<GcRef>,
+    /// The `quasiquote` special form, if bound.
     quasiquote: Option<GcRef>,
     /// Results for pairs already walked, keyed by pair and context (0 for
     /// code, the quasiquote depth otherwise): shared structure is rewritten
@@ -652,6 +672,7 @@ impl Stripper<'_> {
         is_identifier(head) && sf.is_some() && lookup(heap, head, self.env) == sf
     }
 
+    /// `form` as code: strip only inside quoted data and vector literals.
     fn code(&mut self, heap: &mut GcHeap, form: GcRef) -> GcRef {
         if let Some(done) = self.memo.get(&(form, 0)) {
             return *done;
@@ -662,6 +683,7 @@ impl Stripper<'_> {
         result
     }
 
+    /// `code` without the memo.
     fn code_uncached(&mut self, heap: &mut GcHeap, form: GcRef) -> GcRef {
         match gc_value!(form) {
             SchemeValue::Vector(_) => strip_datum(heap, form),
@@ -707,6 +729,7 @@ impl Stripper<'_> {
         result
     }
 
+    /// `quasi` without the memo.
     fn quasi_uncached(&mut self, heap: &mut GcHeap, form: GcRef, depth: usize) -> GcRef {
         match gc_value!(form) {
             SchemeValue::Symbol(_) => strip(heap, form),

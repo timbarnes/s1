@@ -979,7 +979,7 @@ fn radix_arg(args: &[GcRef], index: usize, who: &str) -> Result<u32, String> {
     }
 }
 
-/// (number->string z [radix])
+/// `(number->string z [radix])`
 pub fn number_to_string_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.is_empty() || args.len() > 2 {
         return Err("number->string: expects 1 or 2 arguments".to_string());
@@ -996,7 +996,7 @@ pub fn number_to_string_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, St
     Ok(new_string(heap, &s))
 }
 
-/// (string->number string [radix])
+/// `(string->number string [radix])`
 pub fn string_to_number_b(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.is_empty() || args.len() > 2 {
         return Err("string->number: expects 1 or 2 arguments".to_string());

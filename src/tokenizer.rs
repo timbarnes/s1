@@ -88,14 +88,17 @@ fn named_char(name: &str) -> Option<char> {
 
 /// Tokenizer that reads characters from a port and produces tokens.
 pub struct Tokenizer<'a> {
+    /// The port read from.
     port_kind: &'a mut PortKind,
 }
 
 impl<'a> Tokenizer<'a> {
+    /// A tokenizer reading from `port_kind`.
     pub fn new(port_kind: &'a mut PortKind) -> Self {
         Tokenizer { port_kind }
     }
 
+    /// The next character, or `None` at end of input.
     fn read_char(&mut self) -> Option<char> {
         self.port_kind.next_char_utf8()
     }
@@ -105,6 +108,7 @@ impl<'a> Tokenizer<'a> {
         self.port_kind.unread_char(c);
     }
 
+    /// The next character, without consuming it.
     fn peek_char(&mut self) -> Option<char> {
         let c = self.read_char()?;
         self.unread_char(c);
@@ -124,6 +128,7 @@ impl<'a> Tokenizer<'a> {
         atom
     }
 
+    /// `s`, case-folded if `#!fold-case` is in effect.
     fn fold(&self, s: String) -> String {
         if self.port_kind.fold_case() {
             s.to_lowercase()
@@ -424,6 +429,7 @@ impl<'a> Tokenizer<'a> {
     }
 }
 
+/// A datum-label token (`#n=` or `#n#`, chosen by `make`) for `digits`.
 fn label(digits: &str, make: fn(u64) -> Token) -> Token {
     match digits.parse() {
         Ok(n) => make(n),

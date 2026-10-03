@@ -1,3 +1,8 @@
+//! The low-level side of ports: [`PortKind`], character input with
+//! push-back, and the [`FileTable`] of open output files.
+//!
+//! The Scheme port procedures that use these are in `ports`.
+
 use rustc_hash::FxHashMap as HashMap;
 use std::fs::File;
 use std::io::{self, Read, Write};
@@ -21,7 +26,9 @@ pub enum PortKind {
     Stderr,
     /// Textual input from a string (also used for files being read or loaded)
     StringPortInput {
+        /// The whole text.
         content: String,
+        /// The byte offset of the next character.
         pos: Cell<usize>,
         /// Set by the `#!fold-case` directive (cleared by `#!no-fold-case`):
         /// the reader then folds identifiers and character names to lower
@@ -29,20 +36,46 @@ pub enum PortKind {
         fold_case: Cell<bool>,
     },
     /// Textual output accumulated in a string (`open-output-string`)
-    StringPortOutput { content: String },
+    StringPortOutput {
+        /// The text written so far.
+        content: String,
+    },
     /// Binary input from bytes (`open-input-bytevector`, binary files)
-    BytevectorInput { bytes: Vec<u8>, pos: usize },
+    BytevectorInput {
+        /// The whole input.
+        bytes: Vec<u8>,
+        /// The offset of the next byte.
+        pos: usize,
+    },
     /// Binary output accumulated in bytes (`open-output-bytevector`)
-    BytevectorOutput { bytes: Vec<u8> },
+    BytevectorOutput {
+        /// The bytes written so far.
+        bytes: Vec<u8>,
+    },
     /// Output to a file in the `FileTable`, textual or binary
-    FileOutput { name: String, id: usize, binary: bool },
+    FileOutput {
+        /// The file name, for printing the port.
+        name: String,
+        /// The file's `FileTable` id.
+        id: usize,
+        /// Whether it is a binary port.
+        binary: bool,
+    },
     /// A port after `close-port`. It keeps its direction and kind, so the
     /// port predicates still answer as before; reading or writing it is an
     /// error.
-    Closed { input: bool, output: bool, textual: bool },
+    Closed {
+        /// Whether it was an input port.
+        input: bool,
+        /// Whether it was an output port.
+        output: bool,
+        /// Whether it was a textual port.
+        textual: bool,
+    },
 }
 
 impl PortKind {
+    /// `input-port?`
     pub fn is_input(&self) -> bool {
         match self {
             PortKind::Stdin | PortKind::StringPortInput { .. } | PortKind::BytevectorInput { .. } => true,
@@ -51,6 +84,7 @@ impl PortKind {
         }
     }
 
+    /// `output-port?`
     pub fn is_output(&self) -> bool {
         match self {
             PortKind::Stdout
@@ -63,6 +97,7 @@ impl PortKind {
         }
     }
 
+    /// `textual-port?`; a port that is not textual is binary.
     pub fn is_textual(&self) -> bool {
         match self {
             PortKind::BytevectorInput { .. } | PortKind::BytevectorOutput { .. } => false,
@@ -72,6 +107,7 @@ impl PortKind {
         }
     }
 
+    /// Whether the port has not been closed.
     pub fn is_open(&self) -> bool {
         !matches!(self, PortKind::Closed { .. })
     }
@@ -87,6 +123,8 @@ impl PortKind {
 }
 
 impl PortKind {
+    /// Read the next character from a textual input port; `None` at end of
+    /// input or for any other kind of port.
     pub fn next_char_utf8(&mut self) -> Option<char> {
         match self {
             PortKind::StringPortInput { content, pos, .. } => {
@@ -127,6 +165,7 @@ impl PortKind {
         }
     }
 
+    /// Turn `#!fold-case` on or off for this port.
     pub fn set_fold_case(&mut self, on: bool) {
         match self {
             PortKind::StringPortInput { fold_case, .. } => fold_case.set(on),
@@ -140,11 +179,14 @@ impl PortKind {
 /// position to rewind or field to hold it. There is only one stdin.
 #[derive(Default)]
 struct StdinState {
+    /// Characters pushed back by `unread_char`, the next one last.
     pushback: Vec<char>,
+    /// Whether `#!fold-case` is in effect.
     fold_case: bool,
 }
 
 thread_local! {
+    /// The state of standard input.
     static STDIN_STATE: std::cell::RefCell<StdinState> = Default::default();
 }
 

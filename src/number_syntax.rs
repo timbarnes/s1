@@ -9,11 +9,14 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::{ToPrimitive, Zero};
 
+/// A number read from text.
 #[derive(Debug, PartialEq)]
 pub enum Number {
+    /// An exact integer.
     Int(BigInt),
     /// A non-integer, in lowest terms
     Rational(BigRational),
+    /// An inexact real.
     Float(f64),
 }
 
@@ -27,10 +30,12 @@ pub fn exact_ratio(n: BigInt, d: BigInt) -> Number {
     }
 }
 
+/// The result of reading text as a number.
 #[derive(Debug, PartialEq)]
 pub enum NumberSyntax {
     /// Not number syntax: the reader treats the text as an identifier.
     NotANumber,
+    /// The number.
     Value(Number),
     /// Number syntax that s1 cannot turn into a value; the message says why.
     Error(String),
@@ -39,12 +44,23 @@ pub enum NumberSyntax {
 /// The real-number forms the grammar distinguishes, before exactness is
 /// applied.
 enum Real {
+    /// Digits only.
     Integer(BigInt),
+    /// `n/d`.
     Ratio(BigInt, BigInt),
     /// A radix-10 decimal: its digits as an integer, and the power of ten
     /// to scale them by (`12.5e3` is 125 × 10^2).
-    Decimal { digits: BigInt, exp10: i64, text: String },
+    Decimal {
+        /// The digits, without the point.
+        digits: BigInt,
+        /// The power of ten to scale `digits` by.
+        exp10: i64,
+        /// The text, for parsing as an inexact `f64`.
+        text: String,
+    },
+    /// `+inf.0` or `-inf.0`; true if positive.
     Inf(bool),
+    /// `+nan.0` or `-nan.0`.
     NaN,
 }
 
@@ -86,6 +102,8 @@ pub fn parse_number(text: &str, default_radix: u32) -> NumberSyntax {
     }
 }
 
+/// The value of `real` with the `#e`/`#i` prefix `exact` applied (none:
+/// exact unless written with a point or exponent).
 fn apply_exactness(real: Real, exact: Option<bool>, text: &str) -> NumberSyntax {
     let value = match (real, exact) {
         (Real::Integer(i), Some(false)) => Number::Float(i.to_f64().unwrap_or(f64::NAN)),
@@ -159,6 +177,8 @@ fn parse_real(s: &str, radix: u32) -> Option<Real> {
     })
 }
 
+/// An unsigned real in `radix`: an integer, a ratio, or (in radix 10) a
+/// decimal.
 fn parse_ureal(s: &str, radix: u32) -> Option<Real> {
     if let Some((n, d)) = s.split_once('/') {
         return Some(Real::Ratio(parse_uinteger(n, radix)?, parse_uinteger(d, radix)?));
@@ -173,6 +193,7 @@ fn parse_ureal(s: &str, radix: u32) -> Option<Real> {
     }
 }
 
+/// An unsigned integer in `radix`.
 fn parse_uinteger(s: &str, radix: u32) -> Option<BigInt> {
     if s.is_empty() || !s.chars().all(|c| c.is_digit(radix)) {
         return None;

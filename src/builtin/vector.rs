@@ -1,5 +1,5 @@
-/// Vector functions
-///
+//! Vectors (R7RS 6.8).
+
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{GcHeap, GcRef, SchemeValue, list_from_slice, list_to_vec, new_int, new_vector};
 use crate::register_builtin_family;
@@ -8,6 +8,7 @@ use num_bigint::BigInt;
 use num_traits::{Signed, ToPrimitive};
 use std::vec;
 
+/// Bind the vector procedures in `env`.
 pub fn register_vector_builtins(heap: &mut crate::gc::GcHeap, env: EnvRef) {
     register_builtin_family!(heap, env,
         "vector" => (vector, "(vector arg1 arg2 ...) Create a new vector from a list of arguments"),
@@ -25,14 +26,14 @@ pub fn register_vector_builtins(heap: &mut crate::gc::GcHeap, env: EnvRef) {
 }
 
 /// Creates a new vector from a list of arguments.
-/// (vector arg1 arg2 ...)
+/// `(vector arg1 arg2 ...)`
 pub fn vector(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     let values = args.to_vec();
     Ok(new_vector(heap, values))
 }
 
 /// Makes a vector of specified length and optionally initializes it with a default value.
-/// (make-vector length [default])
+/// `(make-vector length [default])`
 pub fn make_vector(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     match args.len() {
         1 | 2 => {
@@ -145,7 +146,7 @@ fn arity(args: &[GcRef], min: usize, max: usize, who: &str) -> Result<(), String
     }
 }
 
-/// (vector->list vector [start [end]])
+/// `(vector->list vector [start [end]])`
 fn vector_to_list(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     arity(args, 1, 3, "vector->list")?;
     let v = vector_of(args[0], "vector->list")?;
@@ -153,7 +154,7 @@ fn vector_to_list(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     Ok(list_from_slice(&v[start..end], heap))
 }
 
-/// (vector-copy vector [start [end]])
+/// `(vector-copy vector [start [end]])`
 fn vector_copy(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     arity(args, 1, 3, "vector-copy")?;
     let v = vector_of(args[0], "vector-copy")?;
@@ -162,7 +163,7 @@ fn vector_copy(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     Ok(new_vector(heap, copy))
 }
 
-/// (vector-copy! to at from [start [end]])
+/// `(vector-copy! to at from [start [end]])`
 fn vector_copy_to(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     arity(args, 3, 5, "vector-copy!")?;
     let from = vector_of(args[2], "vector-copy!")?;
@@ -182,7 +183,7 @@ fn vector_copy_to(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     Ok(heap.unspecified())
 }
 
-/// (vector-append vector ...)
+/// `(vector-append vector ...)`
 fn vector_append(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     let mut out = Vec::new();
     for a in args {
@@ -191,7 +192,7 @@ fn vector_append(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     Ok(new_vector(heap, out))
 }
 
-/// (list->vector list) -> vector
+/// `(list->vector list)` -> vector
 fn list_to_vector(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 1 {
         return Err("list->vector: expects exactly 1 argument".to_string());
@@ -206,7 +207,7 @@ fn list_to_vector(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     }
 }
 
-/// (vector-fill! vector fill [start [end]]) -> unspecified
+/// `(vector-fill! vector fill [start [end]])` -> unspecified
 fn vector_fill(_heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     arity(args, 2, 4, "vector-fill!")?;
     let fill_val = args[1];

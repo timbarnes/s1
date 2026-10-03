@@ -1,3 +1,18 @@
+//! The evaluator: a CEK machine (control, environment, continuation).
+//!
+//! - `kont`: the machine state ([`CEKState`]) and continuation frames
+//!   ([`Kont`])
+//! - `cek`: the step loop, frame handlers and procedure application
+//! - `exceptions`: `raise`, handlers and error objects (R7RS 6.11)
+//! - `identifiers`: aliases and identifier lookup, for hygiene
+//!
+//! This module holds the interpreter's mutable state outside the machine
+//! itself. [`RunTimeStruct`] owns the heap, the ports, the dynamic-wind and
+//! argument stacks and the handler list. [`RunTime`] is the same set of fields
+//! borrowed, and is what every builtin, special form and frame handler takes.
+//! It also has the entry points: [`initialize_scheme_globals`],
+//! [`eval_main`] and [`eval_string`].
+
 pub mod cek;
 pub mod exceptions;
 pub mod identifiers;
@@ -14,17 +29,28 @@ pub use kont::{
     insert_seq, insert_value,
 };
 
-/// Evaluator that owns both heap and environment
+/// The interpreter's runtime state, owned. Borrow it as a [`RunTime`] to
+/// use it.
 pub struct RunTimeStruct {
-    pub heap: GcHeap,               // The global heap for scheme data
-    pub port_stack: Vec<GcRef>,     // Stack of ports for input/output operations
-    pub file_table: FileTable,      // Table of open files
+    /// The heap holding every Scheme object.
+    pub heap: GcHeap,
+    /// The ports the REPL reads forms from, innermost (current) last.
+    /// `load` and the command line push files; standard input is at the
+    /// bottom.
+    pub port_stack: Vec<GcRef>,
+    /// The open output files.
+    pub file_table: FileTable,
     /// The current input, output and error ports (indexed by
     /// `ports::INPUT`, `OUTPUT`, `ERROR`); GC roots.
     pub current_ports: [GcRef; 3],
+    /// The dynamic-wind extents the current continuation is inside,
+    /// outermost first.
     pub dynamic_wind: Vec<DynamicWind>,
+    /// The id the next dynamic-wind entry gets.
     pub dw_next: u32,
+    /// The tracing and stepping mode set by `trace`.
     pub trace: TraceType,
+    /// The evaluation nesting depth, for indenting trace output.
     pub depth: i32,
     /// Shared scratch space for evaluated call arguments. Every in-flight
     /// application's `Kont::EvalArg` claims a suffix of this stack (from its
@@ -43,6 +69,9 @@ pub struct RunTimeStruct {
     pub handlers: GcRef,
 }
 
+/// Mutable borrows of every field of a [`RunTimeStruct`]: the context
+/// builtins, special forms and the machine run in. Field meanings are as
+/// there.
 pub struct RunTime<'a> {
     pub heap: &'a mut GcHeap,
     pub port_stack: &'a mut Vec<GcRef>,
@@ -57,6 +86,7 @@ pub struct RunTime<'a> {
 }
 
 impl<'a> RunTime<'a> {
+    /// Borrow every field of `eval`.
     pub fn from_eval(eval: &'a mut RunTimeStruct) -> Self {
         RunTime {
             heap: &mut eval.heap,
@@ -73,22 +103,35 @@ impl<'a> RunTime<'a> {
     }
 }
 
+/// The evaluator's tracing mode (see `trace` in sys_builtins.rs).
 pub enum TraceType {
+    /// The initial mode: no tracing, and an uncaught error is reported
+    /// normally rather than entering the stepper.
     Reset,
+    /// Print each expression evaluated (`(trace 'expr)`).
     Control,
+    /// Print each expression and the continuation (`(trace 'all)`).
     Full,
+    /// Stop at every step for a debugger command (`(trace 'step)`).
     Step,
+    /// No tracing (`(trace 'off)`); an uncaught error enters the stepper.
     Off,
 }
 
+/// One dynamic-wind extent on `RunTime::dynamic_wind`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DynamicWind {
+    /// Identifies the extent, so a continuation's saved stack can be
+    /// compared with the current one to find the extents to leave and enter.
     pub id: u32,
+    /// The call `(before)`, run on re-entry.
     pub before: GcRef,
+    /// The call `(after)`, run on exit.
     pub after: GcRef,
 }
 
 impl DynamicWind {
+    /// An extent entry.
     pub fn new(id: u32, before: GcRef, after: GcRef) -> Self {
         DynamicWind { id, before, after }
     }
@@ -195,6 +238,9 @@ pub fn select_clause(clauses: &[GcRef], n: usize) -> Result<GcRef, String> {
         .ok_or_else(|| format!("case-lambda: no clause accepts {} argument{}", n, if n == 1 { "" } else { "s" }))
 }
 
+/// A new frame under `parent_env` binding `params` to `args`. `params` is
+/// empty for no parameters, a lone symbol that takes all the arguments as a
+/// list, or the rest parameter (nil for none) followed by the required ones.
 pub fn bind_params(
     params: &[GcRef],
     args: &[GcRef],
@@ -240,8 +286,8 @@ pub fn bind_params(
     Ok(new_env)
 }
 
-// Expect exactly N arguments in a proper list
-// debug_assert!(N > 0);
+/// The elements of the form `list`, which must have exactly `n` of them,
+/// the operator included (so `n - 1` arguments).
 pub fn expect_n_args(heap: &GcHeap, list: GcRef, n: usize) -> Result<Vec<GcRef>, String> {
     let args = list_to_vec(heap, list)?;
     if args.len() != n {
@@ -255,7 +301,8 @@ pub fn expect_n_args(heap: &GcHeap, list: GcRef, n: usize) -> Result<Vec<GcRef>,
     }
 }
 
-// Expect at least N arguments in a proper list
+/// The elements of the form `list`, which must have at least `n` of them,
+/// the operator included.
 pub fn expect_at_least_n_args(heap: &GcHeap, list: GcRef, n: usize) -> Result<Vec<GcRef>, String> {
     let args = list_to_vec(heap, list)?;
     if args.len() < n {
@@ -269,7 +316,7 @@ pub fn expect_at_least_n_args(heap: &GcHeap, list: GcRef, n: usize) -> Result<Ve
     }
 }
 
-// Expect a single symbol from an expression list
+/// `expr` itself, if it is a symbol.
 pub fn expect_symbol(heap: &GcHeap, expr: &GcRef) -> Result<GcRef, String> {
     match &heap.get_value(*expr) {
         SchemeValue::Symbol(_) => Ok(*expr),

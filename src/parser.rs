@@ -24,9 +24,12 @@ use crate::number_syntax::{Number, NumberSyntax, parse_number};
 use crate::tokenizer::{Token, Tokenizer};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
+/// Why `parse` returned no datum.
 #[derive(Debug, PartialEq)]
 pub enum ParseError {
+    /// The port is at end of input.
     Eof,
+    /// The input is not a valid datum; the message says why.
     Syntax(String),
 }
 
@@ -46,8 +49,11 @@ pub fn parse(heap: &mut GcHeap, port_ref: &mut PortKind) -> Result<GcRef, ParseE
     }
 }
 
+/// The state of reading one top-level datum.
 struct Reader<'a, 'b> {
+    /// The token source.
     tokens: Tokenizer<'a>,
+    /// Where the datum is built.
     heap: &'b mut GcHeap,
     /// Datum labels defined so far in this top-level datum.
     labels: HashMap<u64, GcRef>,
@@ -77,6 +83,7 @@ impl Reader<'_, '_> {
         }
     }
 
+    /// The datum that starts with `token`.
     fn datum(&mut self, token: Token) -> Result<GcRef, ParseError> {
         Ok(match token {
             Token::Eof => return Err(ParseError::Eof),

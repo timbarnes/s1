@@ -27,6 +27,7 @@ use crate::printer::{display_value, print_value};
 use crate::{register_builtin_family, register_sys_builtins};
 use std::rc::Rc;
 
+/// Bind the exception procedures of R7RS 6.11 in `env`.
 pub fn register_exception_builtins(rt: &mut RunTime, env: EnvRef) {
     register_sys_builtins!(rt, env,
         "raise" => raise_sp,
@@ -193,6 +194,7 @@ pub fn handle_raise_return(
 // Procedures
 // ---------------------------------------------------------------------------
 
+/// Check that `who` got exactly `n` arguments.
 fn expect_args(args: &[GcRef], n: usize, who: &str) -> Result<(), String> {
     if args.len() == n {
         Ok(())
@@ -201,6 +203,7 @@ fn expect_args(args: &[GcRef], n: usize, who: &str) -> Result<(), String> {
     }
 }
 
+/// Whether `v` is a procedure (as opposed to syntax).
 fn is_procedure(v: GcRef) -> bool {
     matches!(
         gc_value!(v),
@@ -214,14 +217,14 @@ fn is_procedure(v: GcRef) -> bool {
     )
 }
 
-/// (raise obj)
+/// `(raise obj)`
 fn raise_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: KontRef) -> Result<(), String> {
     expect_args(args, 1, "raise")?;
     raise(state, rt, args[0], false, next);
     Ok(())
 }
 
-/// (raise-continuable obj)
+/// `(raise-continuable obj)`
 fn raise_continuable_sp(
     rt: &mut RunTime,
     args: &[GcRef],
@@ -233,7 +236,7 @@ fn raise_continuable_sp(
     Ok(())
 }
 
-/// (with-exception-handler handler thunk)
+/// `(with-exception-handler handler thunk)`
 fn with_exception_handler_sp(
     rt: &mut RunTime,
     args: &[GcRef],
@@ -254,7 +257,7 @@ fn with_exception_handler_sp(
     Ok(())
 }
 
-/// (error message irritant ...)
+/// `(error message irritant ...)`
 fn error_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: KontRef) -> Result<(), String> {
     if args.is_empty() {
         return Err("error: expects a message".to_string());
@@ -265,6 +268,7 @@ fn error_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: KontRe
     Ok(())
 }
 
+/// The kind of `v`, if it is an error object.
 fn error_kind(v: GcRef) -> Option<ErrorKind> {
     match gc_value!(v) {
         SchemeValue::ErrorObject(e) => Some(e.kind),

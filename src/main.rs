@@ -1,3 +1,49 @@
+//! s1: a Scheme interpreter in Rust, aiming at R7RS-small.
+//!
+//! These are the internal docs, for working on the interpreter. Read the user
+//! documentation in `docs/s1-docs.md` and the design notes in `design/*.md`
+//! (both relative to the repository root) alongside them.
+//!
+//! # How a form is evaluated
+//!
+//! 1. [`tokenizer`] turns a port's characters into tokens, and [`parser`]
+//!    builds a datum from them on the garbage-collected heap ([`gc`]).
+//! 2. [`eval`] runs the datum on a CEK machine: a control (expression or
+//!    value), an environment ([`env`](mod@env)), and a continuation of linked frames
+//!    (`eval::kont`). The step loop is `eval::cek`. It never recurses on the
+//!    Rust stack for Scheme calls, which gives proper tail calls and
+//!    first-class continuations.
+//! 3. Operators are procedures or syntax ([`gc::Callable`]). Builtins
+//!    ([`builtin`]) take evaluated arguments and return a value.
+//!    Sys-builtins ([`sys_builtins`], [`ports`], `eval::exceptions`) also get
+//!    the machine. Special forms ([`special_forms`]) get the unevaluated form.
+//!    `syntax-rules` macros ([`syntax_rules`]) expand hygienically, by
+//!    renaming (`eval::identifiers`).
+//! 4. [`printer`] gives values their external representation.
+//!
+//! [`main`] loads `scheme/s1-core.scm` (the parts of the language written in
+//! Scheme) into the system environment, registers the standard libraries
+//! ([`libraries`]), then runs files, a script, or the REPL in the
+//! interaction environment.
+//!
+//! # Modules
+//!
+//! - [`tokenizer`], [`parser`], [`number_syntax`]: reading
+//! - [`gc`]: the heap, value representation and collector
+//! - [`env`](mod@env): environments and top-level binding cells
+//! - [`eval`]: the CEK machine, exceptions and hygiene
+//! - [`special_forms`]: core syntax implemented in Rust
+//! - [`syntax_rules`]: `syntax-rules` transformers
+//! - [`builtin`], [`sys_builtins`]: built-in procedures
+//! - [`ports`], [`io`]: ports and I/O
+//! - [`libraries`]: `define-library`, `import` and the standard libraries
+//! - [`printer`]: `write` and `display`
+//! - [`utilities`]: error reporting, tracing and debug dumps
+//!
+//! Build these docs with `cargo doc --open`; `.cargo/config.toml` turns on
+//! private items, since s1 is a binary crate and nearly everything in it is
+//! private.
+
 mod builtin;
 mod env;
 mod eval;
@@ -29,6 +75,7 @@ use argh::FromArgs;
 // Measured ~15% on the GC-heavy regression suite, where sweep frees objects
 // en masse; roughly neutral on the call-heavy micro benchmarks. See
 // design/performance.md, F11.
+/// The global allocator: mimalloc.
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
@@ -53,6 +100,8 @@ struct Args {
     script: Vec<String>,
 }
 
+/// Parse the command line, initialise the runtime, load s1-core.scm and
+/// the standard libraries, then run the files, the script or the REPL.
 fn main() {
     // Process command-line arguments
     let args: Args = argh::from_env();
@@ -120,6 +169,7 @@ fn main() {
     repl(&mut rt, &mut state, args.quit || script.is_some(), env);
 }
 
+/// Evaluate a command needed at startup; exit if it fails.
 fn run_startup_command(command: &str, state: &mut CEKState, rt: &mut RunTime) {
     if let Err(e) = eval_string(command, state, rt) {
         eprintln!("Error executing startup command '{}': {}", command, e);

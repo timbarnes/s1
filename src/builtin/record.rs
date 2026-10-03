@@ -49,7 +49,7 @@ fn record_of(obj: GcRef, rtype: GcRef, who: &str) -> Result<&'static mut Record,
     }
 }
 
-/// (%make-record-type name (field-spec ...)): each spec is `(field accessor
+/// `(%make-record-type name (field-spec ...))`: each spec is `(field accessor
 /// [modifier])` or a bare field name.
 fn make_record_type(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 2 {
@@ -76,7 +76,7 @@ fn make_record_type(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> 
     }))
 }
 
-/// (%record-make type (field ...) (value ...)): fields not given to the
+/// `(%record-make type (field ...) (value ...))`: fields not given to the
 /// constructor start out unspecified.
 fn record_make(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 3 {

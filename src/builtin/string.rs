@@ -1,6 +1,6 @@
-// String builtin functions
-//
-//
+//! Strings (R7RS 6.7), including the case-insensitive comparisons and
+//! conversions to and from lists and vectors.
+
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{
     GcHeap, GcRef, SString, SchemeValue, get_integer, get_string, new_bool, new_char, new_int, new_pair,
@@ -13,16 +13,14 @@ use crate::{gc_value, gc_value_mut, register_builtin_family};
 use std::cmp::Ordering;
 use num_bigint::BigInt;
 
-/// (string char1 [char2 ..])
-/// Create a string from the provided characters
+// `(string char1 [char2 ..])`
+// Create a string from the provided characters
 // fn string(ec: &mut EvalContext, args) {
 
 // }
 
 /////////////////////////////////////////////////
-/// Builtin registration for string functions
-///
-
+/// Bind the string procedures in `env`.
 pub fn register_string_builtins(heap: &mut GcHeap, env: EnvRef) {
     register_builtin_family!(heap, env,
         ">string" => (to_string, "(>string <char1> [<char2> ..]) Create a string from the provided characters"),
@@ -56,7 +54,7 @@ pub fn register_string_builtins(heap: &mut GcHeap, env: EnvRef) {
     );
 }
 
-/// (string char1 [char2 ..])
+/// `(string char1 [char2 ..])`
 /// Create a string from the provided characters
 fn string(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     let mut s = String::new();
@@ -67,7 +65,7 @@ fn string(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     Ok(new_string(heap, &s))
 }
 
-/// (list->string list)
+/// `(list->string list)`
 /// Returns a newly allocated string of the characters that make up the given list.
 fn list_to_string(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() == 1 {
@@ -89,7 +87,7 @@ fn list_to_string(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     }
 }
 
-/// (>string arg)
+/// `(>string arg)`
 /// Convert a lisp object to a string
 fn to_string(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() == 1 {
@@ -100,7 +98,7 @@ fn to_string(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     }
 }
 
-/// (string-upcase string)
+/// `(string-upcase string)`
 /// Convert a string to uppercase
 fn string_upcase(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() == 1 {
@@ -112,7 +110,7 @@ fn string_upcase(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     }
 }
 
-/// (string-downcase string)
+/// `(string-downcase string)`
 /// Convert a string to lowercase
 fn string_downcase(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() == 1 {
@@ -124,7 +122,7 @@ fn string_downcase(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     }
 }
 
-/// (substring string start end)
+/// `(substring string start end)`
 /// The characters of `string` from index `start` up to, not including, `end`.
 fn substring(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 3 {
@@ -162,7 +160,7 @@ fn copy_range(heap: &mut GcHeap, args: &[GcRef], name: &str) -> Result<GcRef, St
     Ok(new_string(heap, &result))
 }
 
-/// (string-append string1 string2 ...)
+/// `(string-append string1 string2 ...)`
 /// Create a new string by concatenating the given strings.
 fn string_append(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() > 0 {
@@ -178,7 +176,7 @@ fn string_append(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     }
 }
 
-/// (string-copy string [start [end]])
+/// `(string-copy string [start [end]])`
 /// Create a new string by copying all or part of the given string.
 fn string_copy(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.is_empty() || args.len() > 3 {
@@ -187,7 +185,7 @@ fn string_copy(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     copy_range(heap, args, "string-copy")
 }
 
-/// (string-length string)
+/// `(string-length string)`
 /// Returns the length of the given string.
 fn string_length(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() == 1 {
@@ -198,7 +196,7 @@ fn string_length(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     }
 }
 
-/// (string-ref string k)
+/// `(string-ref string k)`
 /// Returns the character at the given index in the string.
 fn string_ref(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() == 2 {
@@ -220,7 +218,7 @@ fn get_char(heap: &mut GcHeap, val: GcRef) -> Result<char, String> {
     }
 }
 
-/// (make-string k [char])
+/// `(make-string k [char])`
 /// Returns a newly allocated string of length k.
 /// If char is given, then all elements of the string are initialized to char,
 /// otherwise the contents of the string are unspecified.
@@ -239,7 +237,7 @@ fn make_string(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     }
 }
 
-/// (string-set! string k char)
+/// `(string-set! string k char)`
 /// Stores char in element k of string and returns an unspecified value.
 fn string_set(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() == 3 {

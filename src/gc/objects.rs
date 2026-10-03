@@ -1,3 +1,12 @@
+//! Constructors and accessors for heap objects, list helpers, and the
+//! equivalence predicates (`eq`, `eqv`, `equal`).
+//!
+//! Allocation never collects. The evaluator collects only at two
+//! checkpoints, after a closure returns and on a tail call, when the machine
+//! state is fully installed (see `eval::cek`). So a builtin can build a
+//! structure from several `new_*` calls without rooting the pieces in
+//! between.
+
 #![allow(dead_code)]
 
 use super::{Callable, GcObject, GcRef, SchemeValue};
@@ -26,6 +35,8 @@ pub fn heap_list_iter<'a>(
     })
 }
 
+/// `eq?`: the same object, or two numbers, symbols (by name), booleans,
+/// characters or singletons with the same value.
 pub fn eq(heap: &GcHeap, a: GcRef, b: GcRef) -> bool {
     if std::ptr::eq(a, b) {
         true
@@ -68,7 +79,9 @@ pub fn equal(heap: &GcHeap, a: GcRef, b: GcRef) -> bool {
     equal_with(heap, a, b, &mut state)
 }
 
+/// Cycle detection for `equal`.
 struct EqualState {
+    /// Node pairs compared so far.
     steps: usize,
     /// Node pairs under comparison; only kept once `steps` is large.
     seen: Option<std::collections::HashSet<(usize, usize)>>,
@@ -89,6 +102,8 @@ impl EqualState {
     }
 }
 
+/// `equal` with explicit state; loops on the cdr so long lists don't
+/// recurse.
 fn equal_with(heap: &GcHeap, mut a: GcRef, mut b: GcRef, st: &mut EqualState) -> bool {
     loop {
         match (heap.get_value(a), heap.get_value(b)) {
@@ -144,6 +159,7 @@ fn equal_callables(heap: &GcHeap, a: GcRef, b: GcRef) -> bool {
     }
 }
 
+/// Whether `symbol` is a symbol named `name`.
 pub fn matches_sym(symbol: GcRef, name: &str) -> bool {
     match gc_value!(symbol) {
         SchemeValue::Symbol(s_name) => s_name == name,
@@ -151,6 +167,7 @@ pub fn matches_sym(symbol: GcRef, name: &str) -> bool {
     }
 }
 
+/// Whether `value` is `#f`, the only false value in Scheme.
 pub fn is_false(value: GcRef) -> bool {
     match gc_value!(value) {
         SchemeValue::Bool(b) => !b,
@@ -173,12 +190,17 @@ impl Hash for SchemeValue {
     }
 }
 
+/// Iterates over the elements of a list, stopping silently at an
+/// improper tail (see `heap_list_iter` for one that reports it).
 pub struct ListIter<'a> {
+    /// The rest of the list.
     current: Option<GcRef>,
+    /// The heap the list lives in.
     heap: &'a GcHeap,
 }
 
 impl<'a> ListIter<'a> {
+    /// An iterator over the list starting at `start`.
     pub fn new(start: GcRef, heap: &'a GcHeap) -> Self {
         Self {
             current: Some(start),
@@ -203,6 +225,8 @@ impl<'a> Iterator for ListIter<'a> {
     }
 }
 
+/// Whether `val` is a proper list: a chain of pairs ending in `()`. Does
+/// not terminate on a circular list.
 pub fn is_proper_list(heap: &GcHeap, mut val: GcRef) -> bool {
     loop {
         match &heap.get_value(val) {
@@ -213,6 +237,7 @@ pub fn is_proper_list(heap: &GcHeap, mut val: GcRef) -> bool {
     }
 }
 
+/// The value of an exact integer that fits in an `i64`.
 pub fn get_integer(heap: &mut GcHeap, val: GcRef) -> Result<i64, String> {
     match heap.get_value(val) {
         SchemeValue::Int(val) => {
@@ -226,6 +251,7 @@ pub fn get_integer(heap: &mut GcHeap, val: GcRef) -> Result<i64, String> {
     }
 }
 
+/// The value of a flonum.
 pub fn get_float(heap: &mut GcHeap, val: GcRef) -> Result<f64, String> {
     match heap.get_value(val) {
         SchemeValue::Float(val) => Ok(*val),
@@ -233,6 +259,7 @@ pub fn get_float(heap: &mut GcHeap, val: GcRef) -> Result<f64, String> {
     }
 }
 
+/// A copy of a string's text.
 pub fn get_string(heap: &mut GcHeap, val: GcRef) -> Result<String, String> {
     match heap.get_value(val) {
         SchemeValue::Str(val) => Ok(val.to_string()),
@@ -401,6 +428,7 @@ pub fn new_builtin(
     heap.alloc(obj)
 }
 
+/// Create a sys-builtin procedure (see `Callable::SysBuiltin`).
 pub fn new_sys_builtin(
     rt: &mut RunTime,
     name: &str,
@@ -497,6 +525,7 @@ pub fn new_tail_call_scheduled(heap: &mut GcHeap) -> GcRef {
     heap.alloc(obj)
 }
 
+/// Whether `expr` is the empty list.
 pub fn is_nil(heap: &GcHeap, expr: GcRef) -> bool {
     match &heap.get_value(expr) {
         SchemeValue::Nil => true,
@@ -504,6 +533,7 @@ pub fn is_nil(heap: &GcHeap, expr: GcRef) -> bool {
     }
 }
 
+/// The car of a pair.
 pub fn car(list: GcRef) -> Result<GcRef, String> {
     match gc_value!(list) {
         SchemeValue::Pair(car, _) => Ok(*car),
@@ -511,6 +541,7 @@ pub fn car(list: GcRef) -> Result<GcRef, String> {
     }
 }
 
+/// The cdr of a pair.
 pub fn cdr(list: GcRef) -> Result<GcRef, String> {
     match gc_value!(list) {
         SchemeValue::Pair(_, cdr) => Ok(*cdr),
@@ -518,6 +549,7 @@ pub fn cdr(list: GcRef) -> Result<GcRef, String> {
     }
 }
 
+/// A new pair.
 pub fn cons(car: GcRef, cdr: GcRef, heap: &mut GcHeap) -> Result<GcRef, String> {
     let obj = GcObject {
         value: SchemeValue::Pair(car, cdr),
@@ -526,6 +558,7 @@ pub fn cons(car: GcRef, cdr: GcRef, heap: &mut GcHeap) -> Result<GcRef, String> 
     Ok(heap.alloc(obj))
 }
 
+/// A one-element list.
 pub fn list(car: GcRef, heap: &mut GcHeap) -> Result<GcRef, String> {
     let obj = GcObject {
         value: SchemeValue::Pair(car, heap.nil_s()),
@@ -534,11 +567,13 @@ pub fn list(car: GcRef, heap: &mut GcHeap) -> Result<GcRef, String> {
     Ok(heap.alloc(obj))
 }
 
+/// A two-element list.
 pub fn list2(first: GcRef, second: GcRef, heap: &mut GcHeap) -> Result<GcRef, String> {
     let obj = cons(first, list(second, heap)?, heap)?;
     Ok(obj)
 }
 
+/// A three-element list.
 pub fn list3(
     first: GcRef,
     second: GcRef,
@@ -549,6 +584,7 @@ pub fn list3(
     Ok(obj)
 }
 
+/// Replace the car of a pair.
 pub fn set_car(pair_ref: GcRef, new_car: GcRef) -> Result<(), String> {
     unsafe {
         match &mut (*pair_ref).value {
@@ -561,6 +597,7 @@ pub fn set_car(pair_ref: GcRef, new_car: GcRef) -> Result<(), String> {
     }
 }
 
+/// Replace the cdr of a pair.
 pub fn set_cdr(pair_ref: GcRef, new_cdr: GcRef) -> Result<(), String> {
     unsafe {
         match &mut (*pair_ref).value {
@@ -573,6 +610,7 @@ pub fn set_cdr(pair_ref: GcRef, new_cdr: GcRef) -> Result<(), String> {
     }
 }
 
+/// The element of `list` at `index`.
 pub fn list_ref(heap: &mut GcHeap, mut list: GcRef, index: usize) -> Result<GcRef, String> {
     for _ in 0..index {
         match &heap.get_value(list) {
@@ -588,6 +626,7 @@ pub fn list_ref(heap: &mut GcHeap, mut list: GcRef, index: usize) -> Result<GcRe
     }
 }
 
+/// A new proper list of `exprs`, in order.
 pub fn list_from_slice(exprs: &[GcRef], heap: &mut GcHeap) -> GcRef {
     let mut list = heap.nil_s();
     for element in exprs.iter().rev() {
@@ -596,7 +635,7 @@ pub fn list_from_slice(exprs: &[GcRef], heap: &mut GcHeap) -> GcRef {
     list
 }
 
-// General utility to convert a Scheme list into a Vec of GcRefs
+/// The elements of a proper list, or an error if it is improper.
 pub fn list_to_vec(heap: &GcHeap, list: GcRef) -> Result<Vec<GcRef>, String> {
     let mut l = list;
     let mut result = Vec::new();

@@ -1,3 +1,20 @@
+//! The CEK machine's state and continuation frames.
+//!
+//! The machine's state is a [`CEKState`]: the control (an expression to
+//! evaluate or a value to return), the environment, and the continuation,
+//! a linked chain of [`Kont`] frames saying what to do with the next value.
+//! Frames are reference counted, so capturing a continuation (`call/cc`)
+//! just shares the chain.
+//!
+//! Special forms do not recurse into the evaluator. Instead they push a frame
+//! and set the control, using the `insert_*` helpers here, and `eval::cek`
+//! steps the machine. The frames of forms with subexpressions record
+//! whether the form is in tail position (R7RS 3.5), so that its last
+//! subexpression is evaluated in tail position too, without a frame of its own.
+//!
+//! See design/kont-flat-stack-design.md for the shelved alternative of a
+//! flat frame stack.
+
 use crate::env::EnvRef;
 use crate::eval::DynamicWind;
 use crate::gc::GcRef;
@@ -7,66 +24,104 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Instant;
 
+/// A shared reference to a continuation frame, and so to the whole chain
+/// below it.
 pub type KontRef = Rc<Kont>;
 
+/// A continuation frame: what to do with the value the machine returns
+/// next. Every frame except `Halt` and `Exit` links to the frame below it.
 #[derive(Clone, PartialEq)]
 pub enum Kont {
+    /// The bottom of the chain: the value is the result of the top-level
+    /// form.
     Halt,
     /// `exit` was called: once the `after` thunks of the dynamic-wind
     /// extents being left have run, end the process with status `code`.
     Exit {
+        /// The process exit status.
         code: i32,
     },
+    /// In an `and` or `or`: test the value, then stop or go on to the next
+    /// expression.
     AndOr {
+        /// Which of the two forms.
         kind: AndOrKind,
-        rest: Vec<GcRef>, // remaining expressions in the sequence (head first)
+        /// The remaining expressions, last first, so `pop` yields the next.
+        rest: Vec<GcRef>,
         /// Whether the and/or form is in tail position: its last expression
         /// then is too (R7RS 3.5).
         tail: bool,
         next: KontRef,
     },
+    /// A procedure call with all its arguments evaluated. `apply_proc` runs
+    /// this frame directly, from `state.kont`; it never reaches
+    /// `dispatch_kont`.
     ApplyProc {
+        /// The procedure.
         proc: GcRef,
+        /// The arguments.
         evaluated_args: Rc<Vec<GcRef>>,
         next: KontRef,
     },
+    /// A special form or macro use, applied to its unevaluated form.
     ApplySpecial {
-        proc: GcRef,          // Callable::SpecialForm or Callable::Macro
-        original_call: GcRef, // whole form: (op . args)
+        /// A `Callable::SpecialForm`, `Macro` or `SyntaxRules`.
+        proc: GcRef,
+        /// The whole form: `(op . args)`.
+        original_call: GcRef,
         next: KontRef,
     },
+    /// After the right-hand side of a `define` or `set!`: bind the value.
     Bind {
-        symbol: GcRef, // body expression (or begin)
-        // The frame to bind into, captured where the define/set! was written.
-        // Must NOT be re-derived from state.env when the frame runs: a
-        // non-local exit (call/cc) can arrive here with an unrelated env.
+        /// The variable being bound.
+        symbol: GcRef,
+        /// The frame to bind into, captured where the define/set! was written.
+        /// Must NOT be re-derived from state.env when the frame runs: a
+        /// non-local exit (call/cc) can arrive here with an unrelated env.
         env: EnvRef,
-        is_define: bool, // define returns the symbol; set! returns unspecified
+        /// `define` returns the symbol; `set!` returns unspecified.
+        is_define: bool,
         next: KontRef,
     },
+    /// After `call-with-values`' producer: apply the consumer to its values.
     CallWithValues {
+        /// The procedure that receives the values.
         consumer: GcRef,
         next: KontRef,
     },
+    /// A `cond` with clauses still to try.
     Cond {
-        // processes cond
+        /// The untried clauses, last first.
         remaining: Vec<CondClause>,
         /// Whether the cond form is in tail position: a clause's body (or
         /// `=>` call) is then too.
         tail: bool,
         next: KontRef,
     },
+    /// After a `cond` clause's test: run the clause if the test is true,
+    /// otherwise return to the `Cond` frame below (always the `next`).
     CondClause {
+        /// The clause whose test was evaluated.
         clause: CondClause,
+        /// The enclosing `Cond` frame.
         next: KontRef,
     },
+    /// A `dynamic-wind` in progress; `phase` says which step comes next.
     DynamicWind {
+        /// The three thunks and the body's result.
         procs: Box<DynamicWindProcs>,
+        /// The step to take when the current thunk returns.
         phase: DynamicWindPhase,
+        /// The continuation of the whole `dynamic-wind`.
         next: KontRef,
     },
+    /// Invoking a continuation: run the pending `after`/`before` thunks one
+    /// at a time, then install the target continuation and deliver the value.
     Escape {
+        /// The value to deliver, the thunks left to run, and the state to
+        /// reinstate.
         payload: Box<EscapePayload>,
+        /// The continuation being invoked.
         new_kont: KontRef,
     },
     /// Runs a macro body (already installed as `state.control`/`state.env`)
@@ -74,7 +129,9 @@ pub enum Kont {
     /// environment and either evaluates the expansion (`mode: Evaluate`) or
     /// returns it as a value (`mode: Expand`, for the `expand` debugging aid).
     MacroExpand {
+        /// The environment of the macro use.
         call_env: EnvRef,
+        /// Evaluate the expansion, or return it.
         mode: MacroMode,
         next: KontRef,
     },
@@ -82,18 +139,21 @@ pub enum Kont {
     /// macro call, pushes `MacroExpand { mode: Expand }` to expand it one
     /// level.
     ExpandArg {
+        /// The environment `expand` was called in.
         env: EnvRef,
         next: KontRef,
     },
     /// Drives a sequence of top-level forms (from `eval-string`), collecting
-    /// each result; `remaining` holds the not-yet-evaluated forms (tail
-    /// first), `results` the values collected so far.
+    /// each result.
     EvalSeq {
+        /// The not-yet-evaluated forms (tail first) and the values collected
+        /// so far.
         forms: Box<EvalSeqForms>,
         next: KontRef,
     },
     /// Times the evaluation of the wrapped body (`with-timer`).
     Timer {
+        /// When the body started.
         start: Instant,
         next: KontRef,
     },
@@ -101,6 +161,7 @@ pub enum Kont {
     /// reinstate the handler list that was current before the handler was
     /// installed.
     RestoreHandlers {
+        /// The handler list to reinstate.
         handlers: GcRef,
         next: KontRef,
     },
@@ -109,11 +170,16 @@ pub enum Kont {
     /// the raise) and deliver the value to `next`. Returning from a plain
     /// `raise` is itself an error (R7RS 6.11).
     RaiseReturn {
+        /// The raised object.
         payload: GcRef,
+        /// The handler list current at the raise.
         saved: GcRef,
+        /// Whether it was `raise-continuable`.
         continuable: bool,
         next: KontRef,
     },
+    /// Evaluating the operator and arguments of a procedure call, left to
+    /// right; the value is the operator or the latest argument.
     EvalArg {
         /// Whether the operator has been evaluated yet. Once it has, it sits
         /// at `arg_stack[args_base]` (rooted there like the arguments),
@@ -133,25 +199,38 @@ pub enum Kont {
         /// return), which turns per-call argument accumulation into pushes
         /// onto one long-lived buffer instead of a fresh `Vec` each time.
         args_base: u32,
+        /// The whole call form, for special-form dispatch (if the operator
+        /// turns out to be syntax) and for error messages.
         original_call: GcRef,
+        /// Whether the call is in tail position.
         tail: bool,
+        /// The call's environment, restored before each argument: a tail
+        /// call in the previous argument leaves `state.env` in its callee.
         env: EnvRef,
         next: KontRef,
     },
+    /// After an `if` test: evaluate the chosen branch.
     If {
-        // processes if
+        /// The consequent.
         then_branch: GcRef,
+        /// The alternate (unspecified if the `if` has none).
         else_branch: GcRef,
         /// Whether the if form is in tail position; its branches inherit it.
         tail: bool,
         next: KontRef,
     },
+    /// Below a non-tail closure call: when the body returns, go back to the
+    /// caller's environment. This is one of the two points where the
+    /// evaluator collects garbage.
     RestoreEnv {
+        /// The caller's environment.
         old_env: EnvRef,
         next: KontRef,
     },
+    /// In a body or `begin`: discard the value and evaluate the next form.
     Seq {
-        rest: Vec<GcRef>, // remaining expressions in the sequence (head first)
+        /// The remaining forms, last first, so `pop` yields the next.
+        rest: Vec<GcRef>,
         /// Whether the sequence is in tail position; its last form inherits it.
         tail: bool,
         next: KontRef,
@@ -165,6 +244,7 @@ pub enum Kont {
 }
 
 impl Kont {
+    /// The frame below this one; `None` for `Halt` and `Exit`.
     pub fn next(&self) -> Option<&KontRef> {
         match self {
             Kont::AndOr { next, .. } => Some(next),
@@ -192,9 +272,12 @@ impl Kont {
     }
 }
 
+/// What `Kont::MacroExpand` does with an expansion.
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum MacroMode {
+    /// Evaluate it: an ordinary macro use.
     Evaluate,
+    /// Return it as a value, for `expand`.
     Expand,
 }
 
@@ -394,22 +477,43 @@ impl std::fmt::Debug for Kont {
     }
 }
 
+/// A parsed `cond` clause.
 #[derive(Clone, PartialEq)]
 pub enum CondClause {
-    Normal { test: GcRef, body: Option<GcRef> },
-    Arrow { test: GcRef, arrow_proc: GcRef },
+    /// `(test body ...)` or `(test)`; `else` clauses are this with a true test.
+    Normal {
+        /// The test expression.
+        test: GcRef,
+        /// The body as one expression, or `None` to return the test's value.
+        body: Option<GcRef>,
+    },
+    /// `(test => receiver)`.
+    Arrow {
+        /// The test expression.
+        test: GcRef,
+        /// The expression for the procedure that receives the test's value.
+        arrow_proc: GcRef,
+    },
 }
 
+/// Which short-circuiting form a `Kont::AndOr` frame is running.
 #[derive(Clone, Copy, PartialEq)]
 pub enum AndOrKind {
+    /// Stop at the first false value.
     And,
+    /// Stop at the first true value.
     Or,
 }
 
+/// The step a `Kont::DynamicWind` frame takes when the current thunk
+/// returns.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum DynamicWindPhase {
+    /// `before` has returned: enter the extent and call the body thunk.
     Thunk,
+    /// The body has returned: save its value, leave the extent, call `after`.
     After,
+    /// `after` has returned: return the body's value.
     Return,
 }
 
@@ -418,18 +522,28 @@ pub enum DynamicWindPhase {
 // below). Each variant keeps its `next` link inline, so generic walkers
 // like `Kont::next()` don't have to look inside the box.
 
+/// The boxed payload of `Kont::DynamicWind`.
 #[derive(Clone, PartialEq)]
 pub struct DynamicWindProcs {
+    /// The call `(before)`, made on entering the extent.
     pub before: GcRef,
+    /// The call `(thunk)`: the body.
     pub thunk: GcRef,
+    /// The call `(after)`, made on leaving the extent.
     pub after: GcRef,
+    /// The body's value, held while `after` runs.
     pub thunk_result: Option<GcRef>,
 }
 
+/// The boxed payload of `Kont::Escape`.
 #[derive(Clone, PartialEq)]
 pub struct EscapePayload {
+    /// The value to deliver to the continuation.
     pub result: GcRef,
+    /// The `after` and `before` thunks still to run, the next one last.
     pub thunks: Vec<GcRef>,
+    /// The continuation's dynamic-wind stack, installed once the thunks
+    /// have run.
     pub new_dw_stack: Vec<DynamicWind>,
     /// The continuation's `arg_stack` snapshot (see `ContinuationData`), or
     /// None to keep the stack as it is (an escape-only continuation, which
@@ -442,22 +556,35 @@ pub struct EscapePayload {
 /// `eval-string`'s pending forms (tail first) and results collected so far.
 #[derive(Clone, PartialEq)]
 pub struct EvalSeqForms {
+    /// The forms not yet evaluated, last first.
     pub remaining: Vec<GcRef>,
+    /// The values so far.
     pub results: Vec<GcRef>,
 }
 
 const _: () = assert!(std::mem::size_of::<Kont>() <= 40);
 
+/// The C of the CEK machine: what the next step works on.
 pub enum Control {
-    Expr(GcRef),        // Unevaluated expression
-    Value(GcRef),       // Fully evaluated result
+    /// An expression to evaluate in `CEKState::env`.
+    Expr(GcRef),
+    /// A value to hand to the top continuation frame.
+    Value(GcRef),
+    /// Nothing: a transient state while a step is in progress.
     Empty,
 }
 
+/// The state of the CEK machine.
 pub struct CEKState {
-    pub control: Control, // Current expression
-    pub env: EnvRef,      // Current environment (linked frame or hashmap)
-    pub kont: KontRef,    // Continuation (enum)
+    /// The expression being evaluated, or the value being returned.
+    pub control: Control,
+    /// The current environment.
+    pub env: EnvRef,
+    /// The continuation.
+    pub kont: KontRef,
+    /// Whether `control`'s expression is in tail position. A closure call in
+    /// tail position pushes no `RestoreEnv` frame, so tail calls run in
+    /// constant space.
     pub tail: bool,
     /// A shared `Kont::Halt` used as a placeholder when `dispatch_kont` takes
     /// ownership of the top frame. Cloning this is a refcount bump; allocating
@@ -466,6 +593,7 @@ pub struct CEKState {
 }
 
 impl CEKState {
+    /// A machine with nothing to do, in `env`, with a `Halt` continuation.
     pub fn new(env: EnvRef) -> Self {
         let halt = KontRef::new(Kont::Halt);
         CEKState {
@@ -747,8 +875,8 @@ pub fn insert_and_or(state: &mut CEKState, kind: AndOrKind, mut exprs: Vec<GcRef
 }
 
 // Bind a symbol to a value. This is installed before evaluation of the right hand side.
-/// Insert a frame to run a function.
-///
+// Insert a frame to run a function.
+//
 // pub fn insert_apply_proc(state: &mut CEKState, proc: GcRef, args: Vec<GcRef>) {
 //     // clone the current continuation and link it under the new Bind
 //     let evaluated_args = Rc::new(args);
@@ -760,10 +888,9 @@ pub fn insert_and_or(state: &mut CEKState, kind: AndOrKind, mut exprs: Vec<GcRef
 //     });
 // }
 
-/// Install `expr` into the existing CEKState and return immediately.
-/// If `replace_next` is true, the installed EvalArg (if any) will have `next = Halt`
-/// (i.e., it will replace the current continuation); otherwise the existing kont chain is preserved.
-///
+/// Make `expr` the next expression to evaluate, under the current
+/// continuation. `replace_next` is whether it is in tail position, which
+/// sets `state.tail`.
 pub fn insert_eval(state: &mut CEKState, expr: GcRef, replace_next: bool) {
     // if replace_next, set state.kont to Halt so eval_cek will capture Halt as the `current_kont`
     // and set EvalArg.next = Box::new(Kont::Halt); otherwise leave state.kont as-is.
@@ -802,6 +929,8 @@ pub fn insert_cond(state: &mut CEKState, remaining: Vec<CondClause>) {
     });
 }
 
+/// Push a `dynamic-wind` frame whose `before` call is about to be
+/// evaluated: when it returns, the frame enters the extent and calls `thunk`.
 pub fn insert_dynamic_wind(state: &mut CEKState, before: GcRef, thunk: GcRef, after: GcRef) {
     let prev = Rc::clone(&state.kont);
     state.kont = Rc::new(Kont::DynamicWind {
@@ -839,6 +968,8 @@ pub fn insert_seq(state: &mut CEKState, mut exprs: Vec<GcRef>) {
     });
 }
 
+/// Push a frame that invokes the continuation `new_kont` with `result`,
+/// once the dynamic-wind `thunks` have run.
 pub fn insert_escape(
     state: &mut CEKState,
     result: GcRef,

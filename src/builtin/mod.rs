@@ -1,3 +1,14 @@
+//! The builtin procedures: those that take evaluated arguments and return
+//! a value directly, with no access to the evaluator
+//! (`Callable::Builtin`). Each submodule covers one R7RS chapter's types
+//! and registers its procedures with `register_builtin_family!`, giving each
+//! a name and a usage string that `help` shows. [`register_builtins`] runs
+//! them all.
+//!
+//! Procedures that need the machine (to call procedures or capture the
+//! continuation) are sys-builtins, in `sys_builtins`, `ports` and
+//! `eval::exceptions`.
+
 pub mod bytevector;
 pub mod char;
 pub mod list;
@@ -58,7 +69,7 @@ pub fn register_builtins(heap: &mut GcHeap, env: EnvRef) {
 // BUILTIN FUNCTIONS
 // ============================================================================
 
-/// (system cmd)
+/// `(system cmd)`
 /// Executes the given command in a subprocess and returns the output as a string.
 fn shell(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if args.len() != 1 {
@@ -76,7 +87,7 @@ fn shell(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     }
 }
 
-/// (void)
+/// `(void)`
 /// Returns the void value.
 fn void(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if !args.is_empty() {
@@ -86,7 +97,7 @@ fn void(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     Ok(heap.void())
 }
 
-/// (add-doc symbol doc-string)
+/// `(add-doc symbol doc-string)`
 /// Attaches or replaces documentation for a symbol, independent of whatever
 /// (if anything) it's currently bound to. Takes priority over any doc
 /// string built into the symbol's bound value; see `help_sp`.
@@ -105,6 +116,7 @@ fn add_doc(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     Ok(heap.void())
 }
 
+/// `(gc-threshold [n])`: get or set `GcHeap::threshold`.
 fn gc_threshold(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     match args.len() {
         0 => Ok(new_int(heap, num_bigint::BigInt::from(heap.threshold))),

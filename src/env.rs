@@ -1,16 +1,19 @@
 //! Environment and global binding access for the Scheme interpreter.
 //!
 //! This module provides:
-//! - The Environment struct with frame-based lexical scoping
-//! - Frame creation and chaining for closures and function calls
-//! - Constructors and accessors for environments
-//! - Public get/set global binding helpers
+//! - [`Frame`], one level of lexical scope, chained to its parent; an
+//!   environment is an [`EnvRef`] to its innermost frame
+//! - [`Bindings`], a frame's variables: a small vector for local frames, a
+//!   hash map of [`BindingCell`]s for top-level ones
+//! - [`EnvOps`], lookup, definition and import on an `EnvRef`
+//! - GC marking of environment chains
 
 use crate::gc::GcRef;
 use rustc_hash::FxHashMap as HashMap;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+/// An environment: a shared reference to its innermost frame.
 pub type EnvRef = Rc<RefCell<Frame>>;
 
 /// A top-level variable: the binding itself, with an identity separate from
@@ -30,23 +33,28 @@ pub struct BindingCell {
     value: Cell<GcRef>,
 }
 
+/// A shared reference to a top-level variable.
 pub type CellRef = Rc<BindingCell>;
 
 impl BindingCell {
+    /// A cell holding `value`.
     pub fn new(value: GcRef) -> CellRef {
         Rc::new(BindingCell { value: Cell::new(value) })
     }
 
+    /// A cell with no value yet.
     #[allow(dead_code)] // for libraries (phase 9) and pre-analysis
     pub fn unbound() -> CellRef {
         Self::new(std::ptr::null_mut())
     }
 
+    /// The value, or `None` while unbound.
     pub fn get(&self) -> Option<GcRef> {
         let value = self.value.get();
         if value.is_null() { None } else { Some(value) }
     }
 
+    /// Store `value`, binding the cell if it was unbound.
     pub fn set(&self, value: GcRef) {
         self.value.set(value);
     }
@@ -66,7 +74,9 @@ impl BindingCell {
 /// values directly, since nothing needs to share a local binding.
 #[derive(Debug, PartialEq)]
 pub enum Bindings {
+    /// A local frame's `(symbol, value)` pairs.
     Small(Vec<(GcRef, GcRef)>),
+    /// A top-level frame's bindings, by symbol.
     Large(HashMap<GcRef, TopBinding>),
 }
 
@@ -76,11 +86,14 @@ pub enum Bindings {
 /// variable alone, and `set!` of one is an error (design/libraries-design.md).
 #[derive(Debug, PartialEq)]
 pub struct TopBinding {
+    /// The variable.
     pub cell: CellRef,
+    /// Whether the cell belongs to another environment.
     pub imported: bool,
 }
 
 impl Bindings {
+    /// The value bound to `symbol` in this frame.
     fn get(&self, symbol: GcRef) -> Option<GcRef> {
         match self {
             Bindings::Small(v) => v.iter().find(|(k, _)| *k == symbol).map(|(_, v)| *v),
@@ -88,6 +101,8 @@ impl Bindings {
         }
     }
 
+    /// Bind `symbol` to `val` in this frame: overwrite a local binding or
+    /// a top-level cell, or give an imported name a fresh cell of its own.
     fn insert(&mut self, symbol: GcRef, val: GcRef) {
         match self {
             Bindings::Small(v) => {
@@ -119,7 +134,9 @@ impl Bindings {
 /// A single environment frame containing variable bindings
 #[derive(Debug, PartialEq)]
 pub struct Frame {
+    /// The variables bound in this frame.
     pub bindings: Bindings,
+    /// The enclosing frame; `None` for a top-level frame.
     pub parent: Option<EnvRef>,
     /// The GC epoch (see `crate::gc::GC_EPOCH`) this frame was last visited
     /// in during marking. Since a mark walk always continues to the root,
@@ -159,23 +176,37 @@ impl Frame {
     }
 }
 
+/// Operations on an environment. Symbols are compared by identity, so an
+/// alias and the symbol it renames are different keys (see
+/// `eval::identifiers` for hygienic lookup).
 pub trait EnvOps {
-    fn lookup(&self, symbol: GcRef) -> Option<GcRef>; // Search all frames
-    fn lookup_local(&self, symbol: GcRef) -> Option<GcRef>; // Search only this frame
-    fn lookup_with_frame(&self, symbol: GcRef) -> Option<(GcRef, EnvRef)>; // Search all frames and return the frame where the binding was found
-    fn define(&self, symbol: GcRef, val: GcRef); // Define a binding in this frame
+    /// The value of `symbol`, searching this frame and then its ancestors.
+    fn lookup(&self, symbol: GcRef) -> Option<GcRef>;
+    /// The value of `symbol` in this frame only.
+    fn lookup_local(&self, symbol: GcRef) -> Option<GcRef>;
+    /// The value of `symbol`, searching all frames, and the frame it was
+    /// found in.
+    fn lookup_with_frame(&self, symbol: GcRef) -> Option<(GcRef, EnvRef)>;
+    /// Bind `symbol` to `val` in this frame.
+    fn define(&self, symbol: GcRef, val: GcRef);
+    /// The cell for a top-level name, made unbound if new.
     #[allow(dead_code)] // for define-library (phase 9d) and pre-analysis
-    fn cell(&self, symbol: GcRef) -> Option<CellRef>; // The cell for a top-level name, made unbound if new
-    fn bind_cell(&self, symbol: GcRef, cell: CellRef); // Import: make a top-level name denote an existing cell
-    fn top_level_cells(&self) -> Vec<(GcRef, CellRef)>; // A top-level frame's bound names and their cells
-    fn is_imported(&self, symbol: GcRef) -> bool; // Whether this frame's binding of symbol is imported
+    fn cell(&self, symbol: GcRef) -> Option<CellRef>;
+    /// Import: make a top-level name denote an existing cell.
+    fn bind_cell(&self, symbol: GcRef, cell: CellRef);
+    /// A top-level frame's bound names and their cells.
+    fn top_level_cells(&self) -> Vec<(GcRef, CellRef)>;
+    /// Whether this frame's binding of `symbol` is imported.
+    fn is_imported(&self, symbol: GcRef) -> bool;
+    /// Whether `define` and `set!` are allowed in this environment.
     fn is_mutable(&self) -> bool;
-    fn extend(&self) -> EnvRef; // Create a new frame with this frame as parent
+    /// A new, empty frame with this frame as parent.
+    fn extend(&self) -> EnvRef;
+    /// The enclosing environment, if any.
     fn parent(&self) -> Option<EnvRef>;
 }
 
 impl EnvOps for EnvRef {
-    /// Get a binding from this frame using a symbol key (doesn't search parent)
     fn lookup(&self, symbol: GcRef) -> Option<GcRef> {
         let mut current = Some(self.clone());
         while let Some(env) = current {

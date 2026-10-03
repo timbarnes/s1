@@ -1,9 +1,19 @@
-/// special_forms.rs
-/// Definitions of special forms implemented internally
-///
-/// Special forms are given the full expression, including the name of the form.
-/// This is required for lambda and macro differentiation.
-///
+//! The special forms implemented in Rust: `quote`, `define`, `set!`,
+//! `lambda`, `if`, `cond`, `let` and its variants, `do`, `quasiquote`,
+//! `guard`, `syntax-rules`, `case-lambda` and others.
+//!
+//! A special form gets the full expression, including the form's name
+//! (which `lambda` and `macro` need to tell themselves apart), plus the
+//! machine. It never evaluates subexpressions itself. It either pushes
+//! continuation frames and sets the control (`insert_*` in `eval::kont`),
+//! or rewrites itself into simpler core forms and evaluates the rewrite.
+//! The rewrites of forms evaluated more than once are cached
+//! (`rewrite_once`).
+//!
+//! Rewrites refer to core forms and procedures through `GcHeap::core_id` /
+//! `core_form` and use fresh symbols for temporaries, so user bindings
+//! can't change what they mean.
+
 use crate::env::{EnvOps, EnvRef};
 use crate::eval::{
     AndOrKind, CEKState, CondClause, Control, Kont, RunTime, expect_at_least_n_args,
@@ -20,20 +30,19 @@ use crate::utilities::post_error;
 use std::rc::Rc;
 use std::time::Instant;
 
+/// The shape of a `lambda` parameter list.
 enum Ptype {
-    Empty,    // No arguments to function
-    Variadic, // Variadic argument to function
-    List,     // List of arguments to function
-    Dotted,   // Dotted list of arguments to function
+    /// `()`: no parameters.
+    Empty,
+    /// `args`: one symbol takes all the arguments.
+    Variadic,
+    /// `(a b)`: a proper list.
+    List,
+    /// `(a b . rest)`: a dotted list.
+    Dotted,
 }
 
-/// Macro to register special forms in the environment
-///
-/// Usage: register_special_form!(heap, env,
-///     "name" => function,
-///     "another" => another_function,
-/// );
-
+/// Bind the special forms in `env`.
 pub fn register_special_forms(heap: &mut GcHeap, env: EnvRef) {
     register_special_form!(heap, env,
         "quote" => quote_sf,
@@ -78,8 +87,8 @@ pub fn register_special_forms(heap: &mut GcHeap, env: EnvRef) {
 }
 
 /// Callable logic: create a closure or a macro with captured environment
-/// (lambda (params...) body1 body2 ...) => return closure
-/// (macro (params...) body1 body2 ...) => return macro
+/// `(lambda (params...) body1 body2 ...)` => return closure
+/// `(macro (params...) body1 body2 ...)` => return macro
 ///     params can take one of four forms:
 ///     - an empty vec, meaning no arguments
 ///     - a vec with a single entry, meaning variadic arguments bound as a list
@@ -265,7 +274,7 @@ fn quote_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), S
     }
 }
 
-/// (begin form1 ..)
+/// `(begin form1 ..)`
 fn begin_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     // (begin expr1 expr2 ... exprN) => evaluate each in sequence, return last
     let mut argvec = expect_at_least_n_args(&ec.heap, expr, 2)?;
@@ -283,7 +292,7 @@ fn begin_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), S
     Ok(())
 }
 
-/// (define sym expr)
+/// `(define sym expr)`
 pub fn define_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let args = list_to_vec(&ec.heap, expr)?;
     if args.len() < 3 {
@@ -344,7 +353,7 @@ pub fn define_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
     }
 }
 
-/// (syntax-error message args ...)
+/// `(syntax-error message args ...)`
 /// Raises an error whose message is `message` and whose irritants are the
 /// `args`, unevaluated (R7RS 4.3.3). s1 expands a macro use when it is
 /// evaluated, so the error is raised then.
@@ -377,7 +386,7 @@ fn identifier_name(heap: &GcHeap, id: GcRef) -> String {
     }
 }
 
-/// (set! sym expr)
+/// `(set! sym expr)`
 /// sym must have been previously defined.
 pub fn set_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let args = expect_n_args(&ec.heap, expr, 3)?;
@@ -415,7 +424,7 @@ pub fn set_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(),
     }
 }
 
-/// (if test consequent alternate)
+/// `(if test consequent alternate)`
 /// Requires three arguments.
 pub fn if_sf(expr: GcRef, evaluator: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let args = expect_at_least_n_args(&evaluator.heap, expr, 3);
@@ -445,7 +454,7 @@ pub fn if_sf(expr: GcRef, evaluator: &mut RunTime, state: &mut CEKState) -> Resu
     }
 }
 
-/// (cond (test1 expr) [(test 2...)] [(else expr)])
+/// `(cond (test1 expr) [(test 2...)] [(else expr)])`
 pub fn cond_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let mut args = expect_at_least_n_args(&ec.heap, expr, 2)?;
     args = args.into_iter().skip(1).collect();
@@ -611,6 +620,8 @@ pub fn let_star_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Resul
     Ok(())
 }
 
+/// `(let* ((v1 e1) rest ...) body ...)` as
+/// `(let ((v1 e1)) (let* (rest ...) body ...))`.
 fn rewrite_let_star(expr: GcRef, ec: &mut RunTime) -> Result<GcRef, String> {
     let formvec = expect_at_least_n_args(&ec.heap, expr, 3)?;
     let bindings = list_to_vec(&mut ec.heap, formvec[1])?; // (let* bindings . body)
@@ -652,6 +663,8 @@ pub fn letrec_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
     Ok(())
 }
 
+/// `(letrec ((v e) ...) body ...)` as
+/// `(let ((v #f) ...) (set! v e) ... body ...)`.
 fn rewrite_letrec(expr: GcRef, ec: &mut RunTime) -> Result<GcRef, String> {
     let formvec = expect_at_least_n_args(&ec.heap, expr, 3)?;
     let bindings = list_to_vec(&mut ec.heap, formvec[1])?; // (letrec bindings . body)
@@ -725,7 +738,7 @@ fn expand_sf(expr: GcRef, _ec: &mut RunTime, state: &mut CEKState) -> Result<(),
     Ok(())
 }
 
-/// (quasiquote template)
+/// `(quasiquote template)`
 ///
 /// Lowers the template into an ordinary expression built from `cons`,
 /// `append`, `list->vector` and `quote` (see `lower_quasiquote` below), then
@@ -747,11 +760,16 @@ fn quasiquote_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
 /// expansion immune to a user rebinding `append` (etc.) — see
 /// `design/nested-evaluation.md`.
 struct QqProcs {
+    /// `cons`
     cons: GcRef,
+    /// `append`
     append: GcRef,
+    /// `list->vector`
     list_to_vector: GcRef,
 }
 
+/// Look up the procedures `quasiquote` expands into, in the global
+/// environment.
 fn qq_procs(env: &EnvRef, ec: &mut RunTime) -> Result<QqProcs, String> {
     let mut global = env.clone();
     while let Some(parent) = global.parent() {
@@ -868,6 +886,7 @@ fn lower_quasiquote(
     }
 }
 
+/// The operand of an `unquote`-like form, given its cdr.
 fn qq_single_arg(rest: GcRef) -> Option<GcRef> {
     match gc_value!(rest) {
         SchemeValue::Pair(car, _) => Some(*car),
@@ -899,7 +918,7 @@ fn global_value(env: &EnvRef, ec: &mut RunTime, name: &str) -> Result<GcRef, Str
         .ok_or_else(|| format!("{} is not bound", name))
 }
 
-/// (guard (var clause ...) body ...)
+/// `(guard (var clause ...) body ...)`
 ///
 /// Evaluates the body with an exception handler. If it raises, the handler
 /// escapes back to the guard's dynamic environment (running dynamic-wind
@@ -948,6 +967,7 @@ fn guard_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), S
     Ok(())
 }
 
+/// The expansion of a `guard` form described at `guard_sf`.
 fn rewrite_guard(expr: GcRef, env: &EnvRef, ec: &mut RunTime) -> Result<GcRef, String> {
     const USAGE: &str = "guard: expected (guard (var clause ...) body ...)";
     let form = list_to_vec(ec.heap, expr).map_err(|_| USAGE.to_string())?;
@@ -1036,7 +1056,7 @@ fn rewrite_guard(expr: GcRef, env: &EnvRef, ec: &mut RunTime) -> Result<GcRef, S
     Ok(expansion)
 }
 
-/// (syntax-rules [ellipsis] (literal ...) (pattern template) ...)
+/// `(syntax-rules [ellipsis] (literal ...) (pattern template) ...)`
 ///
 /// Evaluates to a hygienic transformer closed over the current environment
 /// (see src/syntax_rules.rs and design/hygiene-design.md). `define-syntax`
@@ -1054,7 +1074,7 @@ fn syntax_rules_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Resul
     Ok(())
 }
 
-/// (case-lambda (formals body ...) ...)
+/// `(case-lambda (formals body ...) ...)`
 ///
 /// A procedure that, when called, applies the first clause whose formals
 /// accept that many arguments. Each clause is made into a closure here, so
@@ -1083,14 +1103,14 @@ fn case_lambda_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result
     Ok(())
 }
 
-/// (let-syntax ((keyword transformer) ...) body ...): `let` over the
+/// `(let-syntax ((keyword transformer) ...) body ...)`: `let` over the
 /// transformers, so they are evaluated in the enclosing environment and the
 /// body (including any definitions in it) runs in a new frame.
 fn let_syntax_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     rewrite_head(expr, "let", ec, state)
 }
 
-/// (letrec-syntax ((keyword transformer) ...) body ...): as `let-syntax`, but
+/// `(letrec-syntax ((keyword transformer) ...) body ...)`: as `let-syntax`, but
 /// the transformers are evaluated in the new frame and can refer to each other.
 fn letrec_syntax_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     rewrite_head(expr, "letrec", ec, state)
@@ -1115,7 +1135,7 @@ fn unquote_splicing_sf(_expr: GcRef, _ec: &mut RunTime, _state: &mut CEKState) -
     Err("unquote-splicing: not inside a quasiquote".to_string())
 }
 
-/// (and expr1 expr2 ... exprN)
+/// `(and expr1 expr2 ... exprN)`
 /// Stops on first false value
 pub fn and_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     // (and expr1 expr2 ... exprN)
@@ -1135,7 +1155,7 @@ pub fn and_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(),
     Ok(())
 }
 
-/// (or expr1 expr2 ... exprN)
+/// `(or expr1 expr2 ... exprN)`
 /// Stops on first true value
 pub fn or_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     // (and expr1 expr2 ... exprN)
@@ -1154,6 +1174,8 @@ pub fn or_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), 
     Ok(())
 }
 
+/// `(with-timer expr)`: evaluate `expr` and report how long it took (see
+/// `Kont::Timer`).
 fn with_timer_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     let args = expect_n_args(&ec.heap, expr, 2)?;
     let prev = Rc::clone(&state.kont);
@@ -1174,6 +1196,7 @@ pub fn do_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), 
     Ok(())
 }
 
+/// A `do` loop as a named `let`.
 fn rewrite_do(expr: GcRef, ec: &mut RunTime) -> Result<GcRef, String> {
     let formvec = expect_at_least_n_args(&ec.heap, expr, 3)?;
 
@@ -1267,9 +1290,10 @@ fn rewrite_do(expr: GcRef, ec: &mut RunTime) -> Result<GcRef, String> {
     Ok(named_let)
 }
 
-/// Utility functions
-///
+// Utility functions
 
+/// A body whose leading forms are internal definitions, as a `letrec` of
+/// them around the rest of the body. A body without them becomes a `begin`.
 fn transform_internal_defines(body_exprs: &[GcRef], heap: &mut GcHeap) -> Result<GcRef, String> {
     let mut defines = Vec::new();
     let mut expressions = Vec::new();
@@ -1342,6 +1366,8 @@ fn transform_internal_defines(body_exprs: &[GcRef], heap: &mut GcHeap) -> Result
     Ok(letrec_expr)
 }
 
+/// A body as one expression: the form itself if there is one, else
+/// `(begin form ...)`.
 pub fn wrap_body_in_begin(body_exprs: &[GcRef], heap: &mut GcHeap) -> GcRef {
     if body_exprs.len() == 1 {
         body_exprs[0]
@@ -1353,11 +1379,13 @@ pub fn wrap_body_in_begin(body_exprs: &[GcRef], heap: &mut GcHeap) -> GcRef {
     }
 }
 
-// Convert a parameter list, returning the list and a flag indicating the type of list
+/// Whether `v` is a symbol.
 fn is_symbol(v: GcRef) -> bool {
     matches!(gc_value!(v), SchemeValue::Symbol(_))
 }
 
+/// The parameters of a `lambda` parameter list and its shape. A dotted
+/// list's rest parameter comes first.
 fn params_to_vec(heap: &mut GcHeap, mut list: GcRef) -> (Vec<GcRef>, Ptype) {
     let mut result = Vec::new();
     match &heap.get_value(list) {

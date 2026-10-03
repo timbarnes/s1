@@ -1,8 +1,13 @@
+//! Equivalence predicates (R7RS 6.1), symbol and boolean comparison and
+//! conversion, and the introspection procedures `type-of` and
+//! `procedure-source`.
+
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{Callable, GcHeap, GcRef, SchemeValue, get_symbol, new_bool};
 use crate::gc_value;
 use crate::register_builtin_family;
 
+/// Bind the predicate and symbol procedures in `env`.
 pub fn register_predicate_builtins(heap: &mut crate::gc::GcHeap, env: EnvRef) {
     register_builtin_family!(heap, env,
         "procedure-source" => (procedure_source, "(procedure-source proc) The lambda (or macro, or case-lambda) form proc was made from, or #f for a built-in procedure"),

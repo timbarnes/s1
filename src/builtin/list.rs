@@ -1,9 +1,14 @@
+//! Pairs and lists (R7RS 6.4): `car`, `cons`, `append`, `list-ref`,
+//! `memq`, `assq` and the rest of the list procedures written in Rust.
+//! (Others, such as `map` and `member`, are in scheme/s1-core.scm.)
+
 use crate::env::{EnvOps, EnvRef};
 use crate::gc::{GcHeap, GcRef, SchemeValue, new_int, new_pair, set_car, set_cdr};
 use crate::gc_value;
 use crate::register_builtin_family;
 use num_traits::ToPrimitive;
 
+/// Bind the list procedures in `env`.
 pub fn register_list_builtins(heap: &mut GcHeap, env: EnvRef) {
     register_builtin_family!(heap, env,
         "car" => (car_builtin, "(car pair) -> first element of pair"),

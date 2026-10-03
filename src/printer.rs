@@ -1,4 +1,11 @@
-// Only keep this function for pretty-printing SchemeValueSimple:
+//! External representations of Scheme values: what `display`, `write`,
+//! `write-shared` and `write-simple` produce, and what the REPL prints.
+//!
+//! Pairs and vectors that close a cycle (or, for `write-shared`, appear
+//! more than once) are printed with datum labels (`#0=` / `#0#`), so
+//! printing terminates on circular data. Long lists are printed without
+//! recursion on the cdr.
+
 use crate::gc::SchemeValue::*;
 use crate::gc::{Callable, GcRef};
 use crate::gc_value;
@@ -29,14 +36,20 @@ pub fn write_simple_value(obj: &GcRef) -> String {
 }
 
 #[derive(Clone, Copy, PartialEq)]
+/// Which objects get datum labels.
 enum Labels {
+    /// Only those that close a cycle (`write`, `display`).
     Cycles,
+    /// Every pair or vector reached more than once (`write-shared`).
     Shared,
+    /// None (`write-simple`).
     None,
 }
 
 /// Datum-label state while printing one object.
 struct Ctx {
+    /// `write` style (escaped strings and characters) rather than
+    /// `display` style.
     write: bool,
     /// Objects that get a label
     needs: HashSet<GcRef>,
@@ -44,6 +57,7 @@ struct Ctx {
     assigned: HashMap<GcRef, usize>,
 }
 
+/// Print `obj` in `write` or `display` style, labelling per `mode`.
 fn render(obj: GcRef, write: bool, mode: Labels) -> String {
     let needs = match mode {
         Labels::None => HashSet::default(),
@@ -61,6 +75,7 @@ fn render(obj: GcRef, write: bool, mode: Labels) -> String {
     out
 }
 
+/// Whether `obj` can be part of a cycle: a pair or vector.
 fn is_compound(obj: GcRef) -> bool {
     matches!(gc_value!(obj), Pair(..) | Vector(_))
 }
@@ -146,6 +161,7 @@ fn label_prefix(out: &mut String, obj: GcRef, ctx: &mut Ctx) -> bool {
     false
 }
 
+/// Append the representation of `obj` to `out`.
 fn print_into(out: &mut String, obj: GcRef, ctx: &mut Ctx) {
     let write = ctx.write;
     match gc_value!(obj) {
@@ -265,6 +281,7 @@ fn print_into(out: &mut String, obj: GcRef, ctx: &mut Ctx) {
     }
 }
 
+/// Print `items` separated by spaces.
 fn print_separated(out: &mut String, items: &[GcRef], ctx: &mut Ctx) {
     for (i, item) in items.iter().enumerate() {
         if i > 0 {
@@ -316,6 +333,8 @@ fn write_symbol(out: &mut String, s: &str) {
     out.push('|');
 }
 
+/// Whether a symbol named `s` must be written as `|...|` to read back
+/// as the same symbol.
 fn needs_bars(s: &str) -> bool {
     let mut chars = s.chars();
     let Some(first) = chars.next() else {
@@ -381,6 +400,7 @@ fn opaque(kind: &str, name: &Option<String>) -> String {
     }
 }
 
+/// The printed form of a port, e.g. `#<input-port stdin>`.
 fn describe_port(port: &crate::io::PortKind) -> String {
     use crate::io::PortKind::*;
     match port {

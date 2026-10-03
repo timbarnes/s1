@@ -1,3 +1,17 @@
+//! `GcHeap`: allocation, symbol interning, the singleton values, and the
+//! mark-and-sweep collector.
+//!
+//! Objects are individually boxed and tracked in a list; `collect_garbage`
+//! marks from the roots it is handed (the CEK state, ports, dynamic-wind
+//! and argument stacks, handlers) plus the heap's own (symbols, libraries,
+//! cached core identifiers), then frees everything unmarked. Marks are
+//! epochs rather than bits, so no unmark pass is needed. Collection runs
+//! when allocations since the last one exceed `threshold` and the number of
+//! objects that survived the last one (`needs_gc`).
+//!
+//! The heap also holds two ephemeron tables used by hygiene and expansion
+//! caching, `aliases` and `expansions` (design/hygiene-design.md).
+
 #![allow(dead_code)]
 
 use super::{Callable, GcObject, GcRef, Mark, SchemeValue};
@@ -11,39 +25,45 @@ pub const DEFAULT_GC_THRESHOLD: usize = 20000;
 /// The garbage-collected heap that manages all Scheme objects.
 pub struct GcHeap {
     // Singleton values for SchemeValueSimple
+    /// The singleton `()`.
     pub nil_obj: Option<GcRef>,
+    /// The singleton `#t`.
     pub true_obj: Option<GcRef>,
+    /// The singleton `#f`.
     pub false_obj: Option<GcRef>,
     // pub tail_call_obj: Option<GcRef>,
+    /// The singleton end-of-file object.
     pub eof_obj: Option<GcRef>,
+    /// The singleton unspecified value.
     pub undefined_obj: Option<GcRef>,
+    /// The singleton void value.
     pub void_obj: Option<GcRef>,
-    // All allocated GcRef objects (for potential future GC)
+    /// Every allocated object; the sweep walks this.
     objects: Vec<GcRef>,
-    // Reusable worklist for marking objects during GC
+    /// Reusable worklist for marking objects during GC.
     worklist: Vec<GcRef>,
-    // Symbol table for interning symbols (name -> symbol object)
+    /// Symbol table for interning symbols (name -> symbol object).
     symbol_table: HashMap<String, GcRef>,
-    // Documentation attached to symbols via add-doc, independent of what
-    // (if anything) the symbol is currently bound to.
+    /// Documentation attached to symbols via add-doc, independent of what
+    /// (if anything) the symbol is currently bound to.
     doc_table: HashMap<GcRef, String>,
-    // Number of allocations since last GC
+    /// Number of allocations since last GC.
     allocations: usize,
     /// The minimum number of allocations between collections (see
     /// `needs_gc`); `gc-threshold` sets it.
     pub threshold: usize,
     /// How many objects survived the last collection.
     live_after_gc: usize,
-    // Bumped at the start of every collection; an object is "marked" for
-    // the current cycle when its own `marked` field equals this. Avoids a
-    // full-heap pass to reset every object's mark bit before each GC (F7)
-    // — see `collect_garbage`.
+    /// Bumped at the start of every collection; an object is "marked" for
+    /// the current cycle when its own `marked` field equals this. Avoids a
+    /// full-heap pass to reset every object's mark bit before each GC (F7)
+    /// — see `collect_garbage`.
     current_epoch: u64,
-    // When set (via the S1_GC_POISON env var), sweep() overwrites an
-    // unmarked object's value with a "<<FREED>>" sentinel and leaks the box
-    // instead of freeing it, turning a premature free into a visible marker
-    // in printed output instead of silent corruption or a use-after-free.
-    // See design/nested-evaluation.md's "Tooling worth keeping".
+    /// When set (via the S1_GC_POISON env var), sweep() overwrites an
+    /// unmarked object's value with a `"<<FREED>>"` sentinel and leaks the box
+    /// instead of freeing it, turning a premature free into a visible marker
+    /// in printed output instead of silent corruption or a use-after-free.
+    /// See design/nested-evaluation.md's "Tooling worth keeping".
     poison_sweep: bool,
     /// Identifiers renamed by `syntax-rules` expansion (see
     /// design/hygiene-design.md). Each key is an uninterned symbol; its entry
@@ -80,13 +100,18 @@ pub struct CachedExpansion {
     /// The transformer that produced it: a use re-bound to a different
     /// macro misses the cache.
     transformer: GcRef,
+    /// The expanded form.
     expansion: GcRef,
+    /// The GC epoch in which `transformer` and `expansion` were last
+    /// marked, so each live entry is traced once per collection.
     traced: std::cell::Cell<u64>,
 }
 
 /// An alias's renaming record; see `GcHeap::aliases`.
 pub struct Alias {
+    /// The identifier the alias renames (itself possibly an alias).
     pub original: GcRef,
+    /// The macro's definition environment, where `original` is resolved.
     pub env: crate::env::EnvRef,
     /// The GC epoch in which this entry's `original` and `env` were last
     /// marked, so each live entry is traced once per collection.
@@ -193,18 +218,22 @@ impl GcHeap {
         raw
     }
 
+    /// The object `gcref` points to.
     pub fn get(&self, gcref: GcRef) -> &GcObject {
         unsafe { &*gcref }
     }
 
+    /// The object `gcref` points to, mutably.
     pub fn get_mut(&mut self, gcref: GcRef) -> &mut GcObject {
         unsafe { &mut *gcref }
     }
 
+    /// The value `r` points to; the same as `gc_value!`.
     pub fn get_value(&self, r: GcRef) -> &SchemeValue {
         unsafe { &(*r).value }
     }
 
+    /// The value `r` points to, mutably; the same as `gc_value_mut!`.
     pub fn get_value_mut(&self, r: GcRef) -> &mut SchemeValue {
         unsafe { &mut (*r).value }
     }
@@ -320,10 +349,13 @@ impl GcHeap {
         self.core_forms.clear();
     }
 
+    /// Record the interaction environment (see `interaction_env`).
     pub fn set_interaction_env(&mut self, env: crate::env::EnvRef) {
         self.interaction_env = Some(env);
     }
 
+    /// The environment the REPL and loaded files run in, once `main` has
+    /// made it; `interaction-environment` returns it.
     pub fn interaction_env(&self) -> Option<crate::env::EnvRef> {
         self.interaction_env.clone()
     }
@@ -467,6 +499,10 @@ impl GcHeap {
         self.live_after_gc = self.objects.len();
     }
 
+    /// Mark everything reachable from the given roots and the heap's own:
+    /// the singletons, symbols, libraries, cached core identifiers and the
+    /// environments. Ephemeron entries are traced only once their key is
+    /// marked, repeating until no more are.
     fn mark_from(
         &mut self,
         state: &crate::eval::CEKState,
@@ -573,6 +609,8 @@ impl GcHeap {
         }
     }
 
+    /// Free every object not marked in the current epoch, first dropping
+    /// the alias, expansion and `seen` entries whose keys are going.
     fn sweep(&mut self) {
         let poison = self.poison_sweep;
         let epoch = self.current_epoch;
@@ -627,6 +665,7 @@ impl GcHeap {
 /// and popped — k times instead of once, since nothing stopped the earlier
 /// k-1 duplicates from being queued before the first one was processed.)
 #[inline]
+/// Mark `gcref` for `epoch` and queue it, unless it already is.
 fn push_if_unmarked(gcref: GcRef, epoch: u64, worklist: &mut Vec<GcRef>) {
     if *crate::gc_marked!(gcref) == epoch {
         return;
@@ -635,6 +674,7 @@ fn push_if_unmarked(gcref: GcRef, epoch: u64, worklist: &mut Vec<GcRef>) {
     worklist.push(gcref);
 }
 
+/// Mark everything reachable from `start`, iteratively via `worklist`.
 fn mark_reachable(start: GcRef, epoch: u64, worklist: &mut Vec<GcRef>) {
     push_if_unmarked(start, epoch, worklist);
 
@@ -701,17 +741,22 @@ fn mark_reachable(start: GcRef, epoch: u64, worklist: &mut Vec<GcRef>) {
     }
 }
 
+/// Walks the elements of a proper list, failing on an improper tail.
 pub struct ResultListIter {
+    /// The rest of the list; `None` once the end is reached.
     current: Option<GcRef>,
 }
 
 impl ResultListIter {
+    /// An iterator over the list starting at `start`.
     pub fn new(start: GcRef) -> Self {
         Self {
             current: Some(start),
         }
     }
 
+    /// The next element, `None` at the end, or an error if the list is
+    /// improper.
     pub fn next(&mut self, heap: &GcHeap) -> Result<Option<GcRef>, String> {
         let current = match self.current {
             Some(gcref) => gcref,

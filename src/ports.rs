@@ -19,11 +19,14 @@ use crate::printer::{display_value, print_value};
 use crate::{gc_value, gc_value_mut, register_builtin_family, register_sys_builtins};
 use std::io::Write;
 
-/// Indexes into `RunTime::current_ports`.
+/// Index of the current input port in `RunTime::current_ports`.
 pub const INPUT: usize = 0;
+/// Index of the current output port in `RunTime::current_ports`.
 pub const OUTPUT: usize = 1;
+/// Index of the current error port in `RunTime::current_ports`.
 pub const ERROR: usize = 2;
 
+/// Bind the port and I/O procedures in `env`.
 pub fn register_port_builtins(rt: &mut RunTime, env: EnvRef) {
     register_sys_builtins!(rt, env,
         "current-input-port" => current_input_port_sp,
@@ -95,6 +98,7 @@ fn done(state: &mut CEKState, value: GcRef, next: KontRef) -> Result<(), String>
     Ok(())
 }
 
+/// Check that `who` got between `min` and `max` arguments.
 fn arity(args: &[GcRef], min: usize, max: usize, who: &str) -> Result<(), String> {
     if args.len() < min || args.len() > max {
         Err(format!("{}: wrong number of arguments ({})", who, args.len()))
@@ -111,6 +115,7 @@ pub fn port_mut(v: GcRef, who: &str) -> Result<&'static mut PortKind, String> {
     }
 }
 
+/// The port `v`, if it is one.
 fn port_ref(v: GcRef) -> Option<&'static PortKind> {
     match gc_value!(v) {
         SchemeValue::Port(kind) => Some(&**kind),
@@ -123,6 +128,7 @@ fn port_or_current(rt: &RunTime, args: &[GcRef], i: usize, which: usize) -> GcRe
     args.get(i).copied().unwrap_or(rt.current_ports[which])
 }
 
+/// The error for using a closed port.
 fn closed_error(who: &str) -> String {
     format!("{}: the port is closed", who)
 }
@@ -167,6 +173,7 @@ fn get_char(port: GcRef, who: &str, peek: bool) -> Result<Option<char>, String> 
     }
 }
 
+/// A character, or the eof object for `None`.
 fn char_or_eof(heap: &mut GcHeap, c: Option<char>) -> GcRef {
     match c {
         Some(c) => new_char(heap, c),
@@ -181,6 +188,7 @@ pub fn raise_file_error(rt: &mut RunTime, state: &mut CEKState, msg: &str, filen
     Ok(())
 }
 
+/// The text of a string argument.
 fn string_arg(v: GcRef, who: &str) -> Result<&'static str, String> {
     match gc_value!(v) {
         SchemeValue::Str(s) => Ok(s),
@@ -220,6 +228,7 @@ fn current_port(
     done(state, value, next)
 }
 
+/// The value of `sym` in the global (outermost) environment.
 fn global_value(state: &CEKState, sym: GcRef) -> Option<GcRef> {
     let mut env = state.env.clone();
     while let Some(parent) = env.parent() {
@@ -258,6 +267,8 @@ fn check_output_port(_heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String
 // Opening and closing
 // ---------------------------------------------------------------------------
 
+/// `open-input-file` and `open-binary-input-file`: read the whole file
+/// into a string or bytevector input port.
 fn open_input(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: KontRef, binary: bool) -> Result<(), String> {
     let who = if binary { "open-binary-input-file" } else { "open-input-file" };
     arity(args, 1, 1, who)?;
@@ -285,6 +296,7 @@ fn open_binary_input_file_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKSt
     open_input(rt, args, state, next, true)
 }
 
+/// `open-output-file` and `open-binary-output-file`.
 fn open_output(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: KontRef, binary: bool) -> Result<(), String> {
     let who = if binary { "open-binary-output-file" } else { "open-output-file" };
     arity(args, 1, 1, who)?;
@@ -353,7 +365,7 @@ fn delete_file_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: 
 // Textual input
 // ---------------------------------------------------------------------------
 
-/// (read [port])
+/// `(read [port])`
 fn read_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: KontRef) -> Result<(), String> {
     arity(args, 0, 1, "read")?;
     let port = port_or_current(rt, args, 0, INPUT);
@@ -389,7 +401,7 @@ fn peek_char_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: Ko
     done(state, value, next)
 }
 
-/// (read-line [port]): the characters up to the next line ending (\n, \r
+/// `(read-line [port])`: the characters up to the next line ending (\n, \r
 /// or \r\n), which is consumed but not included; the eof object at end of
 /// file.
 fn read_line_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: KontRef) -> Result<(), String> {
@@ -421,7 +433,7 @@ fn read_line_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: Ko
     done(state, value, next)
 }
 
-/// (read-string k [port]): up to k characters; the eof object if none.
+/// `(read-string k [port])`: up to k characters; the eof object if none.
 fn read_string_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: KontRef) -> Result<(), String> {
     arity(args, 1, 2, "read-string")?;
     let k = match gc_value!(args[0]) {
@@ -445,7 +457,7 @@ fn read_string_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: 
     done(state, value, next)
 }
 
-/// (char-ready? [port]): #t if a character can be read without waiting
+/// `(char-ready? [port])`: #t if a character can be read without waiting
 /// (always, for string ports, including at end of file).
 fn char_ready_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: KontRef) -> Result<(), String> {
     arity(args, 0, 1, "char-ready?")?;
@@ -506,7 +518,7 @@ fn write_char_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: K
     done(state, rt.heap.void(), next)
 }
 
-/// (write-string string [port [start [end]]])
+/// `(write-string string [port [start [end]]])`
 fn write_string_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: KontRef) -> Result<(), String> {
     arity(args, 1, 4, "write-string")?;
     let s = string_arg(args[0], "write-string")?;
@@ -567,7 +579,7 @@ fn write_u8_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: Kon
     done(state, rt.heap.void(), next)
 }
 
-/// (write-bytevector bv [port [start [end]]])
+/// `(write-bytevector bv [port [start [end]]])`
 fn write_bytevector_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: KontRef) -> Result<(), String> {
     arity(args, 1, 4, "write-bytevector")?;
     let bv = match gc_value!(args[0]) {
@@ -584,7 +596,7 @@ fn write_bytevector_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, n
 // Loading support: the REPL reads forms from the port on top of this stack
 // ---------------------------------------------------------------------------
 
-/// (push-port! port): read and evaluate forms from port next (used by load).
+/// `(push-port! port)`: read and evaluate forms from port next (used by load).
 fn push_port_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: KontRef) -> Result<(), String> {
     arity(args, 1, 1, "push-port!")?;
     rt.port_stack.push(args[0]);
@@ -601,6 +613,7 @@ fn pop_port_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: Kon
 // Predicates and string ports (no runtime state needed)
 // ---------------------------------------------------------------------------
 
+/// A port predicate: whether the argument is a port satisfying `test`.
 fn port_test(heap: &mut GcHeap, args: &[GcRef], who: &str, test: fn(&PortKind) -> bool) -> Result<GcRef, String> {
     arity(args, 1, 1, who)?;
     let result = port_ref(args[0]).is_some_and(test);
@@ -705,6 +718,7 @@ fn binary_input(port: GcRef, who: &str) -> Result<(&'static [u8], &'static mut u
     }
 }
 
+/// A byte as an integer, or the eof object for `None`.
 fn byte_or_eof(heap: &mut GcHeap, b: Option<u8>) -> GcRef {
     match b {
         Some(b) => crate::gc::new_int(heap, num_bigint::BigInt::from(b)),
@@ -741,7 +755,7 @@ fn u8_ready(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     Ok(new_bool(heap, true))
 }
 
-/// (read-bytevector k port)
+/// `(read-bytevector k port)`
 fn read_bytevector(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     arity(args, 1, 2, "read-bytevector")?;
     let k = match gc_value!(args[0]) {
@@ -760,7 +774,7 @@ fn read_bytevector(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     Ok(crate::gc::new_bytevector(heap, out))
 }
 
-/// (read-bytevector! bv port [start [end]]): the number of bytes read into
+/// `(read-bytevector! bv port [start [end]])`: the number of bytes read into
 /// bv starting at start, or the eof object if none were available.
 fn read_bytevector_into(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     arity(args, 1, 4, "read-bytevector!")?;

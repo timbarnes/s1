@@ -16,6 +16,7 @@ use std::rc::Rc;
 
 /// Where an identifier's binding was found.
 pub struct Resolved {
+    /// The bound value.
     pub value: GcRef,
     /// The frame holding the binding
     pub frame: EnvRef,
@@ -117,6 +118,8 @@ pub fn strip_datum(heap: &mut GcHeap, datum: GcRef) -> GcRef {
     copy_stripped(heap, datum)
 }
 
+/// Whether `datum` contains an alias, setting `cyclic` if it meets a
+/// pair or vector twice.
 fn contains_alias(heap: &GcHeap, datum: GcRef, seen: &mut HashSet<GcRef>, cyclic: &mut bool) -> bool {
     match gc_value!(datum) {
         SchemeValue::Symbol(_) => heap.alias(datum).is_some(),
@@ -139,6 +142,7 @@ fn contains_alias(heap: &GcHeap, datum: GcRef, seen: &mut HashSet<GcRef>, cyclic
     }
 }
 
+/// A copy of the acyclic `datum` with every alias stripped.
 fn copy_stripped(heap: &mut GcHeap, datum: GcRef) -> GcRef {
     match gc_value!(datum) {
         SchemeValue::Symbol(_) => strip(heap, datum),

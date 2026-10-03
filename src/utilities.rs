@@ -1,5 +1,7 @@
-/// Internal utility functions
-///
+//! Internal utilities: error reporting from Rust code (`post_error`), the
+//! tracer and interactive stepper behind `trace`, and debug dumps of the
+//! machine state, continuations and environments.
+
 use crate::env::{EnvOps, EnvRef};
 use crate::eval::{AndOrKind, CEKState, Control, Kont, KontRef};
 use crate::eval::{RunTime, TraceType};
@@ -16,8 +18,8 @@ pub fn post_error(state: &mut CEKState, ec: &mut RunTime, error: &str) {
     crate::eval::exceptions::raise_error(state, ec, crate::gc::ErrorKind::General, error, nil);
 }
 
-/// Trace / debug function called from within the CEK machine and on error
-///
+/// Trace / debug function called from within the CEK machine and on error.
+/// What it does depends on the `trace` mode (see `eval::TraceType`).
 pub fn debugger(loc: &str, state: &CEKState, ec: &mut RunTime) {
     // simple indentation
     match ec.trace {
@@ -41,6 +43,8 @@ pub fn debugger(loc: &str, state: &CEKState, ec: &mut RunTime) {
     }
 }
 
+/// Indent trace output `n` levels; with `v`, mark every tenth level with
+/// its number.
 fn indent(n: i32, v: bool) {
     for i in 0..n {
         if v {
@@ -57,6 +61,8 @@ fn indent(n: i32, v: bool) {
     }
 }
 
+/// The stepper's prompt: read and run debugger commands until one moves
+/// the machine on.
 fn debug_interactive(state: &CEKState, ec: &mut RunTime) {
     use std::io::{self, Write};
     loop {
@@ -111,6 +117,7 @@ fn debug_interactive(state: &CEKState, ec: &mut RunTime) {
     }
 }
 
+/// A one-line description of the control.
 fn dump_control(control: &Control) -> String {
     match control {
         Control::Expr(obj) => format!("Expr:  {}", print_value(obj)),
@@ -146,6 +153,7 @@ pub fn dbg_cek(loc: &str, state: &CEKState) {
     }
 }
 
+/// A one-line description of a continuation frame.
 pub fn dbg_one_kont(loc: &str, frame: &Kont) -> String {
     let mut result = format!("{} ", loc);
     match frame {
@@ -253,6 +261,7 @@ pub fn dbg_one_kont(loc: &str, frame: &Kont) -> String {
     result
 }
 
+/// Print the continuation chain from `kont` down.
 pub fn dbg_kont(loc: &str, kont: &KontRef) {
     print!("{}Stack: ", loc);
     let mut kr = Rc::clone(&kont);
@@ -269,6 +278,7 @@ pub fn dbg_kont(loc: &str, kont: &KontRef) {
     println!("");
 }
 
+/// Print the name of a frame's kind.
 pub fn _dbg_short_kont(kont: &KontRef) {
     match **kont {
         Kont::Halt => println!("    Halt"),
@@ -298,6 +308,7 @@ pub fn _dbg_short_kont(kont: &KontRef) {
     }
 }
 
+/// A one-line summary of a frame's bindings.
 pub fn dbg_env_short(frame: &EnvRef) -> String {
     use std::cmp::min;
     let frame = frame.borrow();
@@ -319,6 +330,7 @@ pub fn dbg_env_short(frame: &EnvRef) -> String {
     result
 }
 
+/// Print one frame's bindings, sorted by name.
 pub fn dbg_one_env(frame: &EnvRef, depth: usize) {
     let frame = frame.borrow();
     let mut bindings = Vec::new();
@@ -364,6 +376,7 @@ pub fn dbg_env(loc: &str, frame: EnvRef, global: bool) {
 use std::io;
 use std::process::Command;
 
+/// Run `cmd` with `sh -c` and return its standard output.
 pub fn run_command(cmd: &str) -> io::Result<String> {
     let output = Command::new("sh").arg("-c").arg(cmd).output()?;
     // Convert stdout bytes to String, trimming trailing newlines if you like

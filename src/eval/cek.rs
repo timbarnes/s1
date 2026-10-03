@@ -1,8 +1,25 @@
+//! The CEK machine: the evaluator's main loop.
+//!
+//! [`eval_main`] evaluates one top-level form by stepping the machine until
+//! a value reaches the `Halt` frame. Each [`step`] either evaluates the
+//! control expression (`eval_cek`): it looks up a variable, starts an
+//! application by pushing a `Kont::EvalArg` frame, or hands a special form
+//! its unevaluated form. Or it returns the control value to the top frame
+//! (`dispatch_kont`, with one `handle_*` function per frame kind).
+//! Procedure application is `apply_proc` and `apply_from_stack`.
+//!
+//! The evaluator never recurses on the Rust stack for Scheme calls, so
+//! deep recursion, tail calls and first-class continuations all work.
+//! Garbage is collected only after a closure returns (`handle_restore_env`)
+//! and on a tail call, when the machine state holds every live reference.
+//!
+//! Expressions simple enough to need no machine step (constants, variables,
+//! small built-in calls) are evaluated directly by [`immediate`]; see
+//! design/precompilation-design.md.
+
 use super::kont::{
     AndOrKind, CEKState, CondClause, Control, Kont, KontRef, MacroMode, insert_eval,
 };
-/// Continuation-Passing Style (CPS) evaluator.
-///
 use crate::env::{EnvOps, EnvRef};
 use crate::eval::kont::{DynamicWindPhase, DynamicWindProcs, EscapePayload, EvalSeqForms};
 use crate::eval::{DynamicWind, RunTime, bind_params};
@@ -66,8 +83,6 @@ fn run_cek(mut state: &mut CEKState, rt: &mut RunTime) -> Result<Vec<GcRef>, Str
 ///
 /// This function looks at the current control expression and continuation frame,
 /// resolving symbols, starting applications, and handling continuations as needed.
-///
-
 fn step(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> {
     //dump_cek("  step", &state);
     // Hoisted out of debugger() so the common (tracing off) case is a branch on
@@ -183,6 +198,7 @@ fn all_qualify(rt: &RunTime, state: &CEKState, mut args: GcRef, depth: u32) -> b
 
 /// The result of trying to evaluate an expression without machine steps.
 pub enum Immediate {
+    /// The expression's value.
     Value(GcRef),
     /// It needs the machine: evaluate it the normal way. Nothing has run.
     Deferred,
@@ -206,6 +222,7 @@ pub fn immediate(rt: &mut RunTime, state: &mut CEKState, expr: GcRef) -> Immedia
     immediate_at(rt, state, expr, IMMEDIATE_DEPTH)
 }
 
+/// `immediate`, allowing built-in calls nested `depth` more levels.
 fn immediate_at(rt: &mut RunTime, state: &mut CEKState, expr: GcRef, depth: u32) -> Immediate {
     match gc_value!(expr) {
         Pair(op, args) => {
@@ -427,6 +444,8 @@ fn take_kont(state: &mut CEKState) -> Kont {
     }
 }
 
+/// Return `val` to the top continuation frame: pop the frame and run its
+/// handler.
 #[inline]
 fn dispatch_kont(state: &mut CEKState, ec: &mut RunTime, val: GcRef) -> Result<(), String> {
     match take_kont(state) {
@@ -514,6 +533,8 @@ fn dispatch_kont(state: &mut CEKState, ec: &mut RunTime, val: GcRef) -> Result<(
     }
 }
 
+/// `Kont::AndOr`: stop on a deciding value, or evaluate the next
+/// expression, the last one in the form's tail position.
 fn handle_and_or(
     state: &mut CEKState,
     kind: AndOrKind,
@@ -550,6 +571,8 @@ fn handle_and_or(
     Ok(())
 }
 
+/// `Kont::ApplySpecial`: apply the special form or macro to the original
+/// form.
 fn handle_apply_special(
     state: &mut CEKState,
     ec: &mut RunTime,
@@ -585,6 +608,8 @@ pub fn name_procedure(heap: &crate::gc::GcHeap, value: GcRef, symbol: GcRef) {
     }
 }
 
+/// `Kont::Bind`: bind the value in the frame the `define` or `set!` was
+/// written in, naming it if it is an anonymous procedure.
 fn handle_bind(
     state: &mut CEKState,
     ec: &mut RunTime,
@@ -614,6 +639,8 @@ fn handle_bind(
     }
 }
 
+/// `Kont::Cond`: evaluate the next clause's test under a `CondClause`
+/// frame, or return `#f` when no clauses are left.
 fn handle_cond(
     state: &mut CEKState,
     ec: &mut RunTime,
@@ -649,6 +676,9 @@ fn handle_cond(
     }
 }
 
+/// `Kont::CondClause`: if the test was true, drop the `Cond` frame and run
+/// the clause (its body, its `=>` receiver, or just the test's value).
+/// Otherwise return to the `Cond` frame to try the next clause.
 fn handle_cond_clause(
     state: &mut CEKState,
     ec: &mut RunTime,
@@ -722,6 +752,8 @@ fn handle_cond_clause(
     Ok(())
 }
 
+/// `Kont::DynamicWind`: advance a `dynamic-wind` from one phase to the
+/// next, pushing and popping its entry on the dynamic-wind stack.
 fn handle_dynamic_wind(
     state: &mut CEKState,
     dw: &mut Vec<DynamicWind>,
@@ -781,6 +813,8 @@ fn handle_dynamic_wind(
     }
 }
 
+/// `Kont::Escape`: run the next pending dynamic-wind thunk, or, when none
+/// is left, install the continuation's state and deliver the value.
 fn handle_escape(
     state: &mut CEKState,
     ec: &mut RunTime,
@@ -815,6 +849,10 @@ fn handle_escape(
     Ok(())
 }
 
+/// `Kont::EvalArg`: `val` is the operator or an argument. A special form
+/// or macro as operator is applied to the unevaluated form. Otherwise the
+/// value goes on the argument stack and evaluation continues with the next
+/// argument (`eval_args`).
 fn handle_eval_arg(
     state: &mut CEKState,
     ec: &mut RunTime,
@@ -904,6 +942,8 @@ pub fn eval_args(
     Ok(())
 }
 
+/// `Kont::If`: evaluate the branch the test chose, in the `if`'s tail
+/// position.
 fn handle_if(
     state: &mut CEKState,
     then_branch: GcRef,
@@ -930,6 +970,8 @@ fn handle_if(
     }
 }
 
+/// `Kont::RestoreEnv`: a closure has returned; restore the caller's
+/// environment, then collect garbage if it is due.
 fn handle_restore_env(
     state: &mut CEKState,
     ec: &mut RunTime,
@@ -960,6 +1002,8 @@ fn handle_restore_env(
     Ok(())
 }
 
+/// `Kont::Seq`: discard the value and evaluate the next form, the last one
+/// in the sequence's tail position.
 fn handle_seq(
     state: &mut CEKState,
     mut rest: Vec<GcRef>,

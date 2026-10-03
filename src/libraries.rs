@@ -20,6 +20,7 @@ use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 /// non-negative integers written in decimal.
 pub type LibraryName = Vec<String>;
 
+/// A registered library: its exports and where its bindings live.
 pub struct Library {
     /// External name and cell, in export order. Every cell belongs to
     /// `env` (defined there or imported into it), or, for a standard
@@ -36,28 +37,34 @@ pub struct Library {
 /// can reach it. Exported cells' values are marked as GC roots.
 #[derive(Default)]
 pub struct Libraries {
+    /// The libraries, by name.
     table: HashMap<LibraryName, Library>,
     /// Library files already loaded: each is loaded at most once per run.
     loaded: HashSet<std::path::PathBuf>,
 }
 
 impl Libraries {
+    /// The library called `name`, if registered.
     pub fn get(&self, name: &LibraryName) -> Option<&Library> {
         self.table.get(name)
     }
 
+    /// Register `library` as `name`, replacing any library of that name.
     pub fn insert(&mut self, name: LibraryName, library: Library) {
         self.table.insert(name, library);
     }
 
+    /// Whether the library file at `path` has been loaded.
     pub fn is_loaded(&self, path: &std::path::Path) -> bool {
         self.loaded.contains(path)
     }
 
+    /// Record that the library file at `path` has been loaded.
     pub fn mark_loaded(&mut self, path: std::path::PathBuf) {
         self.loaded.insert(path);
     }
 
+    /// The names of all registered libraries, sorted.
     pub fn names(&self) -> Vec<LibraryName> {
         let mut names: Vec<_> = self.table.keys().cloned().collect();
         names.sort();
@@ -213,6 +220,7 @@ pub fn register_standard_libraries(heap: &mut GcHeap, system: &EnvRef) {
     heap.libraries.insert(vec!["s1".to_string()], Library { exports: rest, env: None, unimplemented: Vec::new() });
 }
 
+/// A symbol's name.
 fn symbol_name(symbol: GcRef) -> String {
     match gc_value!(symbol) {
         SchemeValue::Symbol(name) => name.clone(),
@@ -241,6 +249,7 @@ pub fn library_name(datum: GcRef, who: &str) -> Result<LibraryName, String> {
     Err(format!("{}: not a library name: {}", who, crate::printer::print_value(&datum)))
 }
 
+/// A library name as written: `(scheme base)`.
 pub fn format_name(name: &LibraryName) -> String {
     format!("({})", name.join(" "))
 }
@@ -323,7 +332,7 @@ pub fn import_bindings(env: &EnvRef, bindings: Vec<(GcRef, CellRef)>) {
     }
 }
 
-/// (import import-set ...)
+/// `(import import-set ...)`
 /// Valid where definitions are, at the top level of an environment. Every
 /// import set is resolved before anything is bound, so a failing import
 /// binds nothing.
@@ -357,6 +366,8 @@ pub fn make_interaction_env(system: &EnvRef) -> EnvRef {
     env
 }
 
+/// Bind the library procedures (`environment`, `library-exports`, ...) in
+/// `env`.
 pub fn register_library_builtins(heap: &mut GcHeap, env: EnvRef) {
     register_builtin_family!(heap, env,
         "environment" => (environment, "(environment import-set ...) A new immutable environment containing the bindings of the import sets"),
@@ -369,6 +380,7 @@ pub fn register_library_builtins(heap: &mut GcHeap, env: EnvRef) {
     );
 }
 
+/// The registered library named by the datum `datum`.
 fn lookup<'a>(heap: &'a GcHeap, datum: GcRef, who: &str) -> Result<&'a Library, String> {
     let name = library_name(datum, who)?;
     heap.libraries
@@ -376,6 +388,7 @@ fn lookup<'a>(heap: &'a GcHeap, datum: GcRef, who: &str) -> Result<&'a Library, 
         .ok_or_else(|| format!("{}: unknown library {}", who, format_name(&name)))
 }
 
+/// A new immutable environment object holding `bindings`.
 fn environment_value(heap: &mut GcHeap, bindings: Vec<(GcRef, CellRef)>) -> GcRef {
     let env = Frame::new_top_level(false);
     import_bindings(&env, bindings);
@@ -385,7 +398,7 @@ fn environment_value(heap: &mut GcHeap, bindings: Vec<(GcRef, CellRef)>) -> GcRe
     })
 }
 
-/// (environment import-set ...)
+/// `(environment import-set ...)`
 fn environment(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     let mut bindings = Vec::new();
     for arg in args {
@@ -405,13 +418,13 @@ fn r5rs_bindings(heap: &GcHeap, args: &[GcRef], who: &str) -> Result<Vec<(GcRef,
     Ok(heap.libraries.get(&name).map(|l| l.exports.clone()).unwrap_or_default())
 }
 
-/// (scheme-report-environment 5)
+/// `(scheme-report-environment 5)`
 fn scheme_report_environment(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     let bindings = r5rs_bindings(heap, args, "scheme-report-environment")?;
     Ok(environment_value(heap, bindings))
 }
 
-/// (null-environment 5): the syntactic keywords of (scheme r5rs) only.
+/// `(null-environment 5)`: the syntactic keywords of (scheme r5rs) only.
 fn null_environment(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     let mut bindings = r5rs_bindings(heap, args, "null-environment")?;
     bindings.retain(|(_, cell)| {
@@ -423,6 +436,7 @@ fn null_environment(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> 
     Ok(environment_value(heap, bindings))
 }
 
+/// The single argument `who` takes.
 fn one_arg(args: &[GcRef], who: &str) -> Result<GcRef, String> {
     match args {
         [arg] => Ok(*arg),
@@ -501,6 +515,8 @@ fn include_forms(heap: &mut GcHeap, files: GcRef, fold_case: bool, who: &str) ->
     Ok(forms)
 }
 
+/// `include` and `include-ci`: evaluate the files' forms in place of the
+/// form.
 fn include(expr: GcRef, ec: &mut RunTime, state: &mut CEKState, fold_case: bool, who: &str) -> Result<(), String> {
     let forms = include_forms(ec.heap, crate::gc::cdr(expr)?, fold_case, who)?;
     if forms.is_empty() {
@@ -515,12 +531,12 @@ fn include(expr: GcRef, ec: &mut RunTime, state: &mut CEKState, fold_case: bool,
     Ok(())
 }
 
-/// (include file ...): the files' forms, as a `begin`, in place of the include.
+/// `(include file ...)`: the files' forms, as a `begin`, in place of the include.
 pub fn include_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     include(expr, ec, state, false, "include")
 }
 
-/// (include-ci file ...): as `include`, reading with case folding.
+/// `(include-ci file ...)`: as `include`, reading with case folding.
 pub fn include_ci_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
     include(expr, ec, state, true, "include-ci")
 }
@@ -530,10 +546,14 @@ pub fn include_ci_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Res
 struct Declarations {
     /// (internal, external) names
     exports: Vec<(GcRef, GcRef)>,
+    /// The import sets, in order.
     imports: Vec<GcRef>,
+    /// The body forms, from `begin` and `include` declarations, in order.
     body: Vec<GcRef>,
 }
 
+/// Add the library declarations `decls` to `out`, expanding
+/// `include-library-declarations` and `cond-expand`.
 fn collect_declarations(heap: &mut GcHeap, decls: &[GcRef], out: &mut Declarations) -> Result<(), String> {
     let who = "define-library";
     for decl in decls {
@@ -584,7 +604,7 @@ fn collect_declarations(heap: &mut GcHeap, decls: &[GcRef], out: &mut Declaratio
     Ok(())
 }
 
-/// (define-library name declaration ...)
+/// `(define-library name declaration ...)`
 ///
 /// The imports are made into a new library environment, then the body runs
 /// there, through the machine, with the caller's environment restored after.
@@ -658,7 +678,7 @@ pub fn define_library_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) ->
     Ok(())
 }
 
-/// (%register-library 'name '((internal . external) ...) env): the last
+/// `(%register-library 'name '((internal . external) ...) env)`: the last
 /// step of a `define-library` body.
 fn register_library_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: KontRef) -> Result<(), String> {
     let [name_datum, export_list, env_value] = args else {
@@ -712,6 +732,7 @@ fn library_file(name: &LibraryName) -> String {
     format!("{}.sld", name.join("/"))
 }
 
+/// The first file on the search path that could define library `name`.
 fn find_library_file(name: &LibraryName) -> Option<std::path::PathBuf> {
     let file = library_file(name);
     search_path().into_iter().map(|dir| dir.join(&file)).find(|path| path.is_file())
@@ -769,7 +790,7 @@ fn load_then_retry(ec: &mut RunTime, state: &mut CEKState, sets: &[GcRef], expr:
     Ok(true)
 }
 
-/// (%load-library "path"): evaluate a library file's forms in the
+/// `(%load-library "path")`: evaluate a library file's forms in the
 /// interaction environment, marking it loaded first so that it is loaded at
 /// most once (and a library that imports itself can't loop). Relative file
 /// names in the `include` declarations of its `define-library` forms are
@@ -856,7 +877,7 @@ fn feature_names() -> Vec<String> {
     names
 }
 
-/// (features)
+/// `(features)`
 fn features(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     if !args.is_empty() {
         return Err("features: takes no arguments".to_string());
@@ -934,7 +955,7 @@ fn choose_cond_expand_clause(heap: &GcHeap, clauses: &[GcRef], who: &str) -> Res
     Ok(Vec::new())
 }
 
-/// (cond-expand (requirement form ...) ... [(else form ...)])
+/// `(cond-expand (requirement form ...) ... [(else form ...)])`
 /// The forms of the first clause whose requirement holds, as a `begin` in
 /// place of the cond-expand; unspecified if no clause holds.
 pub fn cond_expand_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {

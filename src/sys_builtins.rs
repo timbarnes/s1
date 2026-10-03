@@ -1,3 +1,13 @@
+//! System builtins: procedures that need the evaluator.
+//!
+//! These receive evaluated arguments like ordinary builtins, but also the
+//! machine (`RunTime`, `CEKState` and their own continuation `next`). They
+//! return by setting the control and continuation rather than returning a
+//! value, so they can call procedures (`apply`, `call-with-values`,
+//! `dynamic-wind`), capture and invoke continuations (`call/cc`), evaluate
+//! code (`eval`, `eval-string`), or end the process (`exit`). The tracing
+//! and debugging procedures are here too.
+
 use crate::env::{EnvOps, EnvRef};
 use crate::eval::kont::EvalSeqForms;
 use crate::eval::{
@@ -15,13 +25,7 @@ use crate::utilities::post_error;
 use std::rc::Rc;
 use std::time::Instant;
 
-/// System Builtin Functions
-///
-/// These functions are classified as procedures, and receive evaluated arguments.
-/// They differ from normal builtins in that they also have access to the CEK Evaluator.
-///
-/// Like special forms, they return values through the CEK evaluator rather than directly.
-
+/// Bind the system builtins in `env`.
 pub fn register_sys_builtins(runtime: &mut RunTime, env: EnvRef) {
     register_sys_builtins!(runtime, env,
         "eval-string" => eval_string_sp,
@@ -47,7 +51,7 @@ pub fn register_sys_builtins(runtime: &mut RunTime, env: EnvRef) {
     );
 }
 
-/// (eval-string string)
+/// `(eval-string string)`
 ///
 /// Parses every form in `string` up front, then drives them one at a time
 /// from a `Kont::EvalSeq` frame (see `handle_eval_seq` in `eval/cek.rs`)
@@ -99,7 +103,7 @@ fn eval_string_sp(
     Ok(())
 }
 
-/// (eval expr [env])
+/// `(eval expr [env])`
 fn eval_eval_sp(
     _ec: &mut RunTime,
     args: &[GcRef],
@@ -128,7 +132,7 @@ fn eval_eval_sp(
     Ok(())
 }
 
-/// (interaction-environment)
+/// `(interaction-environment)`
 /// The environment the REPL and loaded files run in.
 fn interaction_environment_sp(
     ec: &mut RunTime,
@@ -149,7 +153,7 @@ fn interaction_environment_sp(
     Ok(())
 }
 
-/// (apply func args)
+/// `(apply func args)`
 /// Applies a function to a list of arguments
 fn apply_sp(
     ec: &mut RunTime,
@@ -217,7 +221,7 @@ fn apply_sp(
     }
 }
 
-/// (%kont-depth)
+/// `(%kont-depth)`
 /// The number of continuation frames waiting for this call's value. Lets
 /// the regression suite check that a loop runs in constant space: a proper
 /// tail call leaves the depth unchanged however many times it repeats.
@@ -241,6 +245,7 @@ fn kont_depth_sp(
     Ok(())
 }
 
+/// `(gc)`: collect garbage now; returns the seconds it took.
 fn garbage_collect_sp(
     ec: &mut RunTime,
     _args: &[GcRef],
@@ -263,7 +268,7 @@ fn garbage_collect_sp(
     Ok(())
 }
 
-/// (help symbol)
+/// `(help symbol)`
 /// Returns the documentation for `symbol` as a Scheme string. Resolution
 /// order:
 ///   1. A doc attached directly to the symbol via `add-doc`, which works
@@ -311,7 +316,7 @@ fn help_sp(
     Ok(())
 }
 
-/// (debug-stack)
+/// `(debug-stack)`
 /// Prints the stack
 fn debug_stack_sp(
     ec: &mut RunTime,
@@ -324,7 +329,7 @@ fn debug_stack_sp(
     Ok(())
 }
 
-/// (call/cc func)
+/// `(call/cc func)`
 /// Creates and returns an escape procedure that resets the continuation to the current state
 /// at the time call/cc was invoked.
 fn call_cc_sp(
@@ -336,7 +341,7 @@ fn call_cc_sp(
     capture(ec, args, state, next, false)
 }
 
-/// (%call/ec func)
+/// `(%call/ec func)`
 /// call/cc for an escape-only continuation: one that is only invoked while
 /// the %call/ec call is still in progress (to jump out of it), never to
 /// re-enter it. It records the argument stack's length instead of copying
@@ -423,7 +428,7 @@ fn capture(
     Ok(())
 }
 
-/// (escape continuation arg)
+/// `(escape continuation arg)`
 /// This is the internal mechanism for call/cc. It is bound by a lambda to the escape continuation,
 /// and when called, it resets the continuation and returns the provided arg.
 fn escape_sp(
@@ -438,7 +443,7 @@ fn escape_sp(
     escape_to(ec, state, args[0], args[1])
 }
 
-/// (<escape-values> continuation list-of-values)
+/// `(<escape-values> continuation list-of-values)`
 /// The body of the procedure call/cc hands out: delivers every value in the
 /// list to the continuation, packaged by `new_values`.
 fn escape_values_sp(
@@ -526,7 +531,7 @@ pub fn exit_now(code: i32) -> ! {
     std::process::exit(code)
 }
 
-/// (exit [obj])
+/// `(exit [obj])`
 ///
 /// Runs the `after` thunks of every dynamic-wind extent the call is inside,
 /// innermost first, then ends the process (R7RS 6.14). The unwinding is the
@@ -557,7 +562,7 @@ fn exit_sp(
     Ok(())
 }
 
-/// (emergency-exit [obj])
+/// `(emergency-exit [obj])`
 ///
 /// Ends the process at once, without running any dynamic-wind `after`
 /// thunks.
@@ -570,6 +575,8 @@ fn emergency_exit_sp(
     exit_now(exit_status(args, "emergency-exit")?)
 }
 
+/// `(dynamic-wind before thunk after)`: call `before`, then push the
+/// `Kont::DynamicWind` frame that runs `thunk` and `after`.
 fn dynamic_wind_sp(
     ec: &mut RunTime,
     args: &[GcRef],
@@ -592,6 +599,7 @@ fn dynamic_wind_sp(
     Ok(())
 }
 
+/// `(values obj ...)`: return the objects as multiple values.
 fn values_sp(
     ec: &mut RunTime,
     args: &[GcRef],
@@ -603,6 +611,7 @@ fn values_sp(
     Ok(())
 }
 
+/// `(call-with-values producer consumer)`
 fn call_with_values_sp(
     ec: &mut RunTime,
     args: &[GcRef],
@@ -625,16 +634,15 @@ fn call_with_values_sp(
     Ok(())
 }
 
-/// Debug Functions
-///
+// Debug Functions
 
-/// (trace [arg])
-/// Controls step and tracing options
-/// (trace)         - returns the current trace setting
-/// (trace 'all)    - print state.control and state.kont each time through the evaluator
-/// (trace 'expr)   - show trace when control is an expr, or when a value is returned
-/// (trace 'step)   - enable single stepping
-/// (trace 'off)    - disable tracing and stepping
+/// `(trace [arg])`
+/// Controls step and tracing options:
+/// - `(trace)`: returns the current trace setting
+/// - `(trace 'all)`: print state.control and state.kont each time through the evaluator
+/// - `(trace 'expr)`: show trace when control is an expr, or when a value is returned
+/// - `(trace 'step)`: enable single stepping
+/// - `(trace 'off)`: disable tracing and stepping
 fn trace_sp(
     ec: &mut RunTime,
     args: &[GcRef],
@@ -671,7 +679,7 @@ fn trace_sp(
     Ok(())
 }
 
-/// (debug-env ['g(lobal)])
+/// `(debug-env ['g(lobal)])`
 /// Prints the environment, optionally including the global env.
 fn trace_env_sp(
     ec: &mut RunTime,
@@ -685,8 +693,10 @@ fn trace_env_sp(
     Ok(())
 }
 
-/// Utility functions
-///
+// Utility functions
+
+/// The arguments of `(apply f a ... list)` as one list: the leading ones
+/// consed onto the last.
 fn apply_arg_list(args: &[GcRef], heap: &mut GcHeap) -> GcRef {
     if args.is_empty() {
         heap.nil_s()
