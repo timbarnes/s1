@@ -610,3 +610,17 @@
 (test-equal 6 (+ 1 (call/cc (lambda (k) (k 2))) 3) "call/cc in an argument after direct ones")
 (test-equal '(1 2) (let ((x 1) (y 0)) (set! y (+ x 1)) (list x y)) "set! of a built-in call's value")
 (test-equal 'yes (if (pair? '(a)) 'yes 'no) "an if test decided directly")
+
+;; Quoted data and nested built-in calls are evaluated directly too, and a
+;; call whose arguments all are is applied without an EvalArg frame. Nothing
+;; in a nested expression runs unless all of it qualifies.
+(define direct-port (open-input-string "abc"))
+(define (direct-id x) x)
+(test-equal '(97 #\b) (list (char->integer (read-char direct-port)) (direct-id (read-char direct-port)))
+    "a nested built-in call runs once, left to right")
+(test-equal "cz" (string (read-char direct-port) (direct-id #\z)) "a nested call next to a closure call isn't repeated")
+(test-equal '((a b) 2 (3)) (list '(a b) (car (cdr '(1 2 3))) (cons (+ 1 2) '())) "quoted and nested arguments")
+(test-equal 'caught (guard (e (#t 'caught)) (list 1 (car (cdr '(1))))) "an error in a nested call is catchable")
+(test-equal '(5) (let ((quote (lambda (x) 'shadowed))) (list (car (list 5)))) "a rebound quote is not taken for quote")
+(test-equal '(shadowed) (let ((quote (lambda (x) 'shadowed))) (list (quote 5))) "a rebound quote is called")
+

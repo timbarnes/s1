@@ -117,15 +117,68 @@ fn is_self_evaluating(v: &crate::gc::SchemeValue) -> bool {
     )
 }
 
-/// The value of an atomic expression: a constant, or a variable that is
-/// bound. `None` for a form or an unbound variable.
+/// The value of an atomic expression: a constant, a quoted datum, or a
+/// variable that is bound. `None` for any other form or an unbound variable.
 #[inline]
 fn atomic_value(rt: &RunTime, state: &CEKState, expr: GcRef) -> Option<GcRef> {
     match gc_value!(expr) {
         Symbol(_) => identifiers::lookup(rt.heap, expr, &state.env),
+        Pair(op, args) => match lookup_operator(rt, state, *op) {
+            Some(Callable::SpecialForm { name, .. }) if name == "quote" => quoted_datum(*args),
+            _ => None,
+        },
         v if is_self_evaluating(v) => Some(expr),
         _ => None,
     }
+}
+
+/// What the operator `op` of a form denotes, if it is a variable bound to
+/// a procedure or special form.
+#[inline]
+fn lookup_operator<'a>(rt: &RunTime, state: &CEKState, op: GcRef) -> Option<&'a Callable> {
+    match gc_value!(op) {
+        Symbol(_) => identifiers::lookup(rt.heap, op, &state.env).and_then(|v| gc_value!(v).as_callable()),
+        _ => None,
+    }
+}
+
+/// The datum of `(quote datum)`, given the form's cdr.
+fn quoted_datum(args: GcRef) -> Option<GcRef> {
+    match gc_value!(args) {
+        Pair(datum, rest) if matches!(gc_value!(*rest), Nil) => Some(*datum),
+        _ => None,
+    }
+}
+
+/// How deeply built-in calls may nest in an expression that `immediate`
+/// evaluates: `(car (cdr x))` is depth 1.
+const IMMEDIATE_DEPTH: u32 = 2;
+
+/// Whether `immediate_at(expr, depth)` would evaluate `expr` without the
+/// machine. Looks things up but calls nothing.
+fn qualifies(rt: &RunTime, state: &CEKState, expr: GcRef, depth: u32) -> bool {
+    if atomic_value(rt, state, expr).is_some() {
+        return true;
+    }
+    match gc_value!(expr) {
+        Pair(op, args) if matches!(lookup_operator(rt, state, *op), Some(Callable::Builtin { .. })) => {
+            all_qualify(rt, state, *args, depth)
+        }
+        _ => false,
+    }
+}
+
+/// Whether every expression in the argument list `args` of a built-in call
+/// evaluated at `depth` qualifies.
+fn all_qualify(rt: &RunTime, state: &CEKState, mut args: GcRef, depth: u32) -> bool {
+    while let Pair(arg, next) = gc_value!(args) {
+        let ok = atomic_value(rt, state, *arg).is_some() || (depth > 0 && qualifies(rt, state, *arg, depth - 1));
+        if !ok {
+            return false;
+        }
+        args = *next;
+    }
+    matches!(gc_value!(args), Nil)
 }
 
 /// The result of trying to evaluate an expression without machine steps.
@@ -139,40 +192,64 @@ pub enum Immediate {
 }
 
 /// Evaluate `expr` directly when that needs no machine step: a constant, a
-/// bound variable, or a call to a built-in procedure whose arguments are
-/// all constants or bound variables (`(< n 2)`, `(car x)`). Anything else
-/// is `Deferred`, with nothing evaluated, so the normal path can't repeat
-/// any side effect. A built-in's error is raised exactly as the normal
-/// path would.
+/// quoted datum, a bound variable, or a call to a built-in procedure whose
+/// arguments are such expressions, nested up to `IMMEDIATE_DEPTH` calls
+/// deep (`(< n 2)`, `(car (cdr x))`, `(cons x '())`). Anything else is
+/// `Deferred`, with nothing evaluated, so the normal path can't repeat any
+/// side effect. A built-in's error is raised exactly as the normal path
+/// would.
 ///
 /// About half of all evaluator steps used to be spent on such expressions;
 /// see Docs/precompilation-design.md.
 #[inline]
 pub fn immediate(rt: &mut RunTime, state: &mut CEKState, expr: GcRef) -> Immediate {
+    immediate_at(rt, state, expr, IMMEDIATE_DEPTH)
+}
+
+fn immediate_at(rt: &mut RunTime, state: &mut CEKState, expr: GcRef, depth: u32) -> Immediate {
     match gc_value!(expr) {
         Pair(op, args) => {
             let (op, args) = (*op, *args);
-            if !matches!(gc_value!(op), Symbol(_)) {
-                return Immediate::Deferred;
-            }
-            let func = match identifiers::lookup(rt.heap, op, &state.env)
-                .and_then(|v| gc_value!(v).as_callable())
-            {
+            let func = match lookup_operator(rt, state, op) {
                 Some(Callable::Builtin { func, .. }) => *func,
+                Some(Callable::SpecialForm { name, .. }) if name == "quote" => {
+                    return match quoted_datum(args) {
+                        Some(datum) => Immediate::Value(datum),
+                        None => Immediate::Deferred,
+                    };
+                }
                 _ => return Immediate::Deferred,
             };
-            // All the arguments must be atomic before anything is called.
+            // Nothing may be called until every argument is known to
+            // qualify. Atomic arguments call nothing, so they are evaluated
+            // as they are checked; at the first nested call, all the
+            // remaining arguments are checked before it runs.
             let base = rt.arg_stack.len();
             let mut rest = args;
+            let mut checked = false;
             while let Pair(arg, next) = gc_value!(rest) {
-                match atomic_value(rt, state, *arg) {
-                    Some(v) => rt.arg_stack.push(v),
+                let (arg, next) = (*arg, *next);
+                let value = match atomic_value(rt, state, arg) {
+                    Some(v) => v,
+                    None if depth > 0 && (checked || all_qualify(rt, state, rest, depth)) => {
+                        checked = true;
+                        match immediate_at(rt, state, arg, depth - 1) {
+                            Immediate::Value(v) => v,
+                            // Not Deferred: `arg` was checked above, and
+                            // a built-in can't change a binding.
+                            other => {
+                                rt.arg_stack.truncate(base);
+                                return other;
+                            }
+                        }
+                    }
                     None => {
                         rt.arg_stack.truncate(base);
                         return Immediate::Deferred;
                     }
-                }
-                rest = *next;
+                };
+                rt.arg_stack.push(value);
+                rest = next;
             }
             if !matches!(gc_value!(rest), Nil) {
                 rt.arg_stack.truncate(base);
@@ -265,6 +342,21 @@ pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
             // rather than in a private `Vec` per call; `args_base` marks
             // where this call's slice of it begins.
             let args_base = rt.arg_stack.len() as u32;
+
+            // An operator already resolved to anything but a procedural
+            // macro goes straight onto the stack, and the arguments are
+            // evaluated now: a call whose arguments need no machine step
+            // (`(f (- n 1))`) is applied without an EvalArg frame at all.
+            if let Some(op) = op_val {
+                if !matches!(gc_value!(op).as_callable(), Some(Callable::Macro { .. })) {
+                    rt.arg_stack.push(op);
+                    let (is_tail, next) = (state.tail, Rc::clone(&state.kont));
+                    if let Err(err) = eval_args(state, rt, *cdr, args_base, expr, is_tail, next) {
+                        post_error(state, rt, &err);
+                    }
+                    return;
+                }
+            }
 
             match op_val {
                 Some(op) => {
@@ -760,6 +852,20 @@ fn handle_eval_arg(
     // Vec; continuations snapshot and restore that stack (see
     // RunTimeStruct::arg_stack).
     ec.arg_stack.push(val);
+    eval_args(state, ec, remaining_exprs, args_base, original_call, tail, next)
+}
+
+/// Evaluate the arguments `remaining_exprs` of a call whose operator and
+/// earlier arguments are on `arg_stack` from `args_base`, then apply it.
+pub fn eval_args(
+    state: &mut CEKState,
+    ec: &mut RunTime,
+    remaining_exprs: GcRef,
+    args_base: u32,
+    original_call: GcRef,
+    tail: bool,
+    next: KontRef,
+) -> Result<(), String> {
     // Arguments that need no machine step (see `immediate`) are evaluated
     // here, straight onto the stack, instead of with a step and an EvalArg
     // frame each. The first one that needs real evaluation stops this.
