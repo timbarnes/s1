@@ -12,9 +12,10 @@ Standard features s1 doesn't provide yet, and known issues. The R7RS conformance
 
 *   `transcript-on`, `transcript-off` (R5RS only; removed in R7RS).
 
-## Libraries (R7RS phase 9, tabled)
+## Libraries (R7RS phase 9, in progress)
 
-*   `define-library`, `import` (with `only`, `except`, `prefix`, `rename`), `export`, `include`, `cond-expand`, `features`, `environment`, `interaction-environment`, and `eval` with an environment argument. Discussed but not started: the lightweight option is to copy exported values on import (exported variables that the library later `set!`s would not update in importers); the full option is shared binding cells. The conformance shim stubs `import` meanwhile.
+*   Done: `interaction-environment`, and `eval` and `load` with an environment argument (9a).
+*   To do: `define-library`, `import` (with `only`, `except`, `prefix`, `rename`), `export`, `include`, `cond-expand`, `features`, `environment`, `scheme-report-environment`, `null-environment`. Design: [libraries-design.md](./libraries-design.md). The conformance shim stubs `import` meanwhile.
 
 ## Development tools
 

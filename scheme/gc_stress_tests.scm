@@ -60,6 +60,7 @@
 (load "scheme/derived_tests.scm")
 (load "scheme/data_tests.scm")
 (load "scheme/port_tests.scm")
+(load "scheme/library_tests.scm")
 
 ;; Defect 2 (quasiquote_sf's unrooted saved_kont, and defect 3, the
 ;; macro-expander's own Rust-local intermediates): deeply recursive calls

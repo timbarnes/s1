@@ -2,7 +2,6 @@ use crate::env::{EnvOps, EnvRef};
 use crate::eval::kont::EvalSeqForms;
 use crate::eval::{
     CEKState, Control, DynamicWind, Kont, KontRef, RunTime, TraceType, insert_dynamic_wind,
-    insert_eval_eval,
 };
 use crate::gc::{
     Callable, GcHeap, GcRef, SchemeValue, get_symbol, list, list_to_vec, list3,
@@ -27,6 +26,7 @@ pub fn register_sys_builtins(runtime: &mut RunTime, env: EnvRef) {
     register_sys_builtins!(runtime, env,
         "eval-string" => eval_string_sp,
         "eval" => eval_eval_sp,
+        "interaction-environment" => interaction_environment_sp,
         "apply" => apply_sp,
         "debug-stack" => debug_stack_sp,
         "call/cc" => call_cc_sp,
@@ -102,11 +102,45 @@ fn eval_eval_sp(
     state: &mut CEKState,
     next: KontRef,
 ) -> Result<(), String> {
-    match args.len() {
-        1 => insert_eval_eval(state, args[0], None, false),
-        2 => insert_eval_eval(state, args[0], Some(args[1]), false),
+    // With no environment argument (an s1 extension), `expr` is evaluated
+    // in the caller's environment.
+    let env = match args {
+        [_] => state.env.clone(),
+        [_, env] => match gc_value!(*env) {
+            SchemeValue::Environment(env) => env.clone(),
+            _ => return Err("eval: the second argument must be an environment".to_string()),
+        },
         _ => return Err("eval: requires 1 or 2 arguments".to_string()),
+    };
+    // Evaluate in `env`, then restore the caller's environment. Not a tail
+    // call, so the RestoreEnv frame is always pushed.
+    state.kont = Rc::new(Kont::RestoreEnv {
+        old_env: state.env.clone(),
+        next,
+    });
+    state.env = env;
+    state.control = Control::Expr(args[0]);
+    state.tail = false;
+    Ok(())
+}
+
+/// (interaction-environment)
+/// The environment the REPL and loaded files run in.
+fn interaction_environment_sp(
+    ec: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
+    if !args.is_empty() {
+        return Err("interaction-environment: takes no arguments".to_string());
     }
+    let env = ec.heap.interaction_env().ok_or("interaction-environment: no interaction environment")?;
+    let value = ec.heap.alloc(crate::gc::GcObject {
+        value: SchemeValue::Environment(env),
+        marked: 0,
+    });
+    state.control = Control::Value(value);
     state.kont = next;
     Ok(())
 }

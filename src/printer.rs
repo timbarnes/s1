@@ -230,6 +230,7 @@ fn print_into(out: &mut String, obj: GcRef, ctx: &mut Ctx) {
         }),
         Port(port) => out.push_str(&describe_port(port)),
         Continuation(_) => out.push_str("#<continuation>"),
+        Environment(_) => out.push_str("#<environment>"),
         RecordType(t) => {
             out.push_str("#<record-type ");
             print_into(out, t.name, ctx);

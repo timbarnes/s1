@@ -19,6 +19,7 @@ The documentation is organized into the following sections, following the R5RS s
 * [Exceptions](./exceptions.md)
 * [Macros](./macros.md)
 * [Input and Output](./input-and-output.md)
+* [Environments and Evaluation](./environments.md)
 * [System Interface](./system-interface.md)
 * [Miscellaneous](./miscellaneous.md)
 * [S1 Scheme Extensions](./extensions.md)

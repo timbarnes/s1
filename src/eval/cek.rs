@@ -1,5 +1,5 @@
 use super::kont::{
-    AndOrKind, CEKState, CondClause, Control, EvalPhase, Kont, KontRef, MacroMode, insert_eval,
+    AndOrKind, CEKState, CondClause, Control, Kont, KontRef, MacroMode, insert_eval,
 };
 /// Continuation-Passing Style (CPS) evaluator.
 ///
@@ -111,6 +111,7 @@ fn is_self_evaluating(v: &crate::gc::SchemeValue) -> bool {
             | ErrorObject(_)
             | RecordType(_)
             | Record(_)
+            | Environment(_)
             | Void
             | Undefined
     )
@@ -378,12 +379,6 @@ fn dispatch_kont(state: &mut CEKState, ec: &mut RunTime, val: GcRef) -> Result<(
             env,
             next,
         ),
-        Kont::Eval {
-            expr,
-            env,
-            phase,
-            next,
-        } => handle_eval(state, expr, env, phase, next),
         Kont::If {
             then_branch,
             else_branch,
@@ -713,58 +708,6 @@ fn handle_escape(
         *ec.dynamic_wind = payload.new_dw_stack;
         *ec.arg_stack = payload.new_arg_stack;
         *ec.handlers = payload.new_handlers;
-    }
-    Ok(())
-}
-
-fn handle_eval(
-    state: &mut CEKState,
-    expr: GcRef,
-    env: Option<GcRef>,
-    phase: EvalPhase,
-    next: KontRef,
-) -> Result<(), String> {
-    match phase {
-        EvalPhase::EvalEnv => {
-            if let Control::Value(env_val) = state.control {
-                // Capture environment and move to first expression evaluation
-                let new_env = Some(env_val);
-                state.control = Control::Expr(expr);
-                state.tail = false;
-                state.kont = Rc::new(Kont::Eval {
-                    expr,
-                    env: new_env,
-                    phase: EvalPhase::EvalExpr,
-                    next: next,
-                });
-            } else {
-                unreachable!("EvalEnv phase should yield a value");
-            }
-        }
-        EvalPhase::EvalExpr => {
-            if let Control::Value(val) = state.control {
-                // Save the intermediate result, then prepare to re-evaluate
-                state.control = Control::Expr(val);
-                state.tail = false;
-                state.kont = Rc::new(Kont::Eval {
-                    expr: val,
-                    env,
-                    phase: EvalPhase::Done,
-                    next: next,
-                });
-            } else {
-                unreachable!("EvalExpr phase should yield a value");
-            }
-        }
-        EvalPhase::Done => {
-            if let Control::Value(val) = state.control {
-                // Final value: propagate it
-                state.control = Control::Value(val);
-                state.kont = next;
-            } else {
-                unreachable!("Done phase should yield a value");
-            }
-        }
     }
     Ok(())
 }

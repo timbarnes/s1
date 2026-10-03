@@ -144,6 +144,7 @@ pub fn type_of(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
         SchemeValue::ErrorObject(_) => "error-object",
         SchemeValue::RecordType(_) => "record-type",
         SchemeValue::Record(_) => "record",
+        SchemeValue::Environment(_) => "environment",
         _ => "unknown",
     };
     Ok(get_symbol(heap, type_name))

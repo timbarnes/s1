@@ -137,10 +137,15 @@
 (display "s1-core loaded")
 (newline)
 
-(define load (lambda (f)
-    "(load filename) opens filename and pushes it onto the port stack so the interpreter reads and evaluates its contents next"
-    (begin (define inp (open-input-file f))
-        (push-port! inp))))
+(define load (lambda (f . env)
+    "(load filename [env]) evaluates the forms in filename. Without env, the file is pushed onto the port stack so the interpreter reads and evaluates its contents next, in the interaction environment; with env, its forms are read and evaluated in env before load returns"
+    (if (null? env)
+        (push-port! (open-input-file f))
+        (let ((port (open-input-file f)))
+          (let loop ((form (read port)))
+            (if (eof-object? form)
+                (close-port port)
+                (begin (eval form (car env)) (loop (read port)))))))))
 
 (define not (lambda (v)
     "(not v) returns #t if v is #f, otherwise #f"

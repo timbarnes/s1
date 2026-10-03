@@ -213,7 +213,6 @@ pub fn dbg_one_kont(loc: &str, frame: &Kont) -> String {
             )
             .as_str(),
         ),
-        Kont::Eval { .. } => result.push_str("Eval"),
         Kont::If {
             then_branch,
             else_branch,
@@ -283,7 +282,6 @@ pub fn _dbg_short_kont(kont: &KontRef) {
         Kont::Cond { .. } => print!("Cond "),
         Kont::CondClause { .. } => print!("CondClause "),
         Kont::DynamicWind { .. } => print!("DynamicWind "),
-        Kont::Eval { .. } => print!("Eval "),
         Kont::EvalArg { .. } => print!("EvalArg "),
         Kont::If { .. } => print!("If "),
         Kont::RestoreEnv { .. } => print!("RestoreEnv "),

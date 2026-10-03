@@ -24,6 +24,9 @@
 (displayln "         =====Port Tests=====")
 (load "scheme/port_tests.scm")
 
+(displayln "         =====Library and Environment Tests=====")
+(load "scheme/library_tests.scm")
+
 (displayln "         =====Exception Tests=====")
 (load "scheme/exception_tests.scm")
 

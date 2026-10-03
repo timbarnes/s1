@@ -48,6 +48,9 @@ pub struct GcHeap {
     /// The global environment, recorded by `initialize_scheme_globals`, in
     /// which `core_id` aliases resolve.
     global_env: Option<crate::env::EnvRef>,
+    /// The environment the REPL and loaded files run in, returned by
+    /// `interaction-environment`; a GC root.
+    interaction_env: Option<crate::env::EnvRef>,
     /// One cached alias per core name (see `core_id`); GC roots.
     core_ids: HashMap<&'static str, GcRef>,
     /// Cached special-form objects (see `core_form`); GC roots.
@@ -107,6 +110,7 @@ impl GcHeap {
             poison_sweep: std::env::var("S1_GC_POISON").is_ok(),
             aliases: HashMap::default(),
             global_env: None,
+            interaction_env: None,
             core_ids: HashMap::default(),
             core_forms: HashMap::default(),
             expansions: HashMap::default(),
@@ -291,10 +295,17 @@ impl GcHeap {
     }
 
     /// Record the global environment, where `core_id` identifiers resolve.
+    /// It is also the interaction environment, for now (until the system
+    /// and interaction environments are separated, phase 9b).
     pub fn set_global_env(&mut self, env: crate::env::EnvRef) {
+        self.interaction_env = Some(env.clone());
         self.global_env = Some(env);
         self.core_ids.clear();
         self.core_forms.clear();
+    }
+
+    pub fn interaction_env(&self) -> Option<crate::env::EnvRef> {
+        self.interaction_env.clone()
     }
 
     /// The special-form object globally bound to `name`, for a rewrite to
@@ -468,6 +479,12 @@ impl GcHeap {
         // The exception handler list
         mark_reachable(handlers, epoch, &mut self.worklist);
 
+        // The global and interaction environments, which a running library
+        // body or `eval` need not be inside.
+        for env in [&self.global_env, &self.interaction_env].into_iter().flatten() {
+            env.mark(&mut |gcref| mark_reachable(gcref, epoch, &mut self.worklist));
+        }
+
         // Singleton objects
         for &obj in [
             self.nil_obj,
@@ -603,6 +620,9 @@ fn mark_reachable(start: GcRef, epoch: u64, worklist: &mut Vec<GcRef>) {
                 }
                 _ => {}
             },
+            SchemeValue::Environment(env) => {
+                env.mark(&mut |gcref| push_if_unmarked(gcref, epoch, worklist));
+            }
             SchemeValue::Continuation(k) => {
                 k.kont
                     .mark(&mut |gcref| push_if_unmarked(gcref, epoch, worklist));

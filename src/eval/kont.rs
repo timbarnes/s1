@@ -59,12 +59,6 @@ pub enum Kont {
         payload: Box<EscapePayload>,
         new_kont: KontRef,
     },
-    Eval {
-        expr: GcRef,
-        env: Option<GcRef>,
-        phase: EvalPhase,
-        next: KontRef,
-    },
     /// Runs a macro body (already installed as `state.control`/`state.env`)
     /// and, once it yields the expansion, restores the call site's
     /// environment and either evaluates the expansion (`mode: Evaluate`) or
@@ -172,7 +166,6 @@ impl Kont {
             Kont::CondClause { next, .. } => Some(next),
             Kont::DynamicWind { next, .. } => Some(next),
             Kont::Escape { new_kont, .. } => Some(new_kont),
-            Kont::Eval { next, .. } => Some(next),
             Kont::EvalArg { next, .. } => Some(next),
             Kont::Halt => None,
             Kont::If { next, .. } => Some(next),
@@ -385,26 +378,8 @@ impl std::fmt::Debug for Kont {
                 continuable,
                 next
             ),
-            Kont::Eval {
-                expr, phase, next, ..
-            } => {
-                write!(
-                    f,
-                    "Eval {{ expr: {:?}, phase: {:?}, next: {:?} }}",
-                    print_value(expr),
-                    phase,
-                    next
-                )
-            }
         }
     }
-}
-
-#[derive(Copy, Clone, PartialEq, Debug)]
-pub enum EvalPhase {
-    EvalEnv,
-    EvalExpr,
-    Done,
 }
 
 #[derive(Clone, PartialEq)]
@@ -595,15 +570,6 @@ impl crate::gc::Mark for KontRef {
                         }
                     }
                 }
-                Kont::Eval {
-                    expr, env, next, ..
-                } => {
-                    visit(*expr);
-                    if let Some(env) = env {
-                        visit(*env);
-                    }
-                    worklist.push(Rc::clone(next));
-                }
                 Kont::EvalArg {
                     remaining_exprs,
                     original_call,
@@ -752,34 +718,6 @@ pub fn insert_eval(state: &mut CEKState, expr: GcRef, replace_next: bool) {
 ///
 pub fn insert_value(state: &mut CEKState, expr: GcRef) {
     state.control = Control::Value(expr);
-}
-
-pub fn insert_eval_eval(state: &mut CEKState, expr: GcRef, env: Option<GcRef>, tail: bool) {
-    let prev = Rc::clone(&state.kont);
-    match env {
-        Some(e) => {
-            // Process environment evaluation first, if provided
-            state.control = Control::Expr(e);
-            state.kont = Rc::new(Kont::Eval {
-                expr,
-                env: None,
-                phase: EvalPhase::EvalEnv,
-                next: prev,
-            });
-            state.tail = tail;
-        }
-        None => {
-            // Move straight to evaluating the expression
-            state.control = Control::Expr(expr);
-            state.kont = Rc::new(Kont::Eval {
-                expr,
-                env: None,
-                phase: EvalPhase::EvalExpr,
-                next: prev,
-            });
-            state.tail = tail;
-        }
-    }
 }
 
 /// Bind a symbol to a value. This is installed before evaluation of the right hand side.

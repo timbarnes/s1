@@ -67,6 +67,6 @@ Each takes an optional port, defaulting to the current output port.
 
 ## Loading
 
-`(load filename)` reads and evaluates the file's forms in turn. It works by pushing a port onto the stack of ports the REPL reads from (`push-port!`, `pop-port!`, s1 extensions).
+`(load filename)` reads and evaluates the file's forms in turn. It works by pushing a port onto the stack of ports the REPL reads from (`push-port!`, `pop-port!`, s1 extensions). `(load filename environment)` instead evaluates the forms in `environment` before returning; see [System Interface](./system-interface.md).
 
 [Home](s1-docs.md)
