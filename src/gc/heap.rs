@@ -5,6 +5,9 @@ use crate::eval::DynamicWind;
 use crate::io::PortKind;
 use rustc_hash::FxHashMap as HashMap;
 
+/// The default minimum number of allocations between collections.
+pub const DEFAULT_GC_THRESHOLD: usize = 20000;
+
 /// The garbage-collected heap that manages all Scheme objects.
 pub struct GcHeap {
     // Singleton values for SchemeValueSimple
@@ -26,7 +29,11 @@ pub struct GcHeap {
     doc_table: HashMap<GcRef, String>,
     // Number of allocations since last GC
     allocations: usize,
+    /// The minimum number of allocations between collections (see
+    /// `needs_gc`); `gc-threshold` sets it.
     pub threshold: usize,
+    /// How many objects survived the last collection.
+    live_after_gc: usize,
     // Bumped at the start of every collection; an object is "marked" for
     // the current cycle when its own `marked` field equals this. Avoids a
     // full-heap pass to reset every object's mark bit before each GC (F7)
@@ -97,7 +104,7 @@ impl GcHeap {
         // handful of ordinary collections without resorting to the
         // artificially extreme thresholds (1, 500) already used for
         // targeted stress tests in scheme/gc_stress_tests.scm.
-        let gc_threshold = 20000;
+        let gc_threshold = DEFAULT_GC_THRESHOLD;
         let mut heap = Self {
             nil_obj: None,
             true_obj: None,
@@ -112,6 +119,7 @@ impl GcHeap {
             doc_table: HashMap::default(),
             allocations: 0,
             threshold: gc_threshold,
+            live_after_gc: 0,
             current_epoch: 0,
             poison_sweep: std::env::var("S1_GC_POISON").is_ok(),
             aliases: HashMap::default(),
@@ -456,6 +464,7 @@ impl GcHeap {
         crate::gc::GC_EPOCH.store(self.current_epoch, std::sync::atomic::Ordering::Relaxed);
         self.mark_from(state, current_ports, port_stack, dynamic_wind, arg_stack, handlers);
         self.sweep();
+        self.live_after_gc = self.objects.len();
     }
 
     fn mark_from(
@@ -591,8 +600,22 @@ impl GcHeap {
         });
     }
 
+    /// Whether enough has been allocated since the last collection to
+    /// collect again: more than `threshold`, and at least as many objects
+    /// as survived the last collection. The second condition keeps the time
+    /// spent collecting proportional to the time spent allocating however
+    /// large the live heap grows. With a fixed interval, a computation whose
+    /// live data keeps growing, such as a deep non-tail recursion, re-marks
+    /// all of it every interval, which is quadratic in its size. A threshold
+    /// below the default is exact: it's for stress testing.
+    #[inline]
     pub fn needs_gc(&self) -> bool {
-        self.allocations > self.threshold
+        let interval = if self.threshold < DEFAULT_GC_THRESHOLD {
+            self.threshold
+        } else {
+            self.threshold.max(self.live_after_gc)
+        };
+        self.allocations > interval
     }
 
 }

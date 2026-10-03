@@ -8,6 +8,31 @@ F3 (skipped by decision) and F10(3) (deferred by decision, full design in
 `Docs/kont-flat-stack-design.md`) — see "Suggested order" at the end for the
 final per-item status table.
 
+## Collections in proportion to the live heap (2026-10-03, linux/x86-64)
+
+A collection ran every 20,000 allocations however much data was live, and
+each one marks everything live. A computation whose live data keeps growing
+therefore re-marked all of it every 20,000 allocations: a deep non-tail
+recursion, whose frames and environments are all live, was quadratic in its
+depth. A collection now also waits until as many objects have been allocated
+as survived the last one (`GcHeap::needs_gc`), so collecting costs time in
+proportion to allocating. A threshold set below the default with
+`gc-threshold` stays exact, for the stress tests.
+
+| Workload | Before | After |
+|---|---|---|
+| `(+ 1 (count (- n 1)))`, 250,000 deep | 0.24 s | 0.17 s |
+| ... 500,000 deep | 0.62 s | 0.33 s |
+| ... 1,000,000 deep | 1.94 s | **0.64 s**, now linear |
+| a 300,000-element live list, then 200,000 small `map`s | 15.6 s, 55 MB | 12.9 s, 107 MB |
+
+fib, the typical program, the macro loop and the regression suite were
+unchanged in time and peak memory: their live data stays under 20,000
+objects. As usual for this policy, peak memory with a large live heap can
+reach about twice the live data. This fixes the problem that motivated F10(3)
+(`kont-flat-stack-design.md`) without it. A flat stack would make marking
+each frame cheaper, but every collection would still mark every frame.
+
 ## Cheaper evaluation before pre-analysis (2026-10-03, linux/x86-64)
 
 Direct application from the argument stack, a wider `immediate`, and
@@ -62,11 +87,11 @@ The phase 11 audit found and fixed three scaling problems:
   start. Strings now record whether they are all ASCII (`gc/sstring.rs`);
   non-ASCII strings still scan.
 
-Still open: each collection walks the whole live continuation chain, so
-deep non-tail recursion is quadratic in its depth: `(count 1000000)` with
-`(+ 1 (count (- n 1)))` takes 3.8 s, against 0.8 s for the same loop
-written with a tail call. A flat continuation stack (F10(3),
-`Docs/kont-flat-stack-design.md`) or generational marking would fix it.
+Then still open, and fixed since (see "Collections in proportion to the
+live heap" above): each collection walks the whole live continuation chain,
+so deep non-tail recursion was quadratic in its depth: `(count 1000000)`
+with `(+ 1 (count (- n 1)))` took 3.8 s, against 0.8 s for the same loop
+written with a tail call.
 
 ## Results
 

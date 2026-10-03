@@ -55,3 +55,11 @@ cat > "$W/deep.scm" <<'EOF'
 (display (count 300000)) (newline)
 EOF
 run "tail loop 300k (dispatch)" $BIN -f "$W/deep.scm" -q
+
+# Non-tail recursion: every frame stays live, so this checks that collection
+# cost stays proportional to allocation (it was quadratic in the depth).
+cat > "$W/deeprec.scm" <<'EOF2'
+(define count (lambda (n) (if (= n 0) 0 (+ 1 (count (- n 1))))))
+(display (count 500000)) (newline)
+EOF2
+run "deep recursion 500k (GC)" $BIN -f "$W/deeprec.scm" -q

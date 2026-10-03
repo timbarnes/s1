@@ -32,7 +32,6 @@ Standard features s1 doesn't provide yet, and known issues. The R7RS conformance
 
 ## Known issues
 
-*   Deep non-tail recursion is quadratic in its depth, because every collection walks the whole live continuation chain: a million-deep `(+ 1 (count (- n 1)))` takes 3.8 s. Tail-recursive loops are unaffected. See [performance.md](./performance.md).
 *   Indexing a string that contains non-ASCII characters (`string-ref`, `string-set!`, `substring`) scans from the start; ASCII strings are O(1).
 
 [Home](s1-docs.md)

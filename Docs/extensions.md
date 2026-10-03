@@ -8,7 +8,9 @@ This document describes functions and features specific to the S1 Scheme interpr
 
 `(gc-threshold [n])`
 
-With no arguments, returns the current GC threshold. With one argument, sets the GC threshold to `n`.
+With no arguments, returns the current GC threshold. With one argument, sets the GC threshold to `n`; 0 turns automatic collection off.
+
+The threshold is the minimum number of allocations between collections; the default is 20,000. A collection also waits until as many objects have been allocated as survived the last one, so collecting takes time in proportion to allocating, however large the live data grows. A threshold below the default is exact, which is how the GC stress tests collect after every allocation: `(gc-threshold 1)`.
 
 ## `shell`
 
