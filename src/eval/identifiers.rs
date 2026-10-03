@@ -68,9 +68,39 @@ pub fn strip(heap: &GcHeap, id: GcRef) -> GcRef {
 /// `free-identifier=?`, used to match `syntax-rules` literals.
 pub fn free_identifier_eq(heap: &GcHeap, a: GcRef, env_a: &EnvRef, b: GcRef, env_b: &EnvRef) -> bool {
     match (resolve(heap, a, env_a), resolve(heap, b, env_b)) {
-        (Some(x), Some(y)) => Rc::ptr_eq(&x.frame, &y.frame) && x.key == y.key,
+        (Some(x), Some(y)) => same_binding(&x, &y),
         (None, None) => strip(heap, a) == strip(heap, b),
         _ => false,
+    }
+}
+
+/// Whether two resolved names denote the same binding: the same frame and
+/// key, or two top-level names sharing one cell (an import and the name
+/// it was imported from, as `else` in the system environment, where `case`
+/// is defined, and in the interaction environment).
+fn same_binding(x: &Resolved, y: &Resolved) -> bool {
+    if Rc::ptr_eq(&x.frame, &y.frame) && x.key == y.key {
+        return true;
+    }
+    x.frame.parent().is_none()
+        && y.frame.parent().is_none()
+        && match (x.frame.cell(x.key), y.frame.cell(y.key)) {
+            (Some(a), Some(b)) => Rc::ptr_eq(&a, &b),
+            _ => false,
+        }
+}
+
+/// Whether `id`, in `env`, is the auxiliary syntax keyword `name` (such as
+/// `else`), whose system binding is the object `binding`: either it is
+/// bound to that object (perhaps imported under another name), or it is
+/// unbound and spelled `name`. A local variable named `else` is not it.
+pub fn is_keyword(heap: &GcHeap, id: GcRef, env: &EnvRef, name: &str, binding: GcRef) -> bool {
+    if !matches!(gc_value!(id), SchemeValue::Symbol(_)) {
+        return false;
+    }
+    match resolve(heap, id, env) {
+        Some(r) => r.value == binding,
+        None => matches!(gc_value!(strip(heap, id)), SchemeValue::Symbol(s) if s == name),
     }
 }
 

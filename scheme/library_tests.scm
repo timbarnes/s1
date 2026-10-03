@@ -74,12 +74,10 @@
 (test-equal '(#t #t) (list (and (member '(scheme base) (library-names)) #t) (and (member '(s1) (library-names)) #t))
     "library-names")
 
-;; What R7RS assigns the standard libraries that s1 doesn't define yet: the
-;; checklist for the rest of phase 9 and the phase 11 audit.
-(test-equal '(((scheme base) ("..." "=>" "_" "else" "syntax-error"))
-              ((scheme complex) ("angle" "imag-part" "magnitude" "make-polar" "make-rectangular" "real-part"))
-              ((scheme cxr) ("caaaar" "caadar" "cadaar" "caddar" "cdaaar" "cdadar" "cddaar" "cdddar"))
-              ((scheme r5rs) ("angle" "caaaar" "caadar" "cadaar" "caddar" "cdaaar" "cdadar" "cddaar" "cdddar" "imag-part" "magnitude" "make-polar" "make-rectangular" "real-part")))
+;; What R7RS assigns the standard libraries that s1 doesn't define: only
+;; the complex-number procedures, which aren't planned.
+(test-equal '(((scheme complex) ("angle" "imag-part" "magnitude" "make-polar" "make-rectangular" "real-part"))
+              ((scheme r5rs) ("angle" "imag-part" "magnitude" "make-polar" "make-rectangular" "real-part")))
     (let loop ((names (library-names)) (acc '()))
       (cond ((null? names) (reverse acc))
             ((null? (%library-unimplemented (car names))) (loop (cdr names) acc))
@@ -284,7 +282,7 @@
 (display "          === Testing cond-expand and features ===")
 (newline)
 
-(test-equal '(#t #t #t) (map (lambda (f) (and (memq f (features)) #t)) '(r7rs ratios s1)) "features")
+(test-equal '(#t #t #t #t) (map (lambda (f) (and (memq f (features)) #t)) '(r7rs ratios s1 full-unicode)) "features")
 (test-equal #f (and (memq 'exact-complex (features)) #t) "no complex numbers")
 (test-equal 'yes (cond-expand (r7rs 'yes) (else 'no)) "a feature")
 (test-equal 'else (cond-expand (no-such-feature 'yes) (else 'else)) "else")

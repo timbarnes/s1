@@ -6,7 +6,7 @@ R7RS sections 5.2 (`import`), 5.6 (libraries) and 4.2.1 (`cond-expand`). Program
 
 ## Standard libraries
 
-The R7RS standard libraries exist as export lists over the system environment: `(scheme base)`, `(scheme case-lambda)`, `(scheme char)`, `(scheme complex)`, `(scheme cxr)`, `(scheme eval)`, `(scheme file)`, `(scheme inexact)`, `(scheme lazy)`, `(scheme load)`, `(scheme process-context)`, `(scheme read)`, `(scheme repl)`, `(scheme time)`, `(scheme write)` and `(scheme r5rs)`. Names a library should export but s1 doesn't define yet are left out (the complex-number procedures, for example); `(%library-unimplemented library-name)` lists them. `(s1)` exports everything else in the system environment: s1's extensions.
+The R7RS standard libraries exist as export lists over the system environment: `(scheme base)`, `(scheme case-lambda)`, `(scheme char)`, `(scheme complex)`, `(scheme cxr)`, `(scheme eval)`, `(scheme file)`, `(scheme inexact)`, `(scheme lazy)`, `(scheme load)`, `(scheme process-context)`, `(scheme read)`, `(scheme repl)`, `(scheme time)`, `(scheme write)` and `(scheme r5rs)`. Names a library should export but s1 doesn't define are left out: only the complex-number procedures of `(scheme complex)` and `(scheme r5rs)`. `(%library-unimplemented library-name)` lists them. `(s1)` exports everything else in the system environment: s1's extensions.
 
 * `(library-names)`: the registered libraries' names, such as `(scheme base)`. An s1 extension.
 * `(library-exports library-name)`: the names a library exports, as a list of symbols. An s1 extension.
@@ -100,6 +100,6 @@ Evaluates the forms of the first clause whose requirement holds, in place of the
   (else (define (upcase c) c)))
 ```
 
-`(features)` returns s1's feature identifiers: `r7rs`, `exact-closed`, `ieee-float`, `ratios`, `s1`, and the operating system, its family, the architecture and the byte order, for example `linux unix posix x86-64 little-endian`. `exact-complex` is absent, since s1 has no complex numbers; `full-unicode` waits for the phase 11 audit.
+`(features)` returns s1's feature identifiers: `r7rs`, `exact-closed`, `ieee-float`, `full-unicode`, `ratios`, `s1`, and the operating system, its family, the architecture and the byte order, for example `linux unix posix x86-64 little-endian`. `full-unicode` is present: characters are Unicode scalar values, strings hold any of them, and the case, character-class and digit procedures follow Unicode. `exact-complex` is absent, since s1 has no complex numbers.
 
 [Home](s1-docs.md)

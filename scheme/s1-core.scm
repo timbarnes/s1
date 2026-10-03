@@ -92,7 +92,14 @@
 (define cddadr (lambda (l) "(cddadr list) -> cdr of cdr of car of cdr of list" (cdr (cdr (car (cdr l))))))
 (define caaddr (lambda (l) "(caaddr list) -> car of car of cdr of cdr of list" (car (car (cdr (cdr l))))))
 (define cdaddr (lambda (l) "(cdaddr list) -> cdr of car of cdr of cdr of list" (cdr (car (cdr (cdr l))))))
-(define cdddr (lambda (l) "(cdddr list) -> cdr of cdr of cdr of list" (cdr (cdr (cdr l)))))
+(define caaaar (lambda (l) "(caaaar list) -> car of car of car of car of list" (car (car (car (car l))))))
+(define caadar (lambda (l) "(caadar list) -> car of car of cdr of car of list" (car (car (cdr (car l))))))
+(define cadaar (lambda (l) "(cadaar list) -> car of cdr of car of car of list" (car (cdr (car (car l))))))
+(define caddar (lambda (l) "(caddar list) -> car of cdr of cdr of car of list" (car (cdr (cdr (car l))))))
+(define cdaaar (lambda (l) "(cdaaar list) -> cdr of car of car of car of list" (cdr (car (car (car l))))))
+(define cdadar (lambda (l) "(cdadar list) -> cdr of car of cdr of car of list" (cdr (car (cdr (car l))))))
+(define cddaar (lambda (l) "(cddaar list) -> cdr of cdr of car of car of list" (cdr (cdr (car (car l))))))
+(define cdddar (lambda (l) "(cdddar list) -> cdr of cdr of cdr of car of list" (cdr (cdr (cdr (car l))))))
 (define cddddr (lambda (l) "(cddddr list) -> cdr of cdr of cdr of cdr of list" (cdr (cdr (cdr (cdr l))))))
 
 ;; Simplified (single argument) version of map

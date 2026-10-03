@@ -841,7 +841,7 @@ fn relocate_includes(heap: &mut GcHeap, form: GcRef, dir: &std::path::Path) -> G
 
 /// s1's feature identifiers (R7RS appendix B), as strings.
 fn feature_names() -> Vec<String> {
-    let mut names: Vec<String> = ["r7rs", "exact-closed", "ieee-float", "ratios", "s1"]
+    let mut names: Vec<String> = ["r7rs", "exact-closed", "ieee-float", "full-unicode", "ratios", "s1"]
         .iter()
         .map(|f| f.to_string())
         .collect();

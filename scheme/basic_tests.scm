@@ -252,6 +252,33 @@
 (test-equal 1 (caar '((1 2) (3 4))) "caar of nested list")
 (test-equal '(2) (cdar '((1 2) (3 4))) "cdar of nested list")
 (test-equal '(3 4) (cadr '((1 2) (3 4))) "cadr of nested list")
+;; All 28 c...r compositions. Each leaf of cxr-tree is the string of a's
+;; and d's (car and cdr) leading to it, in the order they are applied; so
+;; the leftmost leaf under (cxr cxr-tree) must start with cxr's path, which
+;; is its name's middle letters reversed (cadr applies d, then a).
+(define cxr-tree
+  (let build ((path "") (depth 0))
+    (if (= depth 4)
+        path
+        (cons (build (string-append path "a") (+ depth 1))
+              (build (string-append path "d") (+ depth 1))))))
+(define (cxr-ok? proc name)
+  (let ((path (list->string (reverse (string->list (substring name 1 (- (string-length name) 1))))))
+        (leaf (let leftmost ((t (proc cxr-tree))) (if (pair? t) (leftmost (car t)) t))))
+    (string=? path (substring leaf 0 (string-length path)))))
+(test-equal '()
+    (let loop ((procs (list caar cadr cdar cddr caaar caadr cadar caddr cdaar cdadr cddar cdddr
+                            caaaar caaadr caadar caaddr cadaar cadadr caddar cadddr
+                            cdaaar cdaadr cdadar cdaddr cddaar cddadr cdddar cddddr))
+               (names '("caar" "cadr" "cdar" "cddr" "caaar" "caadr" "cadar" "caddr"
+                        "cdaar" "cdadr" "cddar" "cdddr" "caaaar" "caaadr" "caadar" "caaddr"
+                        "cadaar" "cadadr" "caddar" "cadddr" "cdaaar" "cdaadr" "cdadar" "cdaddr"
+                        "cddaar" "cddadr" "cdddar" "cddddr"))
+               (bad '()))
+      (cond ((null? procs) bad)
+            ((cxr-ok? (car procs) (car names)) (loop (cdr procs) (cdr names) bad))
+            (else (loop (cdr procs) (cdr names) (cons (car names) bad)))))
+    "every c...r procedure follows its path")
 (test-equal 3 (list-ref '(0 1 2 3) 3) "list-ref last item")
 (test-equal 0 (length '()) "zero-length list")
 (test-equal 3 (length '(3 2 1)) "single level list")

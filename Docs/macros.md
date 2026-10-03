@@ -70,6 +70,20 @@ The special forms that s1 implements by rewriting into other forms (named `let`,
 
 Macros are expanded when the evaluator reaches them, so a malformed use in code that never runs is never reported. Errors in the `syntax-rules` form itself are reported when it is evaluated.
 
+`(syntax-error message arg ...)` in a template reports a malformed use: it raises an error whose message is the string `message` and whose irritants are the `arg`s, unevaluated.
+
+```scheme
+(define-syntax must-be-pair
+  (syntax-rules ()
+    ((_ (a . b)) 'pair)
+    ((_ x) (syntax-error "must-be-pair: not a pair" x))))
+(must-be-pair oops)   ; error: must-be-pair: not a pair oops
+```
+
+### Auxiliary syntax
+
+`else`, `=>`, `_` and `...` are bound in `(scheme base)`, so they can be exported, imported and renamed like other syntax: after `(import (rename (only (scheme base) else) (else otherwise)))`, `otherwise` works as `else` in `cond` and `case`. Using one as an expression, as in `(else 1)`, is an error. A local variable named `else` or `=>` is an ordinary variable, and `cond`, `case` and `guard` don't treat it as a keyword.
+
 ### Performance
 
 Each use is expanded once and the expansion is cached, keyed by the use and the macro. A macro used inside a loop or a frequently called procedure costs little more than the equivalent hand-written code (about 1.3× in a tight loop). Redefining the macro invalidates the cache. The cache doesn't notice a literal such as `else` being rebound between two evaluations of the same code; that would need something like `(define else ...)` at top level.

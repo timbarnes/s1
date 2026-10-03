@@ -67,6 +67,14 @@ pub fn register_special_forms(heap: &mut GcHeap, env: EnvRef) {
         "include" => crate::libraries::include_sf,
         "include-ci" => crate::libraries::include_ci_sf,
         "cond-expand" => crate::libraries::cond_expand_sf,
+        "syntax-error" => syntax_error_sf,
+        // Auxiliary syntax (R7RS 4.3.2 and the cond, case and guard
+        // clauses): bound, each to its own object, so that they can be
+        // exported, imported and renamed like other syntax. See `is_keyword`.
+        "else" => auxiliary_syntax_sf,
+        "=>" => auxiliary_syntax_sf,
+        "_" => auxiliary_syntax_sf,
+        "..." => auxiliary_syntax_sf,
     );
 }
 
@@ -289,6 +297,31 @@ pub fn define_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
     }
 }
 
+/// (syntax-error message args ...)
+/// Raises an error whose message is `message` and whose irritants are the
+/// `args`, unevaluated (R7RS 4.3.3). s1 expands a macro use when it is
+/// evaluated, so the error is raised then.
+fn syntax_error_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
+    let form = list_to_vec(ec.heap, expr).map_err(|_| "syntax-error: expected (syntax-error message arg ...)".to_string())?;
+    let message = match form.get(1).map(|m| gc_value!(*m)) {
+        Some(SchemeValue::Str(s)) => s.clone(),
+        _ => return Err("syntax-error: the message must be a string".to_string()),
+    };
+    let irritants = list_from_slice(&form[2..], ec.heap);
+    let irritants = crate::eval::identifiers::strip_datum(ec.heap, irritants);
+    crate::eval::exceptions::raise_error(state, ec, crate::gc::ErrorKind::General, &message, irritants);
+    Ok(())
+}
+
+/// `else`, `=>`, `_` and `...` used as an expression's operator.
+fn auxiliary_syntax_sf(expr: GcRef, ec: &mut RunTime, _state: &mut CEKState) -> Result<(), String> {
+    let name = match gc_value!(expr) {
+        SchemeValue::Pair(head, _) => identifier_name(ec.heap, *head),
+        _ => "auxiliary syntax".to_string(),
+    };
+    Err(format!("{}: auxiliary syntax can't be used as an expression", name))
+}
+
 /// The name an identifier (perhaps an alias) is written as, for messages.
 fn identifier_name(heap: &GcHeap, id: GcRef) -> String {
     match gc_value!(crate::eval::identifiers::strip(heap, id)) {
@@ -371,12 +404,15 @@ pub fn cond_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<()
     args = args.into_iter().skip(1).collect();
     args.reverse();
 
-    // `else` and `=>` are keywords only where they aren't bound as
-    // variables (R7RS compares them by binding): in
+    // `else` and `=>` are keywords only where they still denote the
+    // auxiliary syntax (R7RS compares them by binding): in
     // (let ((=> #f)) (cond (#t => 'ok))) the `=>` is an ordinary expression.
     let env = state.env.clone();
+    let else_binding = ec.heap.core_form("else");
+    let arrow_binding = ec.heap.core_form("=>");
     let keyword = |id: GcRef, name: &str, heap: &GcHeap| {
-        matches_sym(id, name) && crate::eval::identifiers::lookup(heap, id, &env).is_none()
+        let binding = if name == "else" { else_binding } else { arrow_binding };
+        crate::eval::identifiers::is_keyword(heap, id, &env, name, binding)
     };
     let mut clauses = Vec::new();
     for clause in args.iter() {

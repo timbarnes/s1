@@ -177,3 +177,34 @@
 (test-equal 'first (call-which) "the same use again")
 (define-syntax which-version (syntax-rules () ((_) 'second)))
 (test-equal 'second (call-which) "redefining the macro invalidates the cached expansion")
+
+(display "          === Testing syntax-error and auxiliary syntax ===")
+(newline)
+
+(define-syntax must-be-pair
+  (syntax-rules ()
+    ((_ (a . b)) 'pair)
+    ((_ x) (syntax-error "must-be-pair: not a pair" x))))
+(test-equal 'pair (must-be-pair (1 2)) "syntax-error: a rule that doesn't use it")
+(test-equal '("must-be-pair: not a pair" (oops))
+    (guard (e (#t (list (error-object-message e) (error-object-irritants e)))) (must-be-pair oops))
+    "syntax-error: message and unevaluated irritants")
+
+;; else, =>, _ and ... are bound, so they can be imported and renamed, and
+;; still work where they aren't shadowed.
+(test-equal 'b (case 3 ((1) 'a) (else 'b)) "case else, with else bound")
+(test-equal 4 (case 3 ((3) => (lambda (x) (+ x 1))) (else 'b)) "case =>, with => bound")
+(test-equal 2 (let ((else #f)) (cond (else 1) (#t 2))) "a local else is a variable in cond")
+(test-equal 'g (guard (e (else 'g)) (raise 1)) "guard else")
+(test-equal "else: auxiliary syntax can't be used as an expression"
+    (guard (e (#t (error-object-message e))) (else 1))
+    "else as an expression is an error")
+(define-syntax aux-if (syntax-rules (else) ((_ c a else b) (if c a b))))
+(test-equal 2 (aux-if #f 1 else 2) "a user macro with an else literal")
+(test-equal 'renamed
+    (eval '(begin (import (rename (only (scheme base) else) (else otherwise)))
+                  (cond (#f 1) (otherwise 'renamed)))
+          (interaction-environment))
+    "a renamed else still works as else")
+(test-true (and (memq 'else (library-exports '(scheme base))) (memq '... (library-exports '(scheme base))) #t)
+    "(scheme base) exports else and ...")
