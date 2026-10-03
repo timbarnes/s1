@@ -12,10 +12,10 @@ Standard features s1 doesn't provide yet, and known issues. The R7RS conformance
 
 *   `transcript-on`, `transcript-off` (R5RS only; removed in R7RS).
 
-## Libraries (R7RS phase 9, in progress)
+## Libraries (R7RS phase 9, done)
 
-*   Done: `interaction-environment`, and `eval` and `load` with an environment argument (9a). The system and interaction environments, the standard libraries as export lists, and `environment` with library names (9b). `import` with `only`, `except`, `prefix` and `rename`; import sets in `environment`; `scheme-report-environment` and `null-environment` (9c). `define-library`, `include`, `include-ci`, `include-library-declarations` (9d). Library files on a search path (9e). `cond-expand` and `features` (9f).
-*   To do: the conformance suite still stubs `import`; enable its 6.12 tests (9g). Design: [libraries-design.md](./libraries-design.md). The conformance shim stubs `import` meanwhile.
+*   Done: see [Libraries](./libraries.md) and [Environments and Evaluation](./environments.md). `interaction-environment`, and `eval` and `load` with an environment argument (9a). The system and interaction environments, the standard libraries as export lists, and `environment` with library names (9b). `import` with `only`, `except`, `prefix` and `rename`; import sets in `environment`; `scheme-report-environment` and `null-environment` (9c). `define-library`, `include`, `include-ci`, `include-library-declarations` (9d). Library files on a search path (9e). `cond-expand` and `features` (9f). The conformance suite uses the real `import`, and its 6.12 tests pass (9g). Design: [libraries-design.md](./libraries-design.md).
+*   Not provided: `syntax-error`, and bindings for the auxiliary keywords `else`, `=>`, `_` and `...` (recognised by name), so they can't be imported or renamed.
 
 ## Pairs and lists
 

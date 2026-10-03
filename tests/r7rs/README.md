@@ -5,8 +5,8 @@ The yardstick for s1's R7RS-small work.
 | File | What it is |
 | --- | --- |
 | `r7rs-tests.scm` | chibi-scheme's R7RS test suite, vendored **unmodified** from [ashinn/chibi-scheme](https://github.com/ashinn/chibi-scheme) `tests/r7rs-tests.scm` at commit `c4e7367e867428889d8fe898a0b39f42e418b3f1`. BSD licence: `LICENSE-chibi`. |
-| `shim.scm` | Stand-in for `(chibi test)`: `test`, `test-assert`, `test-values`, `test-error`, `test-begin`, `test-end`, and a no-op `import`. Written with s1's `macro` form. |
-| `run.sh` | Runner. Splits the suite into its 20 sections, runs each in a fresh s1 process, prints a table and compares it with the baseline. |
+| `shim.scm` | Stand-in for `(chibi test)`: `test`, `test-assert`, `test-values`, `test-error`, `test-begin`, `test-end`. Written with s1's `macro` form. |
+| `run.sh` | Runner. Splits the suite into its 20 sections, runs each in a fresh s1 process after the suite's own `import` header (less `(chibi test)`, which the shim replaces), prints a table and compares it with the baseline. |
 | `baseline.txt` | Pass counts per section from the last `--update`. |
 | `last-run.log` | Full output of the last run (git-ignored). Search it for `FAIL:` and `ERROR:` lines. |
 
@@ -38,11 +38,9 @@ baseline stays in step with the code. `S1_BIN` selects a prebuilt binary and
 Each section runs in its own process, so a reader desync or crash in one
 section cannot swallow the next ones.
 
-## Known gaps (1140 passing after phase 8)
+## Known gaps (1146 passing after phase 9)
 
 - **Complex numbers** are not supported and are reported as parse errors. They
   account for nearly all unreached tests (in 6.2 Numbers and Numeric syntax).
-- **6.12 Environments and evaluation** (`environment`, `eval` with an
-  environment): phase 9.
 - **6.14 System interface** (`command-line`, `exit`, time, environment
-  variables, `features`): phase 10.
+  variables): phase 10.

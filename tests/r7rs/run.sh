@@ -43,9 +43,12 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 echo '(%r7rs-summary)' > "$work/summary.scm"
 
-# Split into one file per section. The outer (test-begin "R7RS") and the
-# (import ...) header before the first section are dropped: import is a no-op
-# in the shim, and totals are summed here instead.
+# The suite's (import ...) header, run before every section with the real
+# import. (chibi test) is dropped: shim.scm, loaded after it, stands in for it.
+awk '/^\(import /, /^ *\)$/' "$suite" | grep -v '(chibi test)' > "$work/header.scm"
+
+# Split into one file per section. The outer (test-begin "R7RS") is dropped:
+# totals are summed here instead.
 awk -v dir="$work" '
     /^\(test-begin "/ && !/^\(test-begin "R7RS"\)/ {
         n++
@@ -79,7 +82,7 @@ for f in "$work"/section-*.scm; do
     expected="$(expected_tests "$f")"
     echo ";;;; ==== $name" >> "$log"
     status=0
-    out="$(timeout "$timeout_secs" "$S1_BIN" -f "$shim" -f "$f" -f "$work/summary.scm" -q 2>&1 </dev/null)" \
+    out="$(timeout "$timeout_secs" "$S1_BIN" -f "$work/header.scm" -f "$shim" -f "$f" -f "$work/summary.scm" -q 2>&1 </dev/null)" \
         || status=$?
     printf '%s\n' "$out" >> "$log"
 

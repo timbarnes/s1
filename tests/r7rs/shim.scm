@@ -13,9 +13,6 @@
 ;; definition the form needs raised) are never attempted at all; run.sh
 ;; reports those as "not reached".
 
-;; No library system yet (plan phase 9): accept and ignore (import ...).
-(define import (macro args #t))
-
 (define %r7rs-pass 0)
 (define %r7rs-fail 0)
 (define %r7rs-error 0)

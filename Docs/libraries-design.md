@@ -2,7 +2,7 @@
 
 # Libraries and environments: design (phase 9)
 
-Status: in progress. Steps 9a to 9f are implemented; 9g (conformance and docs) remains.
+Status: implemented (9a to 9g). User documentation: [libraries.md](./libraries.md) and [environments.md](./environments.md).
 Built on the binding cells of commit 7300841 (`BindingCell` in `src/env.rs`).
 
 ## Goal
