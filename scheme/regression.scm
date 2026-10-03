@@ -27,6 +27,9 @@
 (displayln "         =====Library and Environment Tests=====")
 (load "scheme/library_tests.scm")
 
+(displayln "         =====Tail Call Tests=====")
+(load "scheme/tail_tests.scm")
+
 (displayln "         =====System Interface Tests=====")
 (load "scheme/system_tests.scm")
 

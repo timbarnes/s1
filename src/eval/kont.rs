@@ -18,6 +18,9 @@ pub enum Kont {
     AndOr {
         kind: AndOrKind,
         rest: Vec<GcRef>, // remaining expressions in the sequence (head first)
+        /// Whether the and/or form is in tail position: its last expression
+        /// then is too (R7RS 3.5).
+        tail: bool,
         next: KontRef,
     },
     ApplyProc {
@@ -328,7 +331,7 @@ impl std::fmt::Debug for Kont {
             Kont::Seq { rest, next, .. } => {
                 write!(f, "Seq {{ rest: {:?}, next: {:?} }}", rest, next)
             }
-            Kont::AndOr { kind, rest, next } => {
+            Kont::AndOr { kind, rest, next, .. } => {
                 let k = match kind {
                     AndOrKind::And => "And",
                     AndOrKind::Or => "Or",
@@ -686,6 +689,7 @@ pub fn insert_and_or(state: &mut CEKState, kind: AndOrKind, mut exprs: Vec<GcRef
     // exprs has length ≥ 2
     exprs.reverse();
     let prev = Rc::clone(&state.kont);
+    let tail = state.tail;
     state.control = Control::Expr(exprs.pop().unwrap());
     // The AndOr frame evaluates more operands after this one, so this one
     // must not be treated as a tail call (it would leave the callee's env).
@@ -693,6 +697,7 @@ pub fn insert_and_or(state: &mut CEKState, kind: AndOrKind, mut exprs: Vec<GcRef
     state.kont = Rc::new(Kont::AndOr {
         kind,
         rest: exprs,
+        tail,
         next: prev,
     });
 }

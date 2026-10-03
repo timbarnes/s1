@@ -39,6 +39,7 @@ pub fn register_sys_builtins(runtime: &mut RunTime, env: EnvRef) {
         "call-with-values" => call_with_values_sp,
         "trace" => trace_sp,
         "trace-env" => trace_env_sp,
+        "%kont-depth" => kont_depth_sp,
         "garbage-collect" => garbage_collect_sp,
         "gc" => garbage_collect_sp,
         "help" => help_sp,
@@ -199,14 +200,9 @@ fn apply_sp(
                 let applied_args = list_to_vec(ec.heap, arglist)?;
                 let new_env =
                     crate::eval::bind_params(&params[..], &applied_args, &closure_env, ec.heap)?;
-                let old_env = state.env.clone();
-
-                // `apply` is never a tail call, so always push RestoreEnv;
-                // the body itself is then in tail position (see apply_proc).
-                state.kont = Rc::new(Kont::RestoreEnv { old_env, next: nxt });
-                state.env = new_env;
-                state.control = Control::Expr(*body);
-                state.tail = true;
+                // A tail call if `apply` (or `call/cc`) was called in tail
+                // position (R7RS 3.5).
+                crate::eval::cek::enter_closure(state, ec, new_env, *body, nxt);
                 return Ok(());
             }
             Callable::CaseLambda { clauses, .. } => {
@@ -218,6 +214,30 @@ fn apply_sp(
         },
         _ => return Err("apply: first argument must be a function".to_string()),
     }
+}
+
+/// (%kont-depth)
+/// The number of continuation frames waiting for this call's value. Lets
+/// the regression suite check that a loop runs in constant space: a proper
+/// tail call leaves the depth unchanged however many times it repeats.
+fn kont_depth_sp(
+    ec: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
+    if !args.is_empty() {
+        return Err("%kont-depth: expected 0 arguments".to_string());
+    }
+    let mut depth = 0usize;
+    let mut k = &next;
+    while let Some(n) = k.next() {
+        depth += 1;
+        k = n;
+    }
+    state.control = Control::Value(crate::gc::new_int(ec.heap, num_bigint::BigInt::from(depth)));
+    state.kont = next;
+    Ok(())
 }
 
 fn garbage_collect_sp(

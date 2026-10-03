@@ -338,7 +338,7 @@ fn take_kont(state: &mut CEKState) -> Kont {
 #[inline]
 fn dispatch_kont(state: &mut CEKState, ec: &mut RunTime, val: GcRef) -> Result<(), String> {
     match take_kont(state) {
-        Kont::AndOr { kind, rest, next } => handle_and_or(state, kind, rest, next),
+        Kont::AndOr { kind, rest, tail, next } => handle_and_or(state, kind, rest, tail, next),
         Kont::ApplySpecial {
             proc,
             original_call,
@@ -426,6 +426,7 @@ fn handle_and_or(
     state: &mut CEKState,
     kind: AndOrKind,
     mut rest: Vec<GcRef>,
+    tail: bool,
     next: KontRef,
 ) -> Result<(), String> {
     if let Control::Value(val) = &state.control {
@@ -445,8 +446,15 @@ fn handle_and_or(
     }
     let next_expr = rest.pop().unwrap(); // safe if not empty
     state.control = Control::Expr(next_expr);
-    state.kont = Rc::new(Kont::AndOr { kind, rest, next });
-    state.tail = false;
+    if rest.is_empty() {
+        // The last expression's value is the form's value: evaluate it
+        // without this frame, in tail position if the form is.
+        state.kont = next;
+        state.tail = tail;
+    } else {
+        state.kont = Rc::new(Kont::AndOr { kind, rest, tail, next });
+        state.tail = false;
+    }
     Ok(())
 }
 
@@ -1090,6 +1098,47 @@ fn apply_unevaluated(state: &mut CEKState, ec: &mut RunTime) -> Result<(), Strin
     }
 }
 
+/// Start evaluating a closure's `body` in `new_env` (its parameters already
+/// bound), continuing to `next`. A call in tail position (`state.tail`)
+/// pushes no frame; any other call pushes a RestoreEnv barrier. Used by
+/// apply_proc and by `apply` (and so `call/cc`), which R7RS also requires
+/// to call their procedure in tail position.
+pub fn enter_closure(state: &mut CEKState, ec: &mut RunTime, new_env: EnvRef, body: GcRef, next: KontRef) {
+    if state.tail {
+        // Tail-call optimization: no RestoreEnv frame.
+        state.env = new_env;
+        state.kont = next; // reuse continuation depth
+        state.control = Control::Expr(body);
+
+        // A tail call never pushes RestoreEnv, so a purely
+        // tail-recursive loop would otherwise never hit the only
+        // other automatic GC checkpoint (handle_restore_env) and
+        // could grow unbounded. Same invariant as there: state is
+        // fully installed above, so collecting now is safe.
+        if ec.heap.needs_gc() {
+            ec.heap.collect_garbage(
+                state,
+                &ec.current_ports[..],
+                ec.port_stack,
+                ec.dynamic_wind,
+                ec.arg_stack,
+                *ec.handlers,
+            );
+        }
+    } else {
+        // Normal (non-tail) call: push a RestoreEnv barrier.
+        let old_env = state.env.clone();
+        state.kont = Rc::new(Kont::RestoreEnv { old_env, next });
+        state.env = new_env;
+        state.control = Control::Expr(body);
+        // The body is in tail position relative to its own
+        // frame: the RestoreEnv below restores the caller's env,
+        // so calls in tail position inside it need no frame of
+        // their own. (Forms inside the body inherit this.)
+        state.tail = true;
+    }
+}
+
 /// Process Builtin, SysBuiltin, and Closure applications. Arguments are already evaluated.
 ///
 pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> {
@@ -1131,46 +1180,8 @@ pub fn apply_proc(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> 
                 ..
             } => {
                 let new_env = bind_params(&params[..], &evaluated_args, &closure_env, ec.heap)?;
-                let old_env = state.env.clone();
-
-                if state.tail {
-                    // Tail-call optimization: no RestoreEnv frame.
-                    state.env = new_env;
-                    state.kont = next; // reuse continuation depth
-                    state.control = Control::Expr(*body);
-
-                    // A tail call never pushes RestoreEnv, so a purely
-                    // tail-recursive loop would otherwise never hit the only
-                    // other automatic GC checkpoint (handle_restore_env) and
-                    // could grow unbounded. Same invariant as there: state is
-                    // fully installed above, so collecting now is safe.
-                    if ec.heap.needs_gc() {
-                        ec.heap.collect_garbage(
-                            state,
-                            &ec.current_ports[..],
-                            ec.port_stack,
-                            ec.dynamic_wind,
-                            ec.arg_stack,
-                            *ec.handlers,
-                        );
-                    }
-
-                    Ok(())
-                } else {
-                    // Normal (non-tail) call: push a RestoreEnv barrier.
-                    state.kont = Rc::new(Kont::RestoreEnv {
-                        old_env,
-                        next: next,
-                    });
-                    state.env = new_env;
-                    state.control = Control::Expr(*body);
-                    // The body is in tail position relative to its own
-                    // frame: the RestoreEnv below restores the caller's env,
-                    // so calls in tail position inside it need no frame of
-                    // their own. (Forms inside the body inherit this.)
-                    state.tail = true;
-                    Ok(())
-                }
+                enter_closure(state, ec, new_env, *body, next);
+                Ok(())
             }
             Callable::CaseLambda { clauses, .. } => {
                 // Apply the first clause that accepts this many arguments.
