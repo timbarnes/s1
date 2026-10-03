@@ -2,7 +2,7 @@
 
 # Libraries and environments: design (phase 9)
 
-Status: in progress. Steps 9a to 9c are implemented; the rest is design.
+Status: in progress. Steps 9a to 9d are implemented; the rest is design.
 Built on the binding cells of commit 7300841 (`BindingCell` in `src/env.rs`).
 
 ## Goal
@@ -159,7 +159,9 @@ level. It:
    registered, so it can be fixed and reloaded.
 
 Step 4 runs as a last internal form appended to the body (a call to a
-system procedure), so no new continuation frame type is needed.
+system procedure), so no new continuation frame type is needed. As built,
+step 2 moved into step 4: the export cells are looked up when the body has
+finished, which finds the same cells and needs no unbound ones.
 
 ### Macros and hygiene
 

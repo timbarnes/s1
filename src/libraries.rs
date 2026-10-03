@@ -446,3 +446,228 @@ fn library_unimplemented(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, Str
     let strings: Vec<GcRef> = names.iter().map(|name| new_string(heap, name)).collect();
     Ok(list_from_slice(&strings, heap))
 }
+
+// ---------------------------------------------------------------------------
+// define-library and include
+
+use crate::eval::{CEKState, Control, Kont, KontRef, RunTime};
+
+/// Read every datum in the file `name`, with case folding for `include-ci`.
+/// Relative names are relative to the current directory.
+pub fn read_file_forms(heap: &mut GcHeap, name: &str, fold_case: bool, who: &str) -> Result<Vec<GcRef>, String> {
+    let content = std::fs::read_to_string(name).map_err(|e| format!("{}: could not read {}: {}", who, name, e))?;
+    let mut port = crate::io::new_string_port_input(&content);
+    if let crate::io::PortKind::StringPortInput { fold_case: fold, .. } = &port {
+        fold.set(fold_case);
+    }
+    let mut forms = Vec::new();
+    loop {
+        match crate::parser::parse(heap, &mut port) {
+            Ok(form) => forms.push(form),
+            Err(crate::parser::ParseError::Eof) => return Ok(forms),
+            Err(crate::parser::ParseError::Syntax(e)) => return Err(format!("{}: {}: {}", who, name, e)),
+        }
+    }
+}
+
+/// The forms of the files named by `files` (a list of strings), in order.
+fn include_forms(heap: &mut GcHeap, files: GcRef, fold_case: bool, who: &str) -> Result<Vec<GcRef>, String> {
+    let names = crate::gc::list_to_vec(heap, files)?;
+    if names.is_empty() {
+        return Err(format!("{}: expects at least one file name", who));
+    }
+    let mut forms = Vec::new();
+    for name in names {
+        let SchemeValue::Str(name) = gc_value!(name) else {
+            return Err(format!("{}: file names must be strings", who));
+        };
+        let name = name.clone();
+        forms.extend(read_file_forms(heap, &name, fold_case, who)?);
+    }
+    Ok(forms)
+}
+
+fn include(expr: GcRef, ec: &mut RunTime, state: &mut CEKState, fold_case: bool, who: &str) -> Result<(), String> {
+    let forms = include_forms(ec.heap, crate::gc::cdr(expr)?, fold_case, who)?;
+    if forms.is_empty() {
+        crate::eval::insert_value(state, ec.heap.unspecified());
+        return Ok(());
+    }
+    // (begin form ...) where the include was, in its tail position.
+    let begin = ec.heap.core_form("begin");
+    let body = list_from_slice(&forms, ec.heap);
+    let begin_form = crate::gc::new_pair(ec.heap, begin, body);
+    crate::eval::insert_eval(state, begin_form, state.tail);
+    Ok(())
+}
+
+/// (include file ...): the files' forms, as a `begin`, in place of the include.
+pub fn include_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
+    include(expr, ec, state, false, "include")
+}
+
+/// (include-ci file ...): as `include`, reading with case folding.
+pub fn include_ci_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
+    include(expr, ec, state, true, "include-ci")
+}
+
+/// What a `define-library`'s declarations add up to.
+#[derive(Default)]
+struct Declarations {
+    /// (internal, external) names
+    exports: Vec<(GcRef, GcRef)>,
+    imports: Vec<GcRef>,
+    body: Vec<GcRef>,
+}
+
+fn collect_declarations(heap: &mut GcHeap, decls: &[GcRef], out: &mut Declarations) -> Result<(), String> {
+    let who = "define-library";
+    for decl in decls {
+        let parts = crate::gc::list_to_vec(heap, *decl)
+            .map_err(|_| format!("{}: not a declaration: {}", who, crate::printer::print_value(decl)))?;
+        let keyword = parts.first().map(|k| identifier_name(heap, *k)).unwrap_or_default();
+        let args = &parts[1.min(parts.len())..];
+        match keyword.as_str() {
+            "export" => {
+                for spec in args {
+                    match gc_value!(*spec) {
+                        SchemeValue::Symbol(_) => out.exports.push((*spec, *spec)),
+                        _ => {
+                            let spec_parts = crate::gc::list_to_vec(heap, *spec).unwrap_or_default();
+                            match spec_parts[..] {
+                                [kw, internal, external] if identifier_name(heap, kw) == "rename" => {
+                                    out.exports.push((internal, external))
+                                }
+                                _ => {
+                                    return Err(format!(
+                                        "{}: bad export spec {}",
+                                        who,
+                                        crate::printer::print_value(spec)
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            "import" => out.imports.extend_from_slice(args),
+            "begin" => out.body.extend_from_slice(args),
+            "include" | "include-ci" => {
+                let forms = include_forms(heap, crate::gc::cdr(*decl)?, keyword == "include-ci", &keyword)?;
+                out.body.extend(forms);
+            }
+            "include-library-declarations" => {
+                let forms = include_forms(heap, crate::gc::cdr(*decl)?, false, &keyword)?;
+                collect_declarations(heap, &forms, out)?;
+            }
+            "cond-expand" => return Err(format!("{}: cond-expand is not supported yet", who)),
+            _ => return Err(format!("{}: unknown declaration {}", who, crate::printer::print_value(decl))),
+        }
+    }
+    Ok(())
+}
+
+/// (define-library name declaration ...)
+///
+/// The imports are made into a new library environment, then the body runs
+/// there, through the machine, with the caller's environment restored after.
+/// The body's last step is a call to `%register-library`, which checks that
+/// every export is defined and only then registers the library, so a
+/// library whose body fails isn't registered (Docs/libraries-design.md).
+pub fn define_library_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
+    let who = "define-library";
+    let parts = crate::gc::list_to_vec(ec.heap, expr)?;
+    if parts.len() < 2 {
+        return Err(format!("{}: expects a library name", who));
+    }
+    if !matches!(state.env.borrow().bindings, crate::env::Bindings::Large(_)) {
+        return Err(format!("{}: only allowed at top level", who));
+    }
+    library_name(parts[1], who)?;
+    let mut decls = Declarations::default();
+    collect_declarations(ec.heap, &parts[2..], &mut decls)?;
+
+    // Imports. Importing one name with two different bindings is an error.
+    let env = Frame::new_top_level(true);
+    let mut seen: HashMap<GcRef, CellRef> = HashMap::default();
+    for set in &decls.imports {
+        for (name, cell) in resolve_import_set(ec.heap, *set, who)? {
+            match seen.get(&name) {
+                Some(existing) if !std::rc::Rc::ptr_eq(existing, &cell) => {
+                    return Err(format!("{}: {} is imported with two different bindings", who, symbol_name(name)));
+                }
+                _ => {
+                    seen.insert(name, cell.clone());
+                    env.bind_cell(name, cell);
+                }
+            }
+        }
+    }
+
+    // The body, then (%register-library 'name '((internal . external) ...) env).
+    let quote = ec.heap.core_form("quote");
+    let mut export_pairs = Vec::with_capacity(decls.exports.len());
+    for (internal, external) in &decls.exports {
+        export_pairs.push(crate::gc::new_pair(ec.heap, *internal, *external));
+    }
+    let export_list = list_from_slice(&export_pairs, ec.heap);
+    let quoted_name = list_from_slice(&[quote, parts[1]], ec.heap);
+    let quoted_exports = list_from_slice(&[quote, export_list], ec.heap);
+    let env_value = ec.heap.alloc(crate::gc::GcObject {
+        value: SchemeValue::Environment(env.clone()),
+        marked: 0,
+    });
+    let register = crate::gc::new_sys_builtin(
+        ec,
+        "%register-library",
+        register_library_sp,
+        "%register-library: sys-builtin".to_string(),
+    );
+    let register_call = list_from_slice(&[register, quoted_name, quoted_exports, env_value], ec.heap);
+    let mut body = decls.body;
+    body.push(register_call);
+    let begin = ec.heap.core_form("begin");
+    let body_list = list_from_slice(&body, ec.heap);
+    let begin_form = crate::gc::new_pair(ec.heap, begin, body_list);
+
+    let old_env = state.env.clone();
+    state.kont = std::rc::Rc::new(Kont::RestoreEnv { old_env, next: state.kont.clone() });
+    state.env = env;
+    state.control = Control::Expr(begin_form);
+    state.tail = false;
+    Ok(())
+}
+
+/// (%register-library 'name '((internal . external) ...) env): the last
+/// step of a `define-library` body.
+fn register_library_sp(ec: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: KontRef) -> Result<(), String> {
+    let [name_datum, export_list, env_value] = args else {
+        return Err("%register-library: expects 3 arguments".to_string());
+    };
+    let SchemeValue::Environment(env) = gc_value!(*env_value) else {
+        return Err("%register-library: not an environment".to_string());
+    };
+    let env = env.clone();
+    let name = library_name(*name_datum, "define-library")?;
+    let mut exports = Vec::new();
+    for pair in crate::gc::list_to_vec(ec.heap, *export_list)? {
+        let SchemeValue::Pair(internal, external) = gc_value!(pair) else {
+            return Err("%register-library: bad export list".to_string());
+        };
+        let cell = env.cell(*internal).expect("a library environment is top level");
+        if cell.get().is_none() {
+            return Err(format!(
+                "define-library: {} exports {}, which it doesn't define",
+                format_name(&name),
+                identifier_name(ec.heap, *internal)
+            ));
+        }
+        // The external name is what importers write, so a plain symbol even
+        // if a macro produced the declaration.
+        exports.push((crate::eval::identifiers::strip(ec.heap, *external), cell));
+    }
+    ec.heap.libraries.insert(name, Library { exports, env: Some(env), unimplemented: Vec::new() });
+    state.control = Control::Value(ec.heap.unspecified());
+    state.kont = next;
+    Ok(())
+}

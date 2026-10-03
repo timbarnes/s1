@@ -76,7 +76,7 @@
 
 ;; What R7RS assigns the standard libraries that s1 doesn't define yet: the
 ;; checklist for the rest of phase 9 and the phase 11 audit.
-(test-equal '(((scheme base) ("..." "=>" "_" "cond-expand" "else" "features" "include" "include-ci" "syntax-error"))
+(test-equal '(((scheme base) ("..." "=>" "_" "cond-expand" "else" "features" "syntax-error"))
               ((scheme complex) ("angle" "imag-part" "magnitude" "make-polar" "make-rectangular" "real-part"))
               ((scheme cxr) ("caaaar" "caadar" "cadaar" "caddar" "cdaaar" "cdadar" "cddaar" "cdddar"))
               ((scheme process-context) ("command-line" "emergency-exit" "get-environment-variable" "get-environment-variables"))
@@ -124,7 +124,7 @@
     "environment with except")
 (test-equal '(1 #\B)
     (eval '(list (head '(1)) (up #\b))
-          (environment '(rename (only (scheme base) car list) (car head))
+          (environment '(rename (only (scheme base) car list quote) (car head))
                        '(prefix (only (scheme char) char-upcase) x-)
                        '(rename (prefix (only (scheme char) char-upcase) x-) (x-char-upcase up))))
     "environment with combined import sets")
@@ -156,3 +156,104 @@
 (test-equal "null-environment: the only version supported is 5"
     (guard (e (#t (error-object-message e))) (null-environment 7))
     "R5RS environments of other versions")
+
+(display "          === Testing define-library ===")
+(newline)
+
+(define-library (test counter)
+  (export count inc! (rename get-count current) bump!)
+  (import (scheme base))
+  (begin
+    (define count 0)
+    (define (inc!) (set! count (+ count 1)) count)
+    (define (get-count) count)
+    ;; An exported macro that assigns the library's own variable
+    (define-syntax bump! (syntax-rules () ((_) (set! count (+ count 10)))))))
+(import (test counter))
+(inc!)
+(inc!)
+(test-equal '(2 2) (list count (current)) "an imported variable sees the library's assignments")
+(bump!)
+(test-equal 12 count "an exported macro can assign the library's variable")
+(test-equal "set!: count is imported and can't be assigned"
+    (guard (e (#t (error-object-message e))) (set! count 0))
+    "an importer can't assign a library's variable")
+(define (get-count) 'importer)
+(test-equal '(importer 12) (list (get-count) (current))
+    "the importer's own definitions don't touch the library")
+(test-equal '(count inc! current bump!) (library-exports '(test counter)) "library-exports of a defined library")
+
+(define-library (test helpers)
+  (export twice)
+  (import (scheme base))
+  (begin
+    (define (helper x) (* 2 x))
+    (define-syntax twice (syntax-rules () ((_ x) (helper x))))))
+(import (test helpers))
+(test-equal 6 (twice 3) "an exported macro can use the library's unexported helper")
+(test-equal 'unbound (guard (e (#t 'unbound)) helper) "the helper itself isn't imported")
+
+(define-library (test isolated)
+  (export shout)
+  (import (scheme base))
+  (begin (define (shout c) (char-upcase c))))
+(import (test isolated))
+(test-equal "Unbound variable: char-upcase"
+    (guard (e (#t (error-object-message e))) (shout #\a))
+    "a library sees only what it imports")
+
+(define-library (test uses-counter)
+  (export counter-plus)
+  (import (scheme base) (only (test counter) count))
+  (begin (define (counter-plus n) (+ count n))))
+(import (test uses-counter))
+(test-equal 13 (counter-plus 1) "a library can import another library")
+
+(test-equal "define-library: (test broken) exports missing, which it doesn't define"
+    (guard (e (#t (error-object-message e)))
+      (eval '(define-library (test broken) (export missing) (import (scheme base)) (begin (define present 1)))
+            (interaction-environment)))
+    "an export that is never defined is an error")
+(test-equal "import: unknown library (test broken)"
+    (guard (e (#t (error-object-message e))) (eval '(import (test broken)) (interaction-environment)))
+    "a library with an error isn't registered")
+(test-equal 'failed
+    (guard (e (#t 'failed))
+      (eval '(define-library (test failing) (export x) (import (scheme base)) (begin (define x (car '()))))
+            (interaction-environment)))
+    "a failing body raises")
+(test-equal #f (and (member '(test failing) (library-names)) #t) "and the library isn't registered")
+(test-equal "define-library: x is imported with two different bindings"
+    (guard (e (#t (error-object-message e)))
+      (eval '(define-library (test clash) (export y) (import (scheme base) (rename (only (scheme base) car) (car x)) (rename (only (scheme base) cdr) (cdr x))) (begin (define y 1)))
+            (interaction-environment)))
+    "importing one name twice differently is an error")
+(test-equal "define-library: only allowed at top level"
+    (guard (e (#t (error-object-message e))) (let () (define-library (test inner) (export) (import (scheme base))) 1))
+    "define-library isn't allowed in a body")
+
+;; include, include-ci and include-library-declarations
+(define include-test-file "tests/include-test.tmp")
+(define include-ci-file "tests/include-ci.tmp")
+(define include-decl-file "tests/include-decl.tmp")
+(call-with-output-file include-test-file
+  (lambda (p) (write '(define (included-double x) (* 2 x)) p)))
+(call-with-output-file include-ci-file
+  (lambda (p) (display "(DEFINE INCLUDED-UPPER 'Up)" p)))
+(call-with-output-file include-decl-file
+  (lambda (p) (write '(export included-double) p) (write '(import (scheme base)) p)))
+(define-library (test included)
+  (include-library-declarations "tests/include-decl.tmp")
+  (include "tests/include-test.tmp"))
+(import (test included))
+(test-equal 8 (included-double 4) "include and include-library-declarations in a library")
+(define-library (test included-ci)
+  (export included-upper)
+  (import (scheme base))
+  (include-ci "tests/include-ci.tmp"))
+(import (test included-ci))
+(test-equal 'up included-upper "include-ci folds case")
+(test-equal 10 (let () (include "tests/include-test.tmp") (included-double 5)) "include in a body")
+(delete-file include-test-file)
+(delete-file include-ci-file)
+(delete-file include-decl-file)

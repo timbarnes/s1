@@ -41,6 +41,44 @@ Naming an identifier the set doesn't contain is an error. Every set is checked b
 
 An imported name shares the library's variable, and can't be `set!`. `import` is allowed only at the top level of an environment (the REPL, a loaded file, or `eval` in a mutable environment), not inside a body. At the REPL, importing a name replaces any binding it had, and a later `define` of it replaces the import.
 
+## `define-library`
+
+`(define-library library-name declaration ...)`
+
+Defines a library. Its body runs in a new environment that contains only what the library imports, and the library is registered under `library-name` once the body has run. The declarations are:
+
+* `(export spec ...)`: each `spec` is a name the library defines (or imports), or `(rename internal external)` to export it under another name.
+* `(import import-set ...)`: as for `import`. Importing one name with two different bindings is an error.
+* `(begin form ...)`: body forms.
+* `(include file ...)`, `(include-ci file ...)`: body forms read from files (`include-ci` folds case).
+* `(include-library-declarations file ...)`: further declarations read from files.
+
+```scheme
+(define-library (example counter)
+  (export count inc!)
+  (import (scheme base))
+  (begin
+    (define count 0)
+    (define (inc!) (set! count (+ count 1)))))
+
+(import (example counter))
+(inc!)
+count                 ; => 1: importers see the library's assignments
+(set! count 5)        ; error: count is imported
+```
+
+* A library sees only its imports: a library that calls `char-upcase` must import `(scheme char)`.
+* An exported `syntax-rules` macro may use the library's unexported definitions, and may assign the library's variables.
+* Exporting a name the body never defines is an error, and a library whose body raises an error isn't registered, so it can be corrected and evaluated again.
+* `define-library` is allowed only at top level. Evaluating it again replaces the library for later imports; existing importers keep the variables they imported.
+* Files named in `include` declarations are relative to the current directory.
+
+`cond-expand` declarations, and finding libraries in files, come in phase 9e and 9f.
+
+## `include` and `include-ci`
+
+`(include file ...)` reads the forms in the files and evaluates them in place of the `include`, as a `begin`. `(include-ci file ...)` does the same, reading with case folding. Both work anywhere an expression or definition can appear.
+
 ## `environment`
 
 `(environment import-set ...)`
