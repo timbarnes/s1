@@ -8,6 +8,23 @@ F3 (skipped by decision) and F10(3) (deferred by decision, full design in
 `Docs/kont-flat-stack-design.md`) — see "Suggested order" at the end for the
 final per-item status table.
 
+## Cheaper evaluation before pre-analysis (2026-10-03, linux/x86-64)
+
+Direct application from the argument stack, a wider `immediate`, and
+cached rewrites of binding forms. Details and per-step figures are in
+[precompilation-design.md](precompilation-design.md), "After phase 11".
+`bench/bench.sh 7` afterwards. The micro workloads are comparable with the
+table below. The regression row isn't: the suite gained 30 tests, and on
+the same suite, interleaved runs against the previous binary give 1.60 s
+-> 1.53 s.
+
+| Workload | Time |
+|---|---|
+| `regression 1x` | 1.51 s |
+| `fib 25` | 0.13 s |
+| `list/map` | 0.34 s |
+| `tail loop 300k` | 0.10 s |
+
 ## R7RS phases 9-11 (2026-10-03, linux/x86-64)
 
 `bench/bench.sh 7` after phase 11, on a different machine from the tables

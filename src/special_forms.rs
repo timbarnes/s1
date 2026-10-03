@@ -11,7 +11,7 @@ use crate::eval::{
     insert_seq, insert_value,
 };
 use crate::gc::{
-    GcHeap, GcRef, SchemeValue, car, cdr, cons, list_from_slice, list_to_vec, list2, matches_sym,
+    Callable, GcHeap, GcRef, SchemeValue, car, cdr, cons, list_from_slice, list_to_vec, list2, matches_sym,
     new_macro, new_special_form,
 };
 use crate::gc_value;
@@ -87,15 +87,72 @@ pub fn register_special_forms(heap: &mut GcHeap, env: EnvRef) {
 ///     - a vec with variadic arguments bound as a list and named arguments
 ///
 pub fn create_callable(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
-    let form = expect_at_least_n_args(&ec.heap, expr, 3)?;
-    let (params, ptype) = params_to_vec(&mut ec.heap, form[1]);
-    let closure = create_lambda_or_macro(expr, &form, &params, ptype, ec, state.env.clone());
-    match closure {
-        Ok(closure) => {
-            insert_value(state, closure);
-            Ok(())
+    let (callable, cached) = rewrite_once(ec, expr, "lambda", &state.env, |ec, env| {
+        let form = expect_at_least_n_args(&ec.heap, expr, 3)?;
+        let (params, ptype) = params_to_vec(&mut ec.heap, form[1]);
+        create_lambda_or_macro(expr, &form, &params, ptype, ec, env)
+    })?;
+    let closure = if cached { instantiate(ec.heap, callable, state.env.clone()) } else { callable };
+    insert_value(state, closure);
+    Ok(())
+}
+
+/// The rewrite of `expr` by the special form `name`, and whether it is
+/// cached. `rewrite(ec, env)` makes it; any procedure in it is closed over
+/// `env`.
+///
+/// The rewrites of `lambda` (its body's internal definitions), `let`,
+/// `let*`, `letrec`, `do` and `guard` depend only on the form, so from the
+/// second evaluation of a form on, its rewrite is cached and reused: code in
+/// a loop or a frequently called procedure is parsed and rewritten once, and
+/// the forms a cached rewrite produces are the same each time, so their own
+/// rewrites are cached too. A procedure in a cached rewrite is a template,
+/// closed over an empty environment, to be copied by `instantiate`. The
+/// first evaluation isn't cached, since caching costs more than it saves on
+/// code that runs once; there `env` is `current_env`.
+///
+/// The entries share the `syntax-rules` expansion cache, keyed by the form
+/// and the special form, and live as long as the form does.
+fn rewrite_once(
+    ec: &mut RunTime,
+    expr: GcRef,
+    name: &'static str,
+    current_env: &EnvRef,
+    rewrite: impl FnOnce(&mut RunTime, EnvRef) -> Result<GcRef, String>,
+) -> Result<(GcRef, bool), String> {
+    let key = ec.heap.core_form(name);
+    if let Some(rewritten) = ec.heap.cached_expansion(expr, key) {
+        return Ok((rewritten, true));
+    }
+    if ec.heap.first_sight(expr) {
+        return Ok((rewrite(ec, current_env.clone())?, false));
+    }
+    let rewritten = rewrite(ec, template_env())?;
+    ec.heap.cache_expansion(expr, key, rewritten);
+    Ok((rewritten, true))
+}
+
+/// The environment of a cached procedure template (see `instantiate`),
+/// which is never called: an empty one, so a template keeps nothing alive,
+/// shared by all templates, so marking them costs nothing extra.
+fn template_env() -> EnvRef {
+    thread_local! {
+        static TEMPLATE_ENV: EnvRef = crate::env::Frame::new_top_level(false);
+    }
+    TEMPLATE_ENV.with(Rc::clone)
+}
+
+/// A procedure or macro like `template` (a cached `lambda` or `let`
+/// rewrite), closed over `env`.
+fn instantiate(heap: &mut GcHeap, template: GcRef, env: EnvRef) -> GcRef {
+    match gc_value!(template).as_callable() {
+        Some(Callable::Closure { params, body, doc, source, .. }) => {
+            crate::gc::new_closure(heap, params.clone(), *body, env, doc.clone(), *source)
         }
-        Err(err) => Err(err),
+        Some(Callable::Macro { params, body, doc, source, .. }) => {
+            new_macro(heap, params.clone(), *body, env, doc.clone(), *source)
+        }
+        _ => unreachable!("procedure template is not a closure or macro"),
     }
 }
 
@@ -445,6 +502,33 @@ pub fn cond_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<()
 
 /// let (basic version, with named let support)
 pub fn let_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
+    let (rewritten, cached) = rewrite_once(ec, expr, "let", &state.env, |ec, env| rewrite_let(expr, ec, env))?;
+    match gc_value!(rewritten) {
+        // A plain let, rewritten to (procedure . inits): apply the
+        // procedure to the inits, as ((lambda (var ...) body ...) init ...)
+        // would, without building that call.
+        SchemeValue::Pair(procedure, inits)
+            if matches!(gc_value!(*procedure).as_callable(), Some(Callable::Closure { .. })) =>
+        {
+            let closure =
+                if cached { instantiate(ec.heap, *procedure, state.env.clone()) } else { *procedure };
+            let base = ec.arg_stack.len() as u32;
+            ec.arg_stack.push(closure);
+            let (tail, next) = (state.tail, Rc::clone(&state.kont));
+            crate::eval::cek::eval_args(state, ec, *inits, base, expr, tail, next)
+        }
+        // A named let, rewritten to a letrec.
+        _ => {
+            insert_eval(state, rewritten, state.tail);
+            Ok(())
+        }
+    }
+}
+
+/// The rewrite of a `let` form: for a named let, the equivalent `letrec`;
+/// for a plain one, `(procedure . inits)`, the procedure closed over `env`
+/// and the list of init expressions.
+fn rewrite_let(expr: GcRef, ec: &mut RunTime, env: EnvRef) -> Result<GcRef, String> {
     let formvec = expect_at_least_n_args(&ec.heap, expr, 3)?;
 
     // Check if this is named let: (let name bindings body...)
@@ -492,8 +576,7 @@ pub fn let_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(),
             let letrec_sym = ec.heap.core_form("letrec");
             let letrec_expr = list_from_slice(&[letrec_sym, name_bindings, call_expr], ec.heap);
 
-            insert_eval(state, letrec_expr, state.tail);
-            Ok(())
+            Ok(letrec_expr)
         }
         _ => {
             // Normal let: (let bindings body...)
@@ -515,27 +598,27 @@ pub fn let_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(),
                 }
             }
             let (params, ptype) = params_to_vec(&mut ec.heap, vars);
-            let lambda_expr =
-                create_lambda_or_macro(expr, &formvec, &params, ptype, ec, state.env.clone())?;
-            // cons the lambda to the list of values
-            let call = cons(lambda_expr, exprs, ec.heap)?;
-
-            insert_eval(state, call, state.tail);
-            Ok(())
+            let procedure = create_lambda_or_macro(expr, &formvec, &params, ptype, ec, env)?;
+            cons(procedure, exprs, ec.heap)
         }
     }
 }
 
 /// let*
 pub fn let_star_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
+    let (rewritten, _) = rewrite_once(ec, expr, "let*", &state.env, |ec, _| rewrite_let_star(expr, ec))?;
+    insert_eval(state, rewritten, state.tail);
+    Ok(())
+}
+
+fn rewrite_let_star(expr: GcRef, ec: &mut RunTime) -> Result<GcRef, String> {
     let formvec = expect_at_least_n_args(&ec.heap, expr, 3)?;
     let bindings = list_to_vec(&mut ec.heap, formvec[1])?; // (let* bindings . body)
 
     if bindings.is_empty() {
         // No bindings, just evaluate the body in sequence
         let wrapped_body = wrap_body_in_begin(&formvec[2..], ec.heap);
-        insert_eval(state, wrapped_body, state.tail);
-        return Ok(());
+        return Ok(wrapped_body);
     }
 
     // Transform (let* ((v1 e1) (v2 e2) ...) body) into nested lets:
@@ -559,20 +642,24 @@ pub fn let_star_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Resul
     let first_binding_list = list_from_slice(&[first_binding], ec.heap);
     let outer_let = list_from_slice(&[let_sym, first_binding_list, inner_expr], ec.heap);
 
-    insert_eval(state, outer_let, state.tail);
-    Ok(())
+    Ok(outer_let)
 }
 
 /// letrec (recursive binding version)
 pub fn letrec_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
+    let (rewritten, _) = rewrite_once(ec, expr, "letrec", &state.env, |ec, _| rewrite_letrec(expr, ec))?;
+    insert_eval(state, rewritten, state.tail);
+    Ok(())
+}
+
+fn rewrite_letrec(expr: GcRef, ec: &mut RunTime) -> Result<GcRef, String> {
     let formvec = expect_at_least_n_args(&ec.heap, expr, 3)?;
     let bindings = list_to_vec(&mut ec.heap, formvec[1])?; // (letrec bindings . body)
 
     if bindings.is_empty() {
         // No bindings, just evaluate the body in sequence
         let wrapped_body = wrap_body_in_begin(&formvec[2..], ec.heap);
-        insert_eval(state, wrapped_body, state.tail);
-        return Ok(());
+        return Ok(wrapped_body);
     }
 
     // Transform (letrec ((v1 e1) (v2 e2) ...) body) into:
@@ -616,8 +703,7 @@ pub fn letrec_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
     let let_body = wrap_body_in_begin(&all_exprs[..], ec.heap);
     let letrec_as_let = list_from_slice(&[let_sym, init_bindings_list, let_body], ec.heap);
 
-    insert_eval(state, letrec_as_let, state.tail);
-    Ok(())
+    Ok(letrec_as_let)
 }
 
 /// (expand form) — debugging aid.
@@ -856,6 +942,13 @@ fn global_value(env: &EnvRef, ec: &mut RunTime, name: &str) -> Result<GcRef, Str
 /// `handler-k` and `args` are fresh uninterned symbols, so the expansion
 /// can't be disturbed by, or capture, the user's variables.
 fn guard_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
+    let env = state.env.clone();
+    let (expansion, _) = rewrite_once(ec, expr, "guard", &env, |ec, _| rewrite_guard(expr, &env, ec))?;
+    insert_eval(state, expansion, state.tail);
+    Ok(())
+}
+
+fn rewrite_guard(expr: GcRef, env: &EnvRef, ec: &mut RunTime) -> Result<GcRef, String> {
     const USAGE: &str = "guard: expected (guard (var clause ...) body ...)";
     let form = list_to_vec(ec.heap, expr).map_err(|_| USAGE.to_string())?;
     if form.len() < 3 {
@@ -869,14 +962,13 @@ fn guard_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), S
     let clauses = &spec[1..];
     let body = &form[2..];
 
-    let env = state.env.clone();
-    let call_cc = global_value(&env, ec, "call/cc")?;
-    let call_ec = global_value(&env, ec, "%call/ec")?;
-    let with_handler = global_value(&env, ec, "with-exception-handler")?;
-    let call_with_values = global_value(&env, ec, "call-with-values")?;
-    let apply = global_value(&env, ec, "apply")?;
-    let values = global_value(&env, ec, "values")?;
-    let raise_continuable = global_value(&env, ec, "raise-continuable")?;
+    let call_cc = global_value(env, ec, "call/cc")?;
+    let call_ec = global_value(env, ec, "%call/ec")?;
+    let with_handler = global_value(env, ec, "with-exception-handler")?;
+    let call_with_values = global_value(env, ec, "call-with-values")?;
+    let apply = global_value(env, ec, "apply")?;
+    let values = global_value(env, ec, "values")?;
+    let raise_continuable = global_value(env, ec, "raise-continuable")?;
 
     let heap = &mut *ec.heap;
     let guard_k = heap.fresh_symbol("guard-k");
@@ -941,8 +1033,7 @@ fn guard_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), S
     let capture_guard_k = l(&[call_ec, guard_k_lambda], heap);
     let expansion = l(&[capture_guard_k], heap);
 
-    insert_eval(state, expansion, state.tail);
-    Ok(())
+    Ok(expansion)
 }
 
 /// (syntax-rules [ellipsis] (literal ...) (pattern template) ...)
@@ -1078,6 +1169,12 @@ fn with_timer_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<
 /// do (iterative loop construct)
 /// Syntax: (do ((var1 init1 step1) (var2 init2 step2) ...) (test expr ...) command ...)
 pub fn do_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), String> {
+    let (rewritten, _) = rewrite_once(ec, expr, "do", &state.env, |ec, _| rewrite_do(expr, ec))?;
+    insert_eval(state, rewritten, state.tail);
+    Ok(())
+}
+
+fn rewrite_do(expr: GcRef, ec: &mut RunTime) -> Result<GcRef, String> {
     let formvec = expect_at_least_n_args(&ec.heap, expr, 3)?;
 
     let bindings = list_to_vec(&mut ec.heap, formvec[1])?;
@@ -1167,8 +1264,7 @@ pub fn do_sf(expr: GcRef, ec: &mut RunTime, state: &mut CEKState) -> Result<(), 
     // Create the complete named let: (let loop ((var1 init1) ...) (if ...))
     let named_let = list_from_slice(&[let_sym, loop_sym, init_bindings_list, if_expr], ec.heap);
 
-    insert_eval(state, named_let, state.tail);
-    Ok(())
+    Ok(named_let)
 }
 
 /// Utility functions

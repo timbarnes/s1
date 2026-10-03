@@ -37,8 +37,10 @@ All numbers below come from the build at commit c83f996 on the workloads in
    committing to it.
 
 Recommended order: inline trivial operands now; cells with phase 9; then a
-measured prototype of D. (Status: steps 1 and 2 are done, cells ahead of
-phase 9; see "Recommended plan".)
+measured prototype of D. (Status, 2026-10-03: steps 1 and 2 are done, and
+phase 9 uses the cells. Before D, three cheaper changes were made, cutting
+another 7-42% (see "After phase 11: cheaper steps before D"). D is not
+started.)
 
 ## Method
 
@@ -313,7 +315,8 @@ What would fight R7RS environments, and must be avoided:
    objects as first proposed: nothing then has to thread the heap through
    `define`, a cell can never leak into Scheme data, and the values they hold
    are marked through the frames (pre-analysed nodes holding cells will mark
-   them too). Measured speed-neutral.
+   them too). Measured speed-neutral. Phase 9's `import` now binds names to
+   cells (tests in `scheme/library_tests.scm`).
 3. **Prototype D on a subset**: constants, local and global references,
    `if`, application, `lambda`, `begin`, with everything else falling back to
    the current evaluator (a node that evaluates its source form the old way).
@@ -321,6 +324,87 @@ What would fight R7RS environments, and must be avoided:
    large (say, at least 1.5x on fib and the typical program).
 4. If it pays, **convert the remaining special forms**, procedural macros as
    lazy nodes, and retire the s-expression evaluator path.
+
+## After phase 11: cheaper steps before D
+
+A review of the evaluator after phase 11 found per-evaluation work that
+doesn't need D to remove. Each change was measured separately on this
+machine (linux/x86-64), as medians of 7-11 interleaved runs, in seconds.
+`fib` here is `bench/fib.scm` (fib 31), and "let loop" is a procedure called
+100,000 times whose body has a `let`, an internal `define` and a named
+`let`.
+
+1. **Direct application from the argument stack.** Closures and built-ins
+   are applied straight from `arg_stack` (`apply_from_stack` in
+   `src/eval/cek.rs`). This saves an `ApplyProc` frame and an `Rc<Vec>` copy
+   of the arguments on every call. `bind_params` no longer binds a junk entry
+   for the empty rest slot of a fixed-arity procedure. Also removed: a
+   parameter `HashMap` built and thrown away on every closure creation.
+2. **A wider `immediate`.** It now covers quoted data (`'()`, `'sym`) and
+   built-in calls nested up to two deep (`(car (cdr x))`). Before any
+   built-in in a nested expression runs, every remaining argument is
+   checked, so falling back to the machine never repeats a call. When a
+   call's operator is already resolved, `eval_cek` evaluates the arguments at
+   once (`eval_args`). A call whose arguments all qualify, like `(fib (- n
+   1))`, needs no `EvalArg` frame at all.
+3. **Cached rewrites.** `lambda`, `let`, named `let`, `let*`, `letrec`,
+   `do` and `guard` used to rebuild their rewrites, closure templates and
+   internal-definition transforms on every evaluation; a named `let` built
+   about a dozen forms and two closures each time a loop was entered. From a
+   form's second evaluation on, its rewrite is cached (`rewrite_once` in
+   `src/special_forms.rs`), in the `syntax-rules` expansion cache, keyed by
+   the form and the special form. A cached `lambda` or `let` holds a
+   procedure *template*, which `instantiate` copies with the current
+   environment. A plain `let` then applies that copy to its inits directly,
+   without building a call form.
+
+| | fib | typical | macro loop | regression | let loop |
+|---|---|---|---|---|---|
+| before | 2.47 | 0.44 | 0.28 | 1.60 | 1.06 |
+| 1. direct application | -11% | -17% | ~0 | ~0 | |
+| 2. wider `immediate` | -3% | -19% | ~0 | -2% | -27% (1 and 2) |
+| 3. cached rewrites | ~0 | ~0 | -4% | +4% | -22% |
+| after | **2.08 (-16%)** | **0.29 (-34%)** | **0.26 (-7%)** | **1.53 (-4%)** | **0.62 (-42%)** |
+
+What didn't pay:
+
+* **`immediate` for `cond` tests, `and`/`or` operands and non-final `begin`
+  forms** made no measurable difference, even on a microbenchmark written
+  for it, once step 2's operator fast path had made those evaluations cheap.
+  It was reverted.
+* **Caching from the first evaluation** made the regression suite 14%
+  slower. That suite is mostly code that runs once, and much of it runs at
+  `gc-threshold 1`. `guard`'s rewrite builds about eight fresh `lambda` forms
+  each time, every one of which became a single-use cache entry. Each
+  collection also marks the cached templates and rewrites. Caching only from
+  the second evaluation (`GcHeap::first_sight`) keeps the whole gain on
+  repeated code and cuts the suite's cost to the +4% in the table.
+* **Revisiting only untraced ephemeron entries** during marking changed
+  nothing measurable.
+
+Behaviour changes, all deliberate:
+
+* A rewrite is cached per form, like a `syntax-rules` expansion. A `guard`
+  form's rewrite holds the top-level `call/cc`, `apply`, ... it found on its
+  second evaluation, not on each evaluation. That only differs if a program
+  redefines one of those at top level between evaluations of the same
+  `guard` form.
+* `trace` shows fewer steps.
+
+Regression tests for these paths are in `scheme/advanced_tests.scm`: nested
+calls with side effects, quoted arguments, a rebound `quote`, a fresh
+closure per evaluation, `call/cc` in a `let` init, a redefined macro inside
+a cached named `let`, and repeated `guard`, `let*`, `letrec` and `do`.
+
+**Where D stands.** These steps remove part of what D was expected to
+remove: per-evaluation closure creation and rewrites, and per-step
+overhead for simple operands. What D would still remove: special-form
+dispatch by lookup, alias re-resolution in macro output, global hash lookups,
+and `EvalArg` frames for arguments that are calls to closures. The 1.5x gate
+for the step 3 prototype is now measured against these faster numbers. The
+largest remaining cost that D doesn't touch is the continuation chain:
+`RestoreEnv` and `EvalArg` frames, and a GC that walks the whole chain, which
+makes deep recursion quadratic. That is F10(3) (kont-flat-stack-design.md).
 
 ## Risks
 

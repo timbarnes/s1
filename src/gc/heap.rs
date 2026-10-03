@@ -62,6 +62,10 @@ pub struct GcHeap {
     /// an entry keeps its transformer and expansion alive only while the use
     /// form is reachable. See Docs/hygiene-design.md section 7.
     expansions: HashMap<GcRef, CachedExpansion>,
+    /// Forms evaluated once by a special form that caches its rewrite in
+    /// `expansions` from the second evaluation on (see `first_sight`).
+    /// Weak: an entry goes when its form does.
+    seen: rustc_hash::FxHashSet<GcRef>,
 }
 
 /// A cached expansion; see `GcHeap::expansions`.
@@ -117,6 +121,7 @@ impl GcHeap {
             core_ids: HashMap::default(),
             core_forms: HashMap::default(),
             expansions: HashMap::default(),
+            seen: Default::default(),
         };
 
         // Pre-allocate singleton objects
@@ -382,6 +387,14 @@ impl GcHeap {
         );
     }
 
+    /// Whether this is the first time `form` is seen here: true once, then
+    /// false. A special form uses it to cache only the rewrites of forms
+    /// evaluated more than once, since caching costs more than it saves on
+    /// code that runs once.
+    pub fn first_sight(&mut self, form: GcRef) -> bool {
+        self.seen.insert(form)
+    }
+
     /// The number of cached expansions (for tests and diagnostics).
     pub fn expansion_count(&self) -> usize {
         self.expansions.len()
@@ -559,6 +572,7 @@ impl GcHeap {
             .retain(|&alias, _| unsafe { (*alias).marked } == epoch);
         self.expansions
             .retain(|&form, _| unsafe { (*form).marked } == epoch);
+        self.seen.retain(|&form| unsafe { (*form).marked } == epoch);
         self.objects.retain(|obj| {
             let marked = unsafe { (**obj).marked } == epoch;
             if !marked {
