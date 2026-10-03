@@ -743,10 +743,13 @@ fn search_path() -> Vec<std::path::PathBuf> {
     path
 }
 
-/// The file a library is looked for in: its name parts joined by `/`, with
-/// `.sld` appended.
-fn library_file(name: &LibraryName) -> String {
-    format!("{}.sld", name.join("/"))
+/// The file a library is looked for in: its name parts as path components,
+/// with `.sld` appended, so `(foo bar)` is `foo/bar.sld` (`foo\bar.sld` on
+/// Windows).
+fn library_file(name: &LibraryName) -> std::path::PathBuf {
+    let mut file: std::path::PathBuf = name.iter().collect();
+    file.set_extension("sld");
+    file
 }
 
 /// The first file on the search path that could define library `name`.

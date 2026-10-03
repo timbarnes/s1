@@ -268,10 +268,14 @@
 ;; A file loaded without defining its library is an error, and isn't loaded
 ;; again. (The count survives this file being run twice, under GC stress.)
 (define sld-load-count (guard (e (#t 0)) sld-load-count))
-(test-equal "import: ./tests/libs/wrong-name.sld does not define (tests libs wrong-name)"
+(define wrong-name-error
+  (cond-expand
+    (windows "import: .\\tests\\libs\\wrong-name.sld does not define (tests libs wrong-name)")
+    (else "import: ./tests/libs/wrong-name.sld does not define (tests libs wrong-name)")))
+(test-equal wrong-name-error
     (guard (e (#t (error-object-message e))) (eval '(import (tests libs wrong-name)) (interaction-environment)))
     "a library file that doesn't define its library")
-(test-equal "import: ./tests/libs/wrong-name.sld does not define (tests libs wrong-name)"
+(test-equal wrong-name-error
     (guard (e (#t (error-object-message e))) (eval '(import (tests libs wrong-name)) (interaction-environment)))
     "the same error again")
 (test-equal 1 sld-load-count "the file was loaded once")
