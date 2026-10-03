@@ -38,11 +38,11 @@ baseline stays in step with the code. `S1_BIN` selects a prebuilt binary and
 Each section runs in its own process, so a reader desync or crash in one
 section cannot swallow the next ones.
 
-## Known blockers (811 passing after phase 7)
+## Known gaps (1140 passing after phase 8)
 
-
-- **Read syntax, Numeric syntax, 6.13 Input and output**: these need string
-  ports (phase 8). Their helper macros now define correctly.
-- **6.11 Exceptions**: the remaining tests use string ports (phase 8).
-- **Complex numbers** are reported as parse errors ("not supported"). The
-  unreached tests in 6.2 Numbers are all complex-number tests.
+- **Complex numbers** are not supported and are reported as parse errors. They
+  account for nearly all unreached tests (in 6.2 Numbers and Numeric syntax).
+- **6.12 Environments and evaluation** (`environment`, `eval` with an
+  environment): phase 9.
+- **6.14 System interface** (`command-line`, `exit`, time, environment
+  variables, `features`): phase 10.

@@ -181,8 +181,10 @@ fn parse_uinteger(s: &str, radix: u32) -> Option<BigInt> {
 }
 
 /// `digits [. digits] [e [sign] digits]` with at least one mantissa digit.
+/// The exponent marker may also be R5RS's `s`, `f`, `d` or `l`, which all
+/// mean the same here (the text is already lower-cased).
 fn parse_decimal(s: &str) -> Option<Real> {
-    let (mantissa, exponent) = match s.split_once('e') {
+    let (mantissa, exponent) = match s.split_once(['e', 's', 'f', 'd', 'l']) {
         Some((m, e)) => (m, Some(e)),
         None => (s, None),
     };
@@ -214,7 +216,8 @@ fn parse_decimal(s: &str) -> Option<Real> {
     Some(Real::Decimal {
         digits,
         exp10: exp.saturating_sub(frac_part.len() as i64),
-        text: s.to_string(),
+        // Rust's float parser only knows `e` as the exponent marker.
+        text: s.chars().map(|c| if "sfdl".contains(c) { 'e' } else { c }).collect(),
     })
 }
 
@@ -284,6 +287,9 @@ mod tests {
         assert_eq!(parse_number("1.", 10), float(1.0));
         assert_eq!(parse_number("-1e3", 10), float(-1000.0));
         assert_eq!(parse_number("1E3", 10), float(1000.0));
+        assert_eq!(parse_number("1s2", 10), float(100.0));
+        assert_eq!(parse_number("1D2", 10), float(100.0));
+        assert_eq!(parse_number("1d", 10), NumberSyntax::NotANumber);
         assert_eq!(parse_number("#i5", 10), float(5.0));
         assert_eq!(parse_number("#e1.5e1", 10), int(15));
         assert_eq!(parse_number("#e1e3", 10), int(1000));

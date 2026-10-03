@@ -21,6 +21,9 @@
 (displayln "         =====Data Type Tests=====")
 (load "scheme/data_tests.scm")
 
+(displayln "         =====Port Tests=====")
+(load "scheme/port_tests.scm")
+
 (displayln "         =====Exception Tests=====")
 (load "scheme/exception_tests.scm")
 

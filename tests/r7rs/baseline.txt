@@ -14,9 +14,9 @@
 6.8 Vectors	43	0	0	43	43	
 6.9 Bytevectors	39	0	0	39	39	
 6.10 Control Features	34	0	0	34	34	
-6.11 Exceptions	18	2	0	20	30	
+6.11 Exceptions	30	0	0	30	30	
 6.12 Environments and evaluation	0	0	4	4	4	
-6.13 Input and output	3	0	56	59	63	
-Read syntax	6	0	69	75	95	
-Numeric syntax	0	0	11	11	213	
-6.14 System interface	0	1	10	11	13	
+6.13 Input and output	63	0	0	63	63	
+Read syntax	93	0	0	93	95	
+Numeric syntax	166	0	0	166	213	
+6.14 System interface	3	0	8	11	13	

@@ -44,6 +44,8 @@ pub fn register_port_builtins(rt: &mut RunTime, env: EnvRef) {
         "read-string" => read_string_sp,
         "char-ready?" => char_ready_sp,
         "write" => write_sp,
+        "write-shared" => write_shared_sp,
+        "write-simple" => write_simple_sp,
         "display" => display_sp,
         "newline" => newline_sp,
         "write-char" => write_char_sp,
@@ -464,6 +466,20 @@ fn write_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: KontRe
     arity(args, 1, 2, "write")?;
     let text = print_value(&args[0]);
     put_str(rt, port_or_current(rt, args, 1, OUTPUT), &text, "write")?;
+    done(state, rt.heap.void(), next)
+}
+
+fn write_shared_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: KontRef) -> Result<(), String> {
+    arity(args, 1, 2, "write-shared")?;
+    let text = crate::printer::write_shared_value(&args[0]);
+    put_str(rt, port_or_current(rt, args, 1, OUTPUT), &text, "write-shared")?;
+    done(state, rt.heap.void(), next)
+}
+
+fn write_simple_sp(rt: &mut RunTime, args: &[GcRef], state: &mut CEKState, next: KontRef) -> Result<(), String> {
+    arity(args, 1, 2, "write-simple")?;
+    let text = crate::printer::write_simple_value(&args[0]);
+    put_str(rt, port_or_current(rt, args, 1, OUTPUT), &text, "write-simple")?;
     done(state, rt.heap.void(), next)
 }
 

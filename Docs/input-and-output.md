@@ -2,146 +2,71 @@
 
 # Input and Output
 
-## `call-with-input-file`
+R7RS section 6.13. A port is an object that characters or bytes are read from or written to. Ports are shared: every reference to a port sees the same position and contents, and closing a port closes it everywhere. All of these procedures are built in except where noted.
 
-`(call-with-input-file string proc)`
+## Kinds of port
 
-## `call-with-output-file`
+* **Textual ports** read and write characters: standard input, output and error, string ports, and files opened with `open-input-file` / `open-output-file`.
+* **Binary ports** read and write bytes: bytevector ports and files opened with `open-binary-input-file` / `open-binary-output-file`.
 
-`(call-with-output-file string proc)`
+Character procedures on a binary port, or byte procedures on a textual one, raise an error.
 
-These procedures call `proc` with one argument: the port obtained by opening the named file for input or output. If the file cannot be opened, an error is signalled. The port is closed whether `proc` returns normally or returns by escaping from its continuation. Implemented in `s1-core.scm`.
+* `(port? obj)`, `(input-port? obj)`, `(output-port? obj)`, `(textual-port? obj)`, `(binary-port? obj)`.
+* `(input-port-open? port)`, `(output-port-open? port)`.
 
-## `input-port?`
+## Current ports
 
-`(input-port? obj)`
+`(current-input-port)`, `(current-output-port)`, `(current-error-port)` return the ports that procedures use when no port is given. They start as standard input, output and error, and can be changed for a dynamic extent with `parameterize`:
 
-Returns `#t` if `obj` is an input port, and `#f` otherwise.
+```scheme
+(let ((out (open-output-string)))
+  (parameterize ((current-output-port out))
+    (display "captured"))
+  (get-output-string out))         ; => "captured"
+```
 
-## `output-port?`
+Note that the current input port is standard input even while a file is being loaded, so `(read)` in a loaded file reads from standard input, not from the file.
 
-`(output-port? obj)`
+## Opening and closing
 
-Returns `#t` if `obj` is an output port, and `#f` otherwise.
+* `(open-input-file name)`, `(open-binary-input-file name)`: a file that can't be opened raises a `file-error?` error naming it.
+* `(open-output-file name)`, `(open-binary-output-file name)`: create or truncate the file.
+* `(open-input-string string)`, `(open-output-string)`, `(get-output-string port)`: string ports.
+* `(open-input-bytevector bv)`, `(open-output-bytevector)`, `(get-output-bytevector port)`: bytevector ports.
+* `(close-port port)`, `(close-input-port port)`, `(close-output-port port)`: a closed port can't be read or written, but still answers the port predicates.
+* `(call-with-port port proc)`: calls `proc` with `port`, then closes it. `(call-with-input-file name proc)` and `(call-with-output-file name proc)` open a file and do the same. In `s1-core.scm`.
+* `(with-input-from-file name thunk)`, `(with-output-to-file name thunk)`: call `thunk` with the current input or output port set to the file. In `s1-core.scm`.
 
-## `port?`
+## Input
 
-`(port? obj)`
+Each takes an optional port, defaulting to the current input port (the byte procedures require a binary port). At end of input they return the eof object, which `(eof-object? obj)` tests for and `(eof-object)` returns.
 
-Returns `#t` if `obj` is a port, and `#f` otherwise. Implemented via `type-of`.
+* `(read [port])`: the next datum. Malformed input raises a `read-error?` error.
+* `(read-char [port])`, `(peek-char [port])`: the next character, consumed or not.
+* `(read-line [port])`: the characters up to the next line ending (`\n`, `\r` or `\r\n`), which is consumed but not returned.
+* `(read-string k [port])`: up to `k` characters.
+* `(char-ready? [port])`: `#t` if a character can be read without waiting (always, for string ports).
+* `(read-u8 port)`, `(peek-u8 port)`, `(u8-ready? port)`, `(read-bytevector k port)`, `(read-bytevector! bv port [start [end]])`: bytes.
 
-## `current-input-port`
+## Output
 
-`(current-input-port)`
+Each takes an optional port, defaulting to the current output port.
 
-Returns the current default input port.
+* `(write obj [port])`: the external representation, readable by `read`. Cyclic data is written with datum labels, so `write` always terminates: a list whose tail is itself prints as `#0=(1 . #0#)`.
+* `(write-shared obj [port])`: datum labels for every pair or vector that appears more than once.
+* `(write-simple obj [port])`: no datum labels (it loops forever on cyclic data).
+* `(display obj [port])`: strings and characters appear as their raw text. Cycles are labelled as for `write`.
+* `(newline [port])`, `(write-char char [port])`, `(write-string string [port [start [end]]])`.
+* `(write-u8 byte [port])`, `(write-bytevector bv [port [start [end]]])`.
+* `(flush-output-port [port])`: write out anything buffered (`flush-output` is an older name).
 
-## `current-output-port`
+## Files
 
-`(current-output-port)`
+* `(file-exists? name)`.
+* `(delete-file name)`: a file that can't be deleted raises a `file-error?` error.
 
-Returns the current default output port.
+## Loading
 
-## `open-input-file`
-
-`(open-input-file filename)`
-
-Takes a string for `filename` and returns an input port that can deliver characters from the file.
-
-## `open-output-file`
-
-`(open-output-file filename)`
-
-Takes a string for `filename` and returns an output port that can write characters to the file.
-
-## `close-input-port`
-
-`(close-input-port port)`
-
-Closes the `port`.
-
-## `close-output-port`
-
-`(close-output-port port)`
-
-Closes the `port`.
-
-## `read`
-
-`(read [port])`
-
-Converts external representations of Scheme objects into the objects themselves.
-
-## `write`
-
-`(write obj [port])`
-
-Writes a written representation of `obj` to the given `port`.
-
-## `display`
-
-`(display obj [port])`
-
-Writes a representation of `obj` to the given `port`.
-
-## `newline`
-
-`(newline [port])`
-
-Writes an end of line to `port`.
-
-## `displayln`
-
-`(displayln obj ...)`
-
-Like `display`, but adds a newline character at the end. Implemented in `s1-core.scm`.
-
-## `writeln`
-
-`(writeln obj ...)`
-
-Like `write`, but adds a newline character at the end. Implemented in `s1-core.scm`.
-
-## `read-char`
-
-`(read-char [port])`
-
-Returns the next character available from the input `port`.
-
-## `peek-char`
-
-`(peek-char [port])`
-
-Returns the next character available from the input `port`, but without consuming it.
-
-## `eof-object?`
-
-`(eof-object? obj)`
-
-Returns `#t` if `obj` is an end-of-file object, and `#f` otherwise.
-
-## `char-ready?`
-
-`(char-ready? [port])`
-
-Returns `#t` if a character is ready on the input `port` and `#f` otherwise.
-
-## `load`
-
-`(load filename)`
-
-`filename` must be a string. The `load` procedure reads expressions and definitions from the file and evaluates them sequentially. Implemented in `s1-core.scm`.
-
-## `transcript-on`
-
-`(transcript-on filename)`
-
-`filename` must be a string. Starts a transcript of interaction with the user, saving it to the file. **Not implemented.**
-
-## `transcript-off`
-
-`(transcript-off)`
-
-Ends the transcript. **Not implemented.**
+`(load filename)` reads and evaluates the file's forms in turn. It works by pushing a port onto the stack of ports the REPL reads from (`push-port!`, `pop-port!`, s1 extensions).
 
 [Home](s1-docs.md)

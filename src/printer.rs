@@ -2,43 +2,181 @@
 use crate::gc::SchemeValue::*;
 use crate::gc::{Callable, GcRef};
 use crate::gc_value;
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 /// The external representation `display` produces: strings and characters
-/// appear as their raw text, at any depth.
+/// appear as their raw text, at any depth. Cycles get datum labels.
 pub fn display_value(obj: &GcRef) -> String {
-    let mut out = String::new();
-    print_into(&mut out, *obj, false);
-    out
+    render(*obj, false, Labels::Cycles)
 }
 
 /// The external representation `write` produces: strings and characters in
-/// the escaped form the reader accepts.
+/// the escaped form the reader accepts. Cycles get datum labels
+/// (`#0=(1 . #0#)`), so printing always terminates.
 pub fn print_value(obj: &GcRef) -> String {
+    render(*obj, true, Labels::Cycles)
+}
+
+/// `write-shared`: datum labels for every pair or vector that appears more
+/// than once, cyclic or not.
+pub fn write_shared_value(obj: &GcRef) -> String {
+    render(*obj, true, Labels::Shared)
+}
+
+/// `write-simple`: no datum labels (loops forever on cyclic data).
+pub fn write_simple_value(obj: &GcRef) -> String {
+    render(*obj, true, Labels::None)
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Labels {
+    Cycles,
+    Shared,
+    None,
+}
+
+/// Datum-label state while printing one object.
+struct Ctx {
+    write: bool,
+    /// Objects that get a label
+    needs: HashSet<GcRef>,
+    /// Labels already printed
+    assigned: HashMap<GcRef, usize>,
+}
+
+fn render(obj: GcRef, write: bool, mode: Labels) -> String {
+    let needs = match mode {
+        Labels::None => HashSet::default(),
+        _ if !is_compound(obj) => HashSet::default(),
+        Labels::Cycles => cycle_targets(obj),
+        Labels::Shared => shared_nodes(obj),
+    };
+    let mut ctx = Ctx {
+        write,
+        needs,
+        assigned: HashMap::default(),
+    };
     let mut out = String::new();
-    print_into(&mut out, *obj, true);
+    print_into(&mut out, obj, &mut ctx);
     out
 }
 
-fn print_into(out: &mut String, obj: GcRef, write: bool) {
+fn is_compound(obj: GcRef) -> bool {
+    matches!(gc_value!(obj), Pair(..) | Vector(_))
+}
+
+/// The children a label search follows.
+fn children(obj: GcRef) -> Vec<GcRef> {
+    match gc_value!(obj) {
+        Pair(car, cdr) => vec![*car, *cdr],
+        Vector(items) => items.clone(),
+        _ => Vec::new(),
+    }
+}
+
+/// Pairs and vectors that close a cycle: the targets of back edges in a
+/// depth-first walk (every cycle has one). Iterative, so long lists don't
+/// exhaust the stack.
+fn cycle_targets(root: GcRef) -> HashSet<GcRef> {
+    enum Step {
+        Enter(GcRef),
+        Exit(GcRef),
+    }
+    let mut on_path = HashSet::default();
+    let mut done = HashSet::default();
+    let mut targets = HashSet::default();
+    let mut stack = vec![Step::Enter(root)];
+    while let Some(step) = stack.pop() {
+        match step {
+            Step::Enter(node) => {
+                if !is_compound(node) || done.contains(&node) {
+                    continue;
+                }
+                if on_path.contains(&node) {
+                    targets.insert(node);
+                    continue;
+                }
+                on_path.insert(node);
+                stack.push(Step::Exit(node));
+                for child in children(node).into_iter().rev() {
+                    stack.push(Step::Enter(child));
+                }
+            }
+            Step::Exit(node) => {
+                on_path.remove(&node);
+                done.insert(node);
+            }
+        }
+    }
+    targets
+}
+
+/// Pairs and vectors reachable more than once.
+fn shared_nodes(root: GcRef) -> HashSet<GcRef> {
+    let mut seen = HashSet::default();
+    let mut shared = HashSet::default();
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if !is_compound(node) {
+            continue;
+        }
+        if !seen.insert(node) {
+            shared.insert(node);
+            continue;
+        }
+        stack.extend(children(node));
+    }
+    shared
+}
+
+/// Print `obj` as `#n#` if its label was already printed; otherwise print
+/// `#n=` first if it needs a label. Returns true if it printed a reference
+/// (and nothing more should be printed for `obj`).
+fn label_prefix(out: &mut String, obj: GcRef, ctx: &mut Ctx) -> bool {
+    if !ctx.needs.contains(&obj) {
+        return false;
+    }
+    if let Some(n) = ctx.assigned.get(&obj) {
+        out.push_str(&format!("#{}#", n));
+        return true;
+    }
+    let n = ctx.assigned.len();
+    ctx.assigned.insert(obj, n);
+    out.push_str(&format!("#{}=", n));
+    false
+}
+
+fn print_into(out: &mut String, obj: GcRef, ctx: &mut Ctx) {
+    let write = ctx.write;
     match gc_value!(obj) {
         Pair(_, _) => {
+            if label_prefix(out, obj, ctx) {
+                return;
+            }
             out.push('(');
             let mut current = obj;
             let mut first = true;
             loop {
                 match gc_value!(current) {
+                    // A labelled tail is printed in dotted form, so its label
+                    // (or reference) can appear.
+                    Pair(..) if !first && ctx.needs.contains(&current) => {
+                        out.push_str(" . ");
+                        print_into(out, current, ctx);
+                        break;
+                    }
                     Pair(car, cdr) => {
                         if !first {
                             out.push(' ');
                         }
-                        print_into(out, *car, write);
+                        print_into(out, *car, ctx);
                         current = *cdr;
                         first = false;
                     }
                     Nil => break,
                     _ => {
                         out.push_str(" . ");
-                        print_into(out, current, write);
+                        print_into(out, current, ctx);
                         break;
                     }
                 }
@@ -46,8 +184,11 @@ fn print_into(out: &mut String, obj: GcRef, write: bool) {
             out.push(')');
         }
         Vector(v) => {
+            if label_prefix(out, obj, ctx) {
+                return;
+            }
             out.push_str("#(");
-            print_separated(out, v, write);
+            print_separated(out, v, ctx);
             out.push(')');
         }
         Bytevector(b) => {
@@ -61,7 +202,7 @@ fn print_into(out: &mut String, obj: GcRef, write: bool) {
             out.push(')');
         }
         // The values of a `(values ...)` package that reached a printer.
-        Values(v) => print_separated(out, v, write),
+        Values(v) => print_separated(out, v, ctx),
         Symbol(s) if write => write_symbol(out, s),
         Symbol(s) => out.push_str(s),
         Int(i) => out.push_str(&i.to_string()),
@@ -90,55 +231,67 @@ fn print_into(out: &mut String, obj: GcRef, write: bool) {
         Continuation(k) => out.push_str(&format!("Continuation<{:?}>", k.kont)),
         RecordType(t) => {
             out.push_str("#<record-type ");
-            print_into(out, t.name, write);
+            print_into(out, t.name, ctx);
             out.push('>');
         }
         Record(r) => {
             out.push_str("#<");
             if let RecordType(t) = gc_value!(r.rtype) {
-                print_into(out, t.name, write);
+                print_into(out, t.name, ctx);
             }
             for f in &r.fields {
                 out.push(' ');
-                print_into(out, *f, write);
+                print_into(out, *f, ctx);
             }
             out.push('>');
         }
         ErrorObject(e) => {
             out.push_str("#<error ");
-            print_into(out, e.message, true);
+            let saved = ctx.write;
+            ctx.write = true;
+            print_into(out, e.message, ctx);
             let mut rest = e.irritants;
             while let Pair(car, cdr) = gc_value!(rest) {
                 out.push(' ');
-                print_into(out, *car, true);
+                print_into(out, *car, ctx);
                 rest = *cdr;
             }
+            ctx.write = saved;
             out.push('>');
         }
         TailCallScheduled => out.push_str("print_value: unprintable."),
     }
 }
 
-fn print_separated(out: &mut String, items: &[GcRef], write: bool) {
+fn print_separated(out: &mut String, items: &[GcRef], ctx: &mut Ctx) {
     for (i, item) in items.iter().enumerate() {
         if i > 0 {
             out.push(' ');
         }
-        print_into(out, *item, write);
+        print_into(out, *item, ctx);
     }
 }
 
 /// Format a flonum so it reads back as one: always with a decimal point or
 /// exponent (`2.0`, not `2`), and the R7RS spellings of the infinities and
 /// NaN. Rust's `Debug` output is already shortest-round-trip and switches
-/// to exponent notation for very large and small magnitudes (`1e21`).
+/// to exponent notation for very large and small magnitudes, which is
+/// written conventionally: `1.0e+21`, `5.0e-324`.
 pub fn format_float(f: f64) -> String {
     if f.is_nan() {
         "+nan.0".to_string()
     } else if f.is_infinite() {
         if f > 0.0 { "+inf.0" } else { "-inf.0" }.to_string()
     } else {
-        format!("{:?}", f)
+        let s = format!("{:?}", f);
+        match s.split_once('e') {
+            Some((mantissa, exp)) => {
+                let point = if mantissa.contains('.') { "" } else { ".0" };
+                let sign = if exp.starts_with('-') { "" } else { "+" };
+                format!("{}{}e{}{}", mantissa, point, sign, exp)
+            }
+            None => s,
+        }
     }
 }
 
@@ -297,7 +450,9 @@ mod tests {
         // Flonums always read back as inexact.
         assert_eq!(print_value(&new_float(heap, 2.0)), "2.0");
         assert_eq!(print_value(&new_float(heap, -0.0)), "-0.0");
-        assert_eq!(print_value(&new_float(heap, 1e21)), "1e21");
+        assert_eq!(print_value(&new_float(heap, 1e21)), "1.0e+21");
+        assert_eq!(print_value(&new_float(heap, 5e-324)), "5.0e-324");
+        assert_eq!(print_value(&new_float(heap, 1.7976931348623157e308)), "1.7976931348623157e+308");
         assert_eq!(print_value(&new_float(heap, f64::INFINITY)), "+inf.0");
         assert_eq!(print_value(&new_float(heap, f64::NEG_INFINITY)), "-inf.0");
         assert_eq!(print_value(&new_float(heap, f64::NAN)), "+nan.0");

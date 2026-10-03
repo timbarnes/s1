@@ -6,7 +6,7 @@ S1 implements the R7RS numeric tower without complex numbers. A number is one of
 
 * an **exact integer** of any size (`42`, `-12345678901234567890`)
 * an **exact rational** that isn't an integer, always in lowest terms (`1/2`, `-7/3`)
-* an **inexact real**, a 64-bit flonum (`2.0`, `1e21`, `+inf.0`, `-inf.0`, `+nan.0`)
+* an **inexact real**, a 64-bit flonum (`2.0`, `1.0e+21`, `+inf.0`, `-inf.0`, `+nan.0`)
 
 Exact arithmetic stays exact: `(/ 1 2)` is `1/2`, and a whole result comes back as an integer (`(/ 6 3)` is `2`). Any inexact operand makes the result inexact: `(+ 1/2 0.5)` is `1.0`. Exact division by exact zero is an error; inexact division follows IEEE 754 (`(/ 1.0 0)` is `+inf.0`).
 
@@ -70,7 +70,7 @@ Each comes in a floor version (quotient rounded toward negative infinity, remain
 
 ## Conversion to and from strings
 
-* `(number->string z [radix])`: the external representation of `z` in radix 2, 8, 10 (the default) or 16. Rationals print as `n/d`. Flonums always show a decimal point or exponent (`2.0`, `1e21`) and support only radix 10.
+* `(number->string z [radix])`: the external representation of `z` in radix 2, 8, 10 (the default) or 16. Rationals print as `n/d`. Flonums always show a decimal point, and an exponent when very large or small (`2.0`, `1.0e+21`, `5.0e-324`); they support only radix 10.
 * `(string->number string [radix])`: the number `string` represents in R7RS number syntax, or `#f` if it isn't one. Surrounding whitespace is not allowed. A radix prefix in the string overrides `radix`.
 
 [Home](s1-docs.md)
