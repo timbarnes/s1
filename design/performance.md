@@ -374,6 +374,15 @@ that does nothing in normal operation.
 Fixed: hoisted the test to the call site in `step()`. Together with F1 this took
 `tail loop 300k` from 0.75 s to 0.30 s.
 
+Regression found 2026-10-03: the hoisted test skipped the call only for
+`TraceType::Off`, but the startup mode was `TraceType::Reset`, so in normal
+runs `debugger()` was still called (not inlined) on every step. Fixed by
+replacing the mode with `TraceMode` plus a separate `break_on_error` flag,
+and gating the call on `CEKState::hook`, a byte beside the fields every step
+touches (`cmpb $0x0,0x29(%r15)` in `eval_main`). `debugger()` is
+`#[cold] #[inline(never)]`. The per-step `depth` counter, kept only to indent
+trace output, went too: the tracer now counts continuation frames itself.
+
 ### F5 — `Rc<RefCell<Frame>>` + `FxHashMap` per call — DONE
 
 `src/env.rs:117-119` and `src/eval/mod.rs:184`. Each call allocates an `Rc`

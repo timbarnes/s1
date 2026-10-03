@@ -1,12 +1,20 @@
-//! Internal utilities: error reporting from Rust code (`post_error`), the
-//! tracer and interactive stepper behind `trace`, and debug dumps of the
-//! machine state, continuations and environments.
+//! Internal utilities: error reporting from Rust code (`post_error`), and
+//! debug dumps of the machine state, continuations and environments (used
+//! by the debugger, `debug-stack` and `trace-env`). Dumps go to standard
+//! error, apart from the program's output.
 
 use crate::env::{EnvOps, EnvRef};
 use crate::eval::{AndOrKind, CEKState, Control, Kont, KontRef};
-use crate::eval::{RunTime, TraceType};
+use crate::eval::RunTime;
 use crate::gc_value;
-use crate::printer::print_value;
+use crate::printer::print_value_limited;
+
+/// The most characters of one value a dump shows.
+const LIMIT: usize = 120;
+
+fn print_value(obj: &crate::gc::GcRef) -> String {
+    print_value_limited(obj, LIMIT)
+}
 use std::rc::Rc;
 
 /// Report a failure (of a built-in procedure, special form or the machine
@@ -18,117 +26,9 @@ pub fn post_error(state: &mut CEKState, ec: &mut RunTime, error: &str) {
     crate::eval::exceptions::raise_error(state, ec, crate::gc::ErrorKind::General, error, nil);
 }
 
-/// Trace / debug function called from within the CEK machine and on error.
-/// What it does depends on the `trace` mode (see `eval::TraceType`).
-pub fn debugger(loc: &str, state: &CEKState, ec: &mut RunTime) {
-    // simple indentation
-    match ec.trace {
-        TraceType::Off => return,
-        TraceType::Control => {
-            indent(*ec.depth, true);
-            println!("{} {}", loc, dump_control(&state.control));
-        }
-        TraceType::Full => {
-            indent(*ec.depth, true);
-            println!("{} {}", loc, dump_control(&state.control));
-            indent(*ec.depth + 1, false);
-            dbg_kont("", &state.kont);
-            //dump_cek("", &state);
-        }
-        TraceType::Step => {
-            indent(*ec.depth, true);
-            debug_interactive(state, ec);
-        }
-        TraceType::Reset => {}
-    }
-}
-
-/// Indent trace output `n` levels; with `v`, mark every tenth level with
-/// its number.
-fn indent(n: i32, v: bool) {
-    for i in 0..n {
-        if v {
-            if i % 10 == 0 {
-                print!("{}", i / 10);
-            } else if i % 2 == 0 {
-                print!(".");
-            } else {
-                print!(" ");
-            }
-        } else {
-            print!(" ");
-        }
-    }
-}
-
-/// The stepper's prompt: read and run debugger commands until one moves
-/// the machine on.
-fn debug_interactive(state: &CEKState, ec: &mut RunTime) {
-    use std::io::{self, Write};
-    loop {
-        print!("debug> ");
-        io::stdout().flush().unwrap();
-
-        let mut input = String::new();
-        if io::stdin().read_line(&mut input).is_err() {
-            println!("error reading input");
-            continue;
-        }
-        let cmd = input.trim();
-        //println!("Command: {}", cmd);
-        match cmd {
-            "" | "n" | "next" => {
-                // "step"one more and come back
-                println!("control expr = {}", dump_control(&state.control));
-                break;
-            }
-            "c" | "continue" => {
-                // run freely until next breakpoint / error
-                *ec.trace = TraceType::Off;
-                break;
-            }
-            "e" | "env" => {
-                let frame = state.env.clone();
-                dbg_env("", frame, false);
-            }
-            "k" | "kont" => {
-                dbg_kont("", &state.kont);
-            }
-            "l" | "locals" => {
-                dbg_one_env(&state.env, 0);
-            }
-            "x" | "expr" => {
-                println!("control expr = {}", dump_control(&state.control));
-            }
-            "s" | "state" => {
-                dbg_cek("state: ", &state);
-            }
-            // "q" | "quit" => {
-            //     println!("Exiting...");
-            //     state.control = Control::Empty;
-            //     state.kont = Rc::new(Kont::Halt);
-            // }
-            _ => {
-                println!(
-                    "commands: n(ext), c(ontinue), e(nv), k(ont), l(ocals), x or expr, s(tate)"
-                );
-            }
-        }
-    }
-}
-
-/// A one-line description of the control.
-fn dump_control(control: &Control) -> String {
-    match control {
-        Control::Expr(obj) => format!("Expr:  {}", print_value(obj)),
-        Control::Value(obj) => format!("Value: {}", print_value(obj)),
-        Control::Empty => format!("Empty"),
-    }
-}
-
-// Dump a summary of the CEK machine state
-///
+/// Dump a summary of the CEK machine state.
 pub fn dbg_cek(loc: &str, state: &CEKState) {
+    std::io::Write::flush(&mut std::io::stdout()).ok();
     eprintln!("{}: ", loc);
 
     match &state.control {
@@ -177,11 +77,11 @@ pub fn dbg_one_kont(loc: &str, frame: &Kont) -> String {
             }
             result.push_str(
                 format!(
-                    "EvalArg{{proc={}, remaining={}, args_base={}, orig={:?}}}",
+                    "EvalArg{{proc={}, remaining={}, args_base={}, orig={}}}",
                     if *have_proc { "Some" } else { "None" },
                     remaining_count,
                     args_base,
-                    original_call,
+                    print_value(original_call),
                 )
                 .as_str(),
             )
@@ -237,7 +137,6 @@ pub fn dbg_one_kont(loc: &str, frame: &Kont) -> String {
         Kont::RestoreEnv { old_env, .. } => {
             result.push_str("RestoreEnv:");
             result.push_str(&dbg_env_short(old_env));
-            result.push('\n');
         }
         Kont::Escape { .. } => result.push_str("Escape"),
         Kont::Seq { .. } => result.push_str("Seq"),
@@ -257,16 +156,18 @@ pub fn dbg_one_kont(loc: &str, frame: &Kont) -> String {
         Kont::Exit { code } => result.push_str(format!("Exit{{code={}}}", code).as_str()),
         Kont::RestoreHandlers { .. } => result.push_str("RestoreHandlers"),
         Kont::RaiseReturn { .. } => result.push_str("RaiseReturn"),
+        Kont::DebugPrint { .. } => result.push_str("DebugPrint"),
     }
     result
 }
 
 /// Print the continuation chain from `kont` down.
 pub fn dbg_kont(loc: &str, kont: &KontRef) {
-    println!("{}Stack:", loc);
+    std::io::Write::flush(&mut std::io::stdout()).ok();
+    eprintln!("{}Stack:", loc);
     let mut kr = Rc::clone(kont);
     loop {
-        println!(" {}", dbg_one_kont("", &kr).trim());
+        eprintln!(" {}", dbg_one_kont("", &kr).trim());
         let Some(k) = kr.next() else { break };
         let k = Rc::clone(k);
         kr = k;
@@ -300,6 +201,7 @@ pub fn _dbg_short_kont(kont: &KontRef) {
         Kont::Exit { .. } => print!("Exit "),
         Kont::RestoreHandlers { .. } => print!("RestoreHandlers "),
         Kont::RaiseReturn { .. } => print!("RaiseReturn "),
+        Kont::DebugPrint { .. } => print!("DebugPrint "),
     }
 }
 
@@ -331,27 +233,32 @@ pub fn dbg_env_short(frame: &EnvRef) -> String {
 
 /// Print one frame's bindings, sorted by name.
 pub fn dbg_one_env(frame: &EnvRef, depth: usize) {
+    std::io::Write::flush(&mut std::io::stdout()).ok();
     let frame = frame.borrow();
-    let mut bindings = Vec::new();
-    println!("Env frame {depth}:");
-    for (k, v) in frame.bindings.iter() {
-        match gc_value!(k) {
-            crate::gc::SchemeValue::Symbol(s) => {
-                bindings.push((s, v));
-            }
-            _ => unreachable!(),
-        }
-    }
-    bindings.sort_by(|(k1, _v1), (k2, _v2)| k1.cmp(k2));
+    let mut bindings: Vec<(String, _)> = frame
+        .bindings
+        .iter()
+        .map(|(k, v)| match gc_value!(k) {
+            crate::gc::SchemeValue::Symbol(s) => (s.to_string(), v),
+            // Not a plain symbol (a renamed identifier, say): show it as
+            // the printer would.
+            _ => (print_value(&k), v),
+        })
+        .collect();
+    eprintln!("Env frame {depth}:");
+    bindings.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
     for (k, v) in bindings {
-        println!("  {:20} => {}", &k, print_value(&v));
+        eprintln!("  {:20} => {}", k, print_value(&v));
     }
 }
 
 /// Debug print the environment, sorted alphabetically within each frame.
 /// If no argument, print from the top of the environment chain
 pub fn dbg_env(loc: &str, frame: EnvRef, global: bool) {
-    eprint!("{} ", loc);
+    std::io::Write::flush(&mut std::io::stdout()).ok();
+    if !loc.is_empty() {
+        eprintln!("{}", loc);
+    }
     let mut depth = 0;
     let mut current = frame;
     loop {

@@ -17,7 +17,7 @@
 
 use crate::env::{EnvOps, EnvRef};
 use crate::eval::kont::insert_escape;
-use crate::eval::{CEKState, Control, Kont, KontRef, RunTime, TraceType};
+use crate::eval::{CEKState, Control, Kont, KontRef, RunTime, TraceMode};
 use crate::gc::{
     Callable, ErrorKind, GcHeap, GcRef, SchemeValue, list_from_slice, new_bool, new_error_object,
     new_pair, new_string, new_sys_builtin,
@@ -102,15 +102,30 @@ fn uncaught(state: &mut CEKState, rt: &mut RunTime, obj: GcRef) {
     // stdout is line-buffered; flush it so the error appears after the output
     // that preceded it rather than ahead of a pending partial line.
     std::io::Write::flush(&mut std::io::stdout()).ok();
-    eprintln!("Error: {}", describe(obj));
-
-    if !matches!(rt.trace, TraceType::Reset) {
-        // Tracing or stepping: hand the failure to the interactive debugger.
-        *rt.trace = TraceType::Step;
-        crate::utilities::debugger("", state, rt);
+    let message = describe(obj);
+    // An error in an expression the debugger's `p` is evaluating goes back
+    // to the debugger prompt.
+    if crate::debugger::error_in_print(state, rt, &message) {
         return;
     }
+    eprintln!("Error: {message}");
 
+    if rt.debug.break_on_error || rt.debug.mode != TraceMode::Off {
+        crate::debugger::post_mortem(state, rt);
+    }
+
+    // Running a script, an uncaught error ends it, once the thunks have run.
+    let halt = if crate::builtin::system::script_mode() {
+        Rc::new(crate::eval::Kont::Exit { code: crate::builtin::system::SCRIPT_ERROR_STATUS })
+    } else {
+        Rc::clone(&state.halt)
+    };
+    abandon_form(state, rt, halt);
+}
+
+/// Abandon the top-level form, continuing with `halt` once the `after`
+/// thunks of the dynamic-wind extents being left have run.
+pub fn abandon_form(state: &mut CEKState, rt: &mut RunTime, halt: KontRef) {
     // Clear the stacks before running the `after` thunks, so a thunk that
     // fails in turn is itself uncaught at top level instead of re-running
     // the unwind.
@@ -118,12 +133,6 @@ fn uncaught(state: &mut CEKState, rt: &mut RunTime, obj: GcRef) {
     rt.dynamic_wind.clear();
     let nil = rt.heap.nil_s();
     *rt.handlers = nil;
-    // Running a script, an uncaught error ends it, once the thunks have run.
-    let halt = if crate::builtin::system::script_mode() {
-        Rc::new(crate::eval::Kont::Exit { code: crate::builtin::system::SCRIPT_ERROR_STATUS })
-    } else {
-        Rc::clone(&state.halt)
-    };
     state.control = Control::Value(rt.heap.void());
     if thunks.is_empty() {
         state.kont = halt;

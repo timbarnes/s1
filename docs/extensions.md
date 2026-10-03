@@ -96,19 +96,68 @@ For timing with standard procedures, use `current-jiffy` (see [System Interface]
 
 ### `trace`
 
-`(trace mode)` controls tracing of the evaluator, and `(trace)` returns the current mode:
+`(trace mode)` traces or single-steps the evaluator, and `(trace)` returns the current mode. Trace output and the debugger prompt go to standard error.
 
-* `(trace 'all)`: prints the machine's control and continuation every step.
-* `(trace 'expr)`: prints each expression as it is evaluated, and each value returned.
-* `(trace 'step)`: single steps.
-* `(trace 'off)`: turns tracing and stepping off, but an uncaught error then enters the stepper, so you can inspect the state where it happened.
-* `(trace 'reset)`: back to the initial mode: no tracing, and uncaught errors are reported normally.
+* `(trace 'expr)`: prints each expression the machine evaluates and each value it returns, indented by continuation depth (the depth is shown as a number once it is past 40).
+* `(trace 'all)`: the same, with the top few continuation frames under each line.
+* `(trace 'step)`: stops at the `debug>` prompt before every step.
+* `(trace 'off)`: no tracing, but an uncaught error opens the `debug>` prompt, so you can look at the state where it happened before the form is abandoned.
+* `(trace 'reset)`: the initial mode: no tracing, and uncaught errors are just reported.
 
-The stepper prompts `debug>`; press Enter to take a step, or type `c` to continue, `e` to show the environment, `l` the local variables, `k` the continuation, `x` the current expression, or `s` the machine state.
+In the modes that trace or step, an uncaught error also opens the prompt. Arguments that need no machine step of their own, such as variables, constants and calls of built-in procedures on them, are evaluated without a step and so don't appear in the trace.
+
+### `break`
+
+`(break obj ...)` displays its arguments and stops at the `debug>` prompt, as if stepping had been on. Put it where you want to look around; `c` continues.
+
+### The `debug>` prompt
+
+| Command | |
+|---|---|
+| Enter, `n` | take one step |
+| `o` | step over the current expression: run until its value is returned |
+| `f` | finish: run until the current procedure returns |
+| `c` | stop stepping and run on |
+| `q` | abandon the top-level form |
+| `bt` | backtrace: the current expression (frame 0) and the continuation frames waiting for it |
+| `u [n]`, `d [n]`, `fr n` | select a frame further up or down the backtrace, or by number |
+| `l` | the bindings in the selected frame's innermost environment |
+| `e` | all its local bindings |
+| `p expr` | evaluate `expr` in the selected frame's environment and print the value; an error in it comes back to the prompt |
+| `x`, `s`, `k` | the current expression, the machine state, the raw continuation |
+| `h` | list the commands |
+
+After an uncaught error the commands that run the machine (`n`, `o`, `f`, `p`) are not available; `c`, `q` or the end of input abandons the form. At the end of input while stepping, stepping stops and the program runs on.
+
+```scheme
+(define (f x) (let ((y (+ x 1))) (break) (* x y)))
+(f 3)
+; break
+;    Value: #<void>
+; debug> p (list x y)
+; (3 4)
+; debug> c
+```
+
+### `trace-procedure`, `untrace-procedure`
+
+`(trace-procedure name)` replaces the procedure bound to the variable `name` with one that writes each call and its result to the current error port, indented by how many traced calls enclose it. `(untrace-procedure name)` puts the original back. Unlike `trace`, it costs nothing in the rest of the program, and it sees every call. Calls of a traced procedure are not tail calls while it is traced. Imported bindings, such as the built-in procedures, can't be traced, because they can't be assigned.
+
+```scheme
+(define (fib n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
+(trace-procedure fib)
+(fib 2)
+; > (fib 2)
+; | > (fib 1)
+; | < 1
+; | > (fib 0)
+; | < 0
+; < 1
+```
 
 ### `debug-stack`, `trace-env`
 
-`(debug-stack)` prints the continuation frames waiting for its value, innermost first. `(trace-env)` prints the bindings in the caller's local environment frames, innermost first; `(trace-env 'global)` includes the top-level frame too, which is long. Both return the void value.
+`(debug-stack)` prints the continuation frames waiting for its value, innermost first. `(trace-env)` prints the bindings in the caller's local environment frames, innermost first; `(trace-env 'global)` includes the top-level frame too, which is long. Both print to standard error and return the void value.
 
 ```scheme
 (define (f x) (let ((y 2)) (trace-env) (+ x y)))

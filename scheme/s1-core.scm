@@ -470,3 +470,53 @@
     (let ((result (parameterize ((current-output-port port)) (thunk))))
       (close-port port)
       result)))
+
+;; --- Procedure tracing (an s1 extension; see docs/extensions.md).
+;; (trace-procedure f) rebinds the variable f to a wrapper that writes each
+;; call and its result to the current error port, indented by how many
+;; traced calls enclose it; (untrace-procedure f) puts the original back.
+;; Untraced code pays nothing. A traced procedure's calls are not tail
+;; calls, since the wrapper waits for the result.
+(define %traced '())              ; (wrapper . original) pairs
+(define %trace-level (make-parameter 0))
+
+(define (%trace-line level mark items)
+  (let ((port (current-error-port)))
+    (let indent ((i 0))
+      (when (< i level) (write-string "| " port) (indent (+ i 1))))
+    (write-string mark port)
+    (let loop ((items items) (sep ""))
+      (unless (null? items)
+        (write-string sep port)
+        (write (car items) port)
+        (loop (cdr items) " ")))
+    (newline port)))
+
+(define (%trace-wrap name proc)
+  (cond ((assq proc %traced) proc)
+        ((not (procedure? proc)) (error "trace-procedure: not a procedure:" name))
+        (else
+         (let ((wrapper
+                (lambda args
+                  (let ((level (%trace-level)))
+                    (%trace-line level "> " (list (cons name args)))
+                    (call-with-values
+                      (lambda ()
+                        (parameterize ((%trace-level (+ level 1))) (apply proc args)))
+                      (lambda results
+                        (%trace-line level "< " results)
+                        (apply values results)))))))
+           (set! %traced (cons (cons wrapper proc) %traced))
+           wrapper))))
+
+(define (%trace-unwrap proc)
+  (let ((entry (assq proc %traced)))
+    (if entry (cdr entry) proc)))
+
+(define-syntax trace-procedure
+  (syntax-rules ()
+    ((_ name) (begin (set! name (%trace-wrap 'name name)) 'name))))
+
+(define-syntax untrace-procedure
+  (syntax-rules ()
+    ((_ name) (begin (set! name (%trace-unwrap name)) 'name))))

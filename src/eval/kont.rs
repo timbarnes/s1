@@ -235,6 +235,14 @@ pub enum Kont {
         tail: bool,
         next: KontRef,
     },
+    /// Below an expression the debugger's `p` command is evaluating: print
+    /// the value, then put the machine back as it was at the prompt (see
+    /// `debugger::handle_debug_print`). Also where an error in that
+    /// expression lands, instead of abandoning the form being debugged.
+    DebugPrint {
+        saved: Box<DebugSaved>,
+        next: KontRef,
+    },
     // Exception handler frame - used later for raise/handler support
     // Handler {
     //     handler_expr: GcRef,
@@ -268,6 +276,7 @@ impl Kont {
             Kont::RaiseReturn { next, .. } => Some(next),
             Kont::RestoreEnv { next, .. } => Some(next),
             Kont::Seq { next, .. } => Some(next),
+            Kont::DebugPrint { next, .. } => Some(next),
         }
     }
 }
@@ -458,6 +467,7 @@ impl std::fmt::Debug for Kont {
                 write!(f, "Timer {{ next: {:?} }}", next)
             }
             Kont::Exit { code } => write!(f, "Exit {{ code: {} }}", code),
+            Kont::DebugPrint { next, .. } => write!(f, "DebugPrint {{ next: {:?} }}", next),
             Kont::RestoreHandlers { next, .. } => {
                 write!(f, "RestoreHandlers {{ next: {:?} }}", next)
             }
@@ -553,6 +563,25 @@ pub struct EscapePayload {
     pub new_handlers: GcRef,
 }
 
+/// The machine as the debugger prompt left it, while `p` evaluates an
+/// expression (`Kont::DebugPrint`).
+#[derive(Clone, PartialEq)]
+pub struct DebugSaved {
+    /// The control to resume: `resume` as an `Expr`, or as a `Value` if
+    /// `resume_value`.
+    pub resume: GcRef,
+    pub resume_value: bool,
+    pub env: EnvRef,
+    pub tail: bool,
+    /// The exception handlers, removed so an error in the expression comes
+    /// to the debugger rather than to the program's handlers.
+    pub handlers: GcRef,
+    /// The heights of `arg_stack` and `dynamic_wind`, to cut them back to
+    /// after an error.
+    pub arg_top: usize,
+    pub dw_len: usize,
+}
+
 /// `eval-string`'s pending forms (tail first) and results collected so far.
 #[derive(Clone, PartialEq)]
 pub struct EvalSeqForms {
@@ -590,6 +619,12 @@ pub struct CEKState {
     /// ownership of the top frame. Cloning this is a refcount bump; allocating
     /// a fresh `Rc::new(Kont::Halt)` each time would undo the saving.
     pub halt: KontRef,
+    /// Whether `step()` calls the tracer/stepper (`utilities::debugger`)
+    /// before each step. Kept here, beside the fields every step touches,
+    /// rather than read through `RunTime::debug`, so that with tracing off
+    /// the per-step cost is one test of a byte already in cache. Set with
+    /// `DebugState::mode` (`utilities::set_trace_mode`).
+    pub hook: bool,
 }
 
 impl CEKState {
@@ -602,6 +637,7 @@ impl CEKState {
             kont: Rc::clone(&halt),
             tail: false,
             halt,
+            hook: false,
         }
     }
 }
@@ -824,6 +860,12 @@ fn mark_kont_chain(start: &KontRef, visit: &mut dyn FnMut(GcRef)) {
                 } => {
                     visit(*payload);
                     visit(*saved);
+                    worklist.push(Rc::clone(next));
+                }
+                Kont::DebugPrint { saved, next } => {
+                    visit(saved.resume);
+                    saved.env.mark(visit);
+                    visit(saved.handlers);
                     worklist.push(Rc::clone(next));
                 }
             }

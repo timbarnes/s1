@@ -108,9 +108,11 @@ Extensible I/O system supporting:
 R7RS `syntax-rules` macros are hygienic: identifiers a macro introduces can't capture, or be captured by, the user's. s1's own `macro` form instead runs Scheme code on the unevaluated arguments to compute the expansion. See [docs/macros.md](docs/macros.md).
 
 #### Debug Support
-- `trace` function for debugging evaluation
-- Limited error messages with context - more work required in the evaluator
-- Interactive debugging in REPL mode
+- `(trace 'expr)`, `(trace 'all)`: trace the evaluator's steps; `(trace 'step)` single-steps
+- `(break)` and an interactive `debug>` prompt: step over/out, backtrace, frame selection, evaluate expressions in a frame
+- `(trace 'off)`: open the prompt on an uncaught error, to inspect the state before the form is abandoned
+- `trace-procedure` / `untrace-procedure`: show each call of a procedure and its result
+- Tracing costs nothing measurable when off. See [docs/extensions.md](docs/extensions.md#trace).
 
 ## Architecture
 

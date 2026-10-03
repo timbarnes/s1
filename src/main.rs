@@ -38,13 +38,15 @@
 //! - [`ports`], [`io`]: ports and I/O
 //! - [`libraries`]: `define-library`, `import` and the standard libraries
 //! - [`printer`]: `write` and `display`
-//! - [`utilities`]: error reporting, tracing and debug dumps
+//! - [`debugger`]: the tracer, stepper and `debug>` prompt
+//! - [`utilities`]: error reporting and debug dumps
 //!
 //! Build these docs with `cargo doc --open`; `.cargo/config.toml` turns on
 //! private items, since s1 is a binary crate and nearly everything in it is
 //! private.
 
 mod builtin;
+mod debugger;
 mod env;
 mod eval;
 mod gc;
@@ -209,7 +211,6 @@ fn repl(rt: &mut RunTime, state: &mut CEKState, quit_after_load: bool, global: E
     let mut interactive;
 
     loop {
-        *rt.depth = 0;
         // Check the port. Each parse-eval needs to be sure the port hasn't changed.
         let current_port_ref = match rt.port_stack.last() {
             Some(port_ref) => *port_ref,

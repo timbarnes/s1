@@ -24,6 +24,19 @@ pub fn print_value(obj: &GcRef) -> String {
     render(*obj, true, Labels::Cycles)
 }
 
+/// `print_value`, cut to at most `max` characters (ending in `...`), for
+/// debugger output, where one large datum would bury everything else.
+pub fn print_value_limited(obj: &GcRef, max: usize) -> String {
+    let mut s = print_value(obj);
+    if let Some((cut, _)) = s.char_indices().nth(max.saturating_sub(3)) {
+        if s.len() > max {
+            s.truncate(cut);
+            s.push_str("...");
+        }
+    }
+    s
+}
+
 /// `write-shared`: datum labels for every pair or vector that appears more
 /// than once, cyclic or not.
 pub fn write_shared_value(obj: &GcRef) -> String {

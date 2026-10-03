@@ -11,7 +11,7 @@
 use crate::env::{EnvOps, EnvRef};
 use crate::eval::kont::EvalSeqForms;
 use crate::eval::{
-    CEKState, Control, DynamicWind, Kont, KontRef, RunTime, TraceType, insert_dynamic_wind,
+    CEKState, Control, DynamicWind, Kont, KontRef, RunTime, TraceMode, insert_dynamic_wind,
 };
 use crate::gc::{
     Callable, GcHeap, GcRef, SchemeValue, get_symbol, list, list_to_vec, list3,
@@ -43,6 +43,7 @@ pub fn register_sys_builtins(runtime: &mut RunTime, env: EnvRef) {
         "values" => values_sp,
         "call-with-values" => call_with_values_sp,
         "trace" => trace_sp,
+        "break" => break_sp,
         "trace-env" => trace_env_sp,
         "%kont-depth" => kont_depth_sp,
         "garbage-collect" => garbage_collect_sp,
@@ -638,46 +639,69 @@ fn call_with_values_sp(
 
 // Debug Functions
 
-/// `(trace [arg])`
-/// Controls step and tracing options:
-/// - `(trace)`: returns the current trace setting
-/// - `(trace 'all)`: print state.control and state.kont each time through the evaluator
-/// - `(trace 'expr)`: show trace when control is an expr, or when a value is returned
-/// - `(trace 'step)`: enable single stepping
-/// - `(trace 'off)`: disable tracing and stepping
+/// `(trace [mode])`
+/// Controls tracing and stepping (see `debugger.rs`):
+/// - `(trace)`: returns the current mode
+/// - `(trace 'expr)`: print each expression evaluated and value returned
+/// - `(trace 'all)`: the same, with the top continuation frames
+/// - `(trace 'step)`: single step at a `debug>` prompt
+/// - `(trace 'off)`: stop tracing; an uncaught error opens the prompt
+/// - `(trace 'reset)`: stop tracing; uncaught errors are just reported
+/// Any mode but `reset` opens the prompt on an uncaught error.
 fn trace_sp(
     ec: &mut RunTime,
     args: &[GcRef],
     state: &mut CEKState,
     next: KontRef,
 ) -> Result<(), String> {
-    *ec.depth -= 1;
-    if args.len() == 0 {
-        let result = match ec.trace {
-            TraceType::Off => ec.heap.intern_symbol("off"),
-            TraceType::Full => ec.heap.intern_symbol("all"),
-            TraceType::Control => ec.heap.intern_symbol("expr"),
-            TraceType::Step => ec.heap.intern_symbol("step"),
-            TraceType::Reset => ec.heap.intern_symbol("reset"),
-        };
-        state.control = Control::Value(result);
-        state.kont = next;
-        return Ok(());
-    }
-    match &gc_value!(args[0]) {
-        SchemeValue::Symbol(cmd) => {
-            *ec.trace = match &cmd[..] {
-                "o" | "off" => TraceType::Off,
-                "a" | "all" => TraceType::Full,
-                "e" | "expr" => TraceType::Control,
-                "s" | "step" => TraceType::Step,
-                "r" | "reset" => TraceType::Reset,
-                _ => TraceType::Off,
+    const USAGE: &str = "trace: expects e(xpr), a(ll), s(tep), o(ff) or r(eset)";
+    let result = match args {
+        [] => {
+            let name = match ec.debug.mode {
+                TraceMode::Off if ec.debug.break_on_error => "off",
+                TraceMode::Off => "reset",
+                TraceMode::Expr => "expr",
+                TraceMode::All => "all",
+                TraceMode::Step => "step",
             };
+            ec.heap.intern_symbol(name)
         }
-        _ => return Err("trace: expects o(ff), a(ll), e(xpr), or s(tep)".to_string()),
+        [arg] => {
+            let SchemeValue::Symbol(cmd) = &gc_value!(*arg) else {
+                return Err(USAGE.to_string());
+            };
+            let mode = match &cmd[..] {
+                "o" | "off" | "r" | "reset" => TraceMode::Off,
+                "a" | "all" => TraceMode::All,
+                "e" | "expr" => TraceMode::Expr,
+                "s" | "step" => TraceMode::Step,
+                _ => return Err(USAGE.to_string()),
+            };
+            ec.debug.break_on_error = !matches!(&cmd[..], "r" | "reset");
+            crate::debugger::set_mode(state, ec.debug, mode);
+            *arg
+        }
+        _ => return Err(USAGE.to_string()),
     };
-    state.control = Control::Value(args[0]);
+    state.control = Control::Value(result);
+    state.kont = next;
+    Ok(())
+}
+
+/// `(break obj ...)`
+/// Stops at the debugger prompt, as `(trace 'step)` would, after displaying
+/// the arguments. Returns the void value.
+fn break_sp(
+    ec: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    next: KontRef,
+) -> Result<(), String> {
+    std::io::Write::flush(&mut std::io::stdout()).ok();
+    let what: Vec<String> = args.iter().map(crate::printer::display_value).collect();
+    eprintln!("{}", std::iter::once("break".to_string()).chain(what).collect::<Vec<_>>().join(" "));
+    crate::debugger::set_mode(state, ec.debug, TraceMode::Step);
+    state.control = Control::Value(ec.heap.void());
     state.kont = next;
     Ok(())
 }
@@ -691,7 +715,6 @@ fn trace_env_sp(
     state: &mut CEKState,
     next: KontRef,
 ) -> Result<(), String> {
-    *ec.depth -= 1;
     let global = match args {
         [] => false,
         [arg] => match &gc_value!(*arg) {

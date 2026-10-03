@@ -28,7 +28,8 @@ use crate::gc::{Callable, GcRef, cons, is_false, list_to_vec, new_float};
 use crate::gc_value;
 use crate::printer::print_value;
 use crate::eval::{exceptions, identifiers};
-use crate::utilities::{debugger, post_error};
+use crate::debugger::debugger;
+use crate::utilities::post_error;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -49,6 +50,8 @@ pub fn eval_main(
     ec.dynamic_wind.clear();
     ec.arg_stack.clear();
     *ec.handlers = ec.heap.nil_s();
+    // A step over or out the last form didn't reach ends with it.
+    ec.debug.stop_at = None;
     run_cek(state, ec)
 }
 
@@ -85,21 +88,19 @@ fn run_cek(mut state: &mut CEKState, rt: &mut RunTime) -> Result<Vec<GcRef>, Str
 /// resolving symbols, starting applications, and handling continuations as needed.
 fn step(state: &mut CEKState, ec: &mut RunTime) -> Result<(), String> {
     //dump_cek("  step", &state);
-    // Hoisted out of debugger() so the common (tracing off) case is a branch on
-    // an already-hot field instead of a call. This runs on every CEK step.
-    if !matches!(*ec.trace, crate::eval::TraceType::Off) {
-        debugger("", &state, ec);
+    // Tested here rather than in debugger() so that with tracing off (the
+    // usual case) each step pays one test of a hot byte, not a call.
+    if state.hook {
+        debugger(state, ec);
     }
 
     let control = std::mem::replace(&mut state.control, Control::Empty);
     match control {
         Control::Expr(expr) => {
-            *ec.depth += 1;
             eval_cek(expr, ec, state);
             Ok(())
         }
         Control::Value(val) => {
-            *ec.depth -= 1;
             state.control = Control::Value(val);
             dispatch_kont(state, ec, val)
         }
@@ -379,10 +380,7 @@ pub fn eval_cek(expr: GcRef, rt: &mut RunTime, state: &mut CEKState) {
                 Some(op) => {
                     // Already resolved above (and confirmed not a special
                     // form): hand it to EvalArg as a Value directly rather
-                    // than re-evaluating `car`. Control::Value dispatch
-                    // always decrements `rt.depth`, so bump it here to
-                    // balance the Control::Expr step this replaces.
-                    *rt.depth += 1;
+                    // than re-evaluating `car`.
                     state.control = Control::Value(op);
                 }
                 None => {
@@ -516,6 +514,10 @@ fn dispatch_kont(state: &mut CEKState, ec: &mut RunTime, val: GcRef) -> Result<(
             continuable,
             next,
         } => exceptions::handle_raise_return(state, ec, payload, saved, continuable, next),
+        Kont::DebugPrint { saved, next } => {
+            crate::debugger::handle_debug_print(state, ec, val, *saved, next);
+            Ok(())
+        }
         Kont::Halt => Ok(()),
         Kont::Exit { code } => crate::sys_builtins::exit_now(code),
         Kont::CallWithValues { consumer, next } => {

@@ -48,10 +48,8 @@ pub struct RunTimeStruct {
     pub dynamic_wind: Vec<DynamicWind>,
     /// The id the next dynamic-wind entry gets.
     pub dw_next: u32,
-    /// The tracing and stepping mode set by `trace`.
-    pub trace: TraceType,
-    /// The evaluation nesting depth, for indenting trace output.
-    pub depth: i32,
+    /// The tracer and stepper's settings (see `utilities::debugger`).
+    pub debug: DebugState,
     /// Shared scratch space for evaluated call arguments. Every in-flight
     /// application's `Kont::EvalArg` claims a suffix of this stack (from its
     /// own `args_base` to the current top) instead of owning a private
@@ -79,8 +77,7 @@ pub struct RunTime<'a> {
     pub current_ports: &'a mut [GcRef; 3],
     pub dynamic_wind: &'a mut Vec<DynamicWind>,
     pub dw_next: &'a mut u32,
-    pub trace: &'a mut TraceType,
-    pub depth: &'a mut i32,
+    pub debug: &'a mut DebugState,
     pub arg_stack: &'a mut Vec<GcRef>,
     pub handlers: &'a mut GcRef,
 }
@@ -95,27 +92,40 @@ impl<'a> RunTime<'a> {
             current_ports: &mut eval.current_ports,
             dynamic_wind: &mut eval.dynamic_wind,
             dw_next: &mut eval.dw_next,
-            trace: &mut eval.trace,
-            depth: &mut eval.depth,
+            debug: &mut eval.debug,
             arg_stack: &mut eval.arg_stack,
             handlers: &mut eval.handlers,
         }
     }
 }
 
-/// The evaluator's tracing mode (see `trace` in sys_builtins.rs).
-pub enum TraceType {
-    /// The initial mode: no tracing, and an uncaught error is reported
-    /// normally rather than entering the stepper.
-    Reset,
-    /// Print each expression evaluated (`(trace 'expr)`).
-    Control,
-    /// Print each expression and the continuation (`(trace 'all)`).
-    Full,
+/// What the machine reports at each step (see `trace` in sys_builtins.rs).
+/// Anything but `Off` needs `CEKState::hook` set, which is what `step()`
+/// tests; the mode itself is only read off the hot path.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum TraceMode {
+    /// Nothing.
+    #[default]
+    Off,
+    /// Print each expression evaluated and value returned (`(trace 'expr)`).
+    Expr,
+    /// Print the control and the top of the continuation (`(trace 'all)`).
+    All,
     /// Stop at every step for a debugger command (`(trace 'step)`).
     Step,
-    /// No tracing (`(trace 'off)`); an uncaught error enters the stepper.
-    Off,
+}
+
+/// The tracer and stepper's settings.
+#[derive(Default)]
+pub struct DebugState {
+    /// What each step reports.
+    pub mode: TraceMode,
+    /// Whether an uncaught error opens the debugger prompt before the form
+    /// is abandoned. `(trace 'off)` sets it; `(trace 'reset)` clears it.
+    pub break_on_error: bool,
+    /// While stepping over or out (`o`, `f`): where it ends. Steps before
+    /// then run without prompting.
+    pub stop_at: Option<crate::debugger::StopAt>,
 }
 
 /// One dynamic-wind extent on `RunTime::dynamic_wind`.
@@ -154,8 +164,7 @@ impl RunTimeStruct {
             current_ports: [stdin_port, stdout_port, stderr_port],
             dynamic_wind: Vec::new(),
             dw_next: 0,
-            trace: TraceType::Reset,
-            depth: 0,
+            debug: DebugState::default(),
             arg_stack: Vec::new(),
             handlers,
         }
