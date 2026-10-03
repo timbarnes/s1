@@ -13,6 +13,45 @@ use std::rc::Rc;
 
 pub type EnvRef = Rc<RefCell<Frame>>;
 
+/// A top-level variable: the binding itself, with an identity separate from
+/// its name and its value (Docs/precompilation-design.md). `define` and
+/// `set!` change a cell's contents, never replace the cell, so anything
+/// holding the cell sees every later assignment. That is what lets two names
+/// share one variable (a library's export and an importer's import) and lets
+/// pre-analysed code hold a global reference directly.
+///
+/// A cell can be unbound: created for a name that has no value yet (a
+/// forward reference in analysed code, say), to be filled by a later
+/// `define`. Lookups treat an unbound cell as no binding.
+#[derive(Debug, PartialEq)]
+pub struct BindingCell {
+    /// The value, or null while unbound. (A null pointer rather than an
+    /// `Option`, which would double the size: raw pointers have no niche.)
+    value: Cell<GcRef>,
+}
+
+pub type CellRef = Rc<BindingCell>;
+
+impl BindingCell {
+    pub fn new(value: GcRef) -> CellRef {
+        Rc::new(BindingCell { value: Cell::new(value) })
+    }
+
+    #[allow(dead_code)] // for libraries (phase 9) and pre-analysis
+    pub fn unbound() -> CellRef {
+        Self::new(std::ptr::null_mut())
+    }
+
+    pub fn get(&self) -> Option<GcRef> {
+        let value = self.value.get();
+        if value.is_null() { None } else { Some(value) }
+    }
+
+    pub fn set(&self, value: GcRef) {
+        self.value.set(value);
+    }
+}
+
 /// Variable bindings for one frame.
 ///
 /// Non-global frames (closure calls, `let`, ...) almost always hold a
@@ -22,17 +61,20 @@ pub type EnvRef = Rc<RefCell<Frame>>;
 /// top-level `define`), where the hash map earns its keep. Frames are
 /// classified once, at creation (`Frame::new`), based on whether they have
 /// a parent: `extend()`-created frames are never global.
+///
+/// A top-level frame maps names to `BindingCell`s; a local frame holds
+/// values directly, since nothing needs to share a local binding.
 #[derive(Debug, PartialEq)]
 pub enum Bindings {
     Small(Vec<(GcRef, GcRef)>),
-    Large(HashMap<GcRef, GcRef>),
+    Large(HashMap<GcRef, CellRef>),
 }
 
 impl Bindings {
     fn get(&self, symbol: GcRef) -> Option<GcRef> {
         match self {
             Bindings::Small(v) => v.iter().find(|(k, _)| *k == symbol).map(|(_, v)| *v),
-            Bindings::Large(m) => m.get(&symbol).copied(),
+            Bindings::Large(m) => m.get(&symbol).and_then(|cell| cell.get()),
         }
     }
 
@@ -45,17 +87,21 @@ impl Bindings {
                     v.push((symbol, val));
                 }
             }
-            Bindings::Large(m) => {
-                m.insert(symbol, val);
-            }
+            Bindings::Large(m) => match m.get(&symbol) {
+                Some(cell) => cell.set(val),
+                None => {
+                    m.insert(symbol, BindingCell::new(val));
+                }
+            },
         }
     }
 
-    /// Iterate `(&symbol, &value)` pairs, for GC marking and debug dumps.
-    pub fn iter(&self) -> Box<dyn Iterator<Item = (&GcRef, &GcRef)> + '_> {
+    /// Iterate the bound `(symbol, value)` pairs, for GC marking and debug
+    /// dumps. Unbound cells are skipped.
+    pub fn iter(&self) -> Box<dyn Iterator<Item = (GcRef, GcRef)> + '_> {
         match self {
-            Bindings::Small(v) => Box::new(v.iter().map(|(k, val)| (k, val))),
-            Bindings::Large(m) => Box::new(m.iter()),
+            Bindings::Small(v) => Box::new(v.iter().copied()),
+            Bindings::Large(m) => Box::new(m.iter().filter_map(|(k, cell)| cell.get().map(|v| (*k, v)))),
         }
     }
 }
@@ -97,6 +143,10 @@ pub trait EnvOps {
     fn lookup_local(&self, symbol: GcRef) -> Option<GcRef>; // Search only this frame
     fn lookup_with_frame(&self, symbol: GcRef) -> Option<(GcRef, EnvRef)>; // Search all frames and return the frame where the binding was found
     fn define(&self, symbol: GcRef, val: GcRef); // Define a binding in this frame
+    #[allow(dead_code)] // for libraries (phase 9) and pre-analysis
+    fn cell(&self, symbol: GcRef) -> Option<CellRef>; // The cell for a top-level name, made unbound if new
+    #[allow(dead_code)] // for libraries (phase 9)
+    fn bind_cell(&self, symbol: GcRef, cell: CellRef); // Make a top-level name denote an existing cell
     fn extend(&self) -> EnvRef; // Create a new frame with this frame as parent
     fn parent(&self) -> Option<EnvRef>;
 }
@@ -139,6 +189,27 @@ impl EnvOps for EnvRef {
         self.borrow_mut().bindings.insert(symbol, val);
     }
 
+    /// The cell `symbol` denotes in this top-level frame, creating an
+    /// unbound one if the name is new, so that a later `define` fills the
+    /// same cell. `None` for a local frame, which has no cells.
+    fn cell(&self, symbol: GcRef) -> Option<CellRef> {
+        match &mut self.borrow_mut().bindings {
+            Bindings::Large(m) => Some(Rc::clone(m.entry(symbol).or_insert_with(BindingCell::unbound))),
+            Bindings::Small(_) => None,
+        }
+    }
+
+    /// Make `symbol` in this top-level frame denote `cell`, replacing any
+    /// binding it had: how an import will share a library's variable.
+    fn bind_cell(&self, symbol: GcRef, cell: CellRef) {
+        match &mut self.borrow_mut().bindings {
+            Bindings::Large(m) => {
+                m.insert(symbol, cell);
+            }
+            Bindings::Small(_) => panic!("bind_cell: not a top-level frame"),
+        }
+    }
+
     // Add a new frame with this frame as parent
     fn extend(&self) -> EnvRef {
         Rc::new(RefCell::new(Frame::new(Some(Rc::clone(self)))))
@@ -165,7 +236,7 @@ impl crate::gc::Mark for EnvRef {
                 break;
             }
             frame.gc_mark_epoch.set(epoch);
-            for (&key, &val) in frame.bindings.iter() {
+            for (key, val) in frame.bindings.iter() {
                 visit(key); // Mark the symbol key
                 visit(val); // Mark the bound value
             }
@@ -402,6 +473,37 @@ mod tests {
         let shadow_val = new_string(ec.heap, "shadowed");
         extended_env.define(global_sym, shadow_val);
         assert!(extended_env.lookup(global_sym).is_some());
+    }
+
+    #[test]
+    fn test_binding_cells() {
+        let mut ev = crate::eval::RunTimeStruct::new();
+        let ec = crate::eval::RunTime::from_eval(&mut ev);
+        let global = Rc::new(RefCell::new(Frame::new(None)));
+        let other = Rc::new(RefCell::new(Frame::new(None)));
+        let x = ec.heap.intern_symbol("x");
+        let y = ec.heap.intern_symbol("y");
+        let one = new_int(ec.heap, BigInt::from(1));
+        let two = new_int(ec.heap, BigInt::from(2));
+
+        // A cell asked for before its name is defined is unbound, and the
+        // later define fills that same cell.
+        let cell = global.cell(x).unwrap();
+        assert_eq!(global.lookup(x), None);
+        assert_eq!(global.borrow().bindings.iter().count(), 0);
+        global.define(x, one);
+        assert_eq!(cell.get(), Some(one));
+
+        // Another frame's name bound to the cell shares the variable both ways.
+        other.bind_cell(y, Rc::clone(&cell));
+        assert_eq!(other.lookup(y), Some(one));
+        global.define(x, two);
+        assert_eq!(other.lookup(y), Some(two));
+        other.define(y, one);
+        assert_eq!(global.lookup(x), Some(one));
+
+        // Local frames have no cells.
+        assert!(global.extend().cell(x).is_none());
     }
 
     #[test]

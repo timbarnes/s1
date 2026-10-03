@@ -37,7 +37,8 @@ All numbers below come from the build at commit c83f996 on the workloads in
    committing to it.
 
 Recommended order: inline trivial operands now; cells with phase 9; then a
-measured prototype of D.
+measured prototype of D. (Status: steps 1 and 2 are done, cells ahead of
+phase 9; see "Recommended plan".)
 
 ## Method
 
@@ -303,11 +304,16 @@ What would fight R7RS environments, and must be avoided:
 1. **Inline trivial operands.** Done: 10-46% measured, including built-in
    calls on trivial arguments, `if` tests and `define`/`set!` values (see
    "Step 1 as implemented").
-2. **Cells for top-level environments** (with phase 9). Change only the
-   global frame's representation (names map to cells; local frames stay as
-   they are), so the change stays inside `env.rs` plus `define`/`set!`. Cells
-   are heap objects so the GC handles them and nodes can point at them.
-   Libraries and `import` are built on them. Speed-neutral by itself.
+2. **Cells for top-level environments.** Done, ahead of phase 9: a
+   top-level frame maps names to `BindingCell`s (`src/env.rs`); local frames
+   are unchanged. `define` and `set!` change a cell's contents, `cell` gets a
+   name's cell (creating an unbound one for a forward reference) and
+   `bind_cell` makes a name denote an existing cell, which is what `import`
+   will do. Cells are `Rc`s, like the frames that hold them, rather than heap
+   objects as first proposed: nothing then has to thread the heap through
+   `define`, a cell can never leak into Scheme data, and the values they hold
+   are marked through the frames (pre-analysed nodes holding cells will mark
+   them too). Measured speed-neutral.
 3. **Prototype D on a subset**: constants, local and global references,
    `if`, application, `lambda`, `begin`, with everything else falling back to
    the current evaluator (a node that evaluates its source form the old way).

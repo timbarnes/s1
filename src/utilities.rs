@@ -303,7 +303,7 @@ pub fn dbg_env_short(frame: &EnvRef) -> String {
     let frame = frame.borrow();
     let mut bindings = Vec::new();
     for (k, v) in frame.bindings.iter() {
-        match gc_value!(*k) {
+        match gc_value!(k) {
             crate::gc::SchemeValue::Symbol(s) => {
                 bindings.push((s, v));
             }
@@ -324,7 +324,7 @@ pub fn dbg_one_env(frame: &EnvRef, depth: usize) {
     let mut bindings = Vec::new();
     println!("Env frame {depth}:");
     for (k, v) in frame.bindings.iter() {
-        match gc_value!(*k) {
+        match gc_value!(k) {
             crate::gc::SchemeValue::Symbol(s) => {
                 bindings.push((s, v));
             }
