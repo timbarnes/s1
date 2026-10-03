@@ -406,6 +406,7 @@ fn dispatch_kont(state: &mut CEKState, ec: &mut RunTime, val: GcRef) -> Result<(
             next,
         } => exceptions::handle_raise_return(state, ec, payload, saved, continuable, next),
         Kont::Halt => Ok(()),
+        Kont::Exit { code } => crate::sys_builtins::exit_now(code),
         Kont::CallWithValues { consumer, next } => {
             // The producer has returned: apply the consumer to its values.
             state.kont = Rc::new(Kont::ApplyProc {

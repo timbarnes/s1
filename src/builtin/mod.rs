@@ -47,7 +47,6 @@ pub fn register_builtins(heap: &mut GcHeap, env: EnvRef) {
     system::register_system_builtins(heap, env.clone());
     vector::register_vector_builtins(heap, env.clone());
     register_builtin_family!(heap, env.clone(),
-        "exit" => (exit, "(exit) Exit the interpreter"),
         "void" => (void, "(void) Return the void object"),
         "gc-threshold" => (gc_threshold, "(gc-threshold [new-threshold]) Get or set the GC threshold"),
         "shell" => (shell, "(shell command-string) Execute a shell command"),
@@ -85,18 +84,6 @@ fn void(heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
     }
 
     Ok(heap.void())
-}
-
-/// Builtin function: (exit)
-///
-/// Exits the Scheme interpreter with exit code 0.
-/// This works in both programs and the REPL.
-fn exit(_heap: &mut GcHeap, args: &[GcRef]) -> Result<GcRef, String> {
-    if !args.is_empty() {
-        return Err("exit: expected 0 arguments".to_string());
-    }
-    // Exit the system cleanly
-    std::process::exit(0);
 }
 
 /// (add-doc symbol doc-string)

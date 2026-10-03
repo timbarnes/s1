@@ -246,6 +246,7 @@ pub fn dbg_one_kont(loc: &str, frame: &Kont) -> String {
             .as_str(),
         ),
         Kont::Timer { .. } => result.push_str("Timer"),
+        Kont::Exit { code } => result.push_str(format!("Exit{{code={}}}", code).as_str()),
         Kont::RestoreHandlers { .. } => result.push_str("RestoreHandlers"),
         Kont::RaiseReturn { .. } => result.push_str("RaiseReturn"),
     }
@@ -291,6 +292,7 @@ pub fn _dbg_short_kont(kont: &KontRef) {
         Kont::ExpandArg { .. } => print!("ExpandArg "),
         Kont::EvalSeq { .. } => print!("EvalSeq "),
         Kont::Timer { .. } => print!("Timer "),
+        Kont::Exit { .. } => print!("Exit "),
         Kont::RestoreHandlers { .. } => print!("RestoreHandlers "),
         Kont::RaiseReturn { .. } => print!("RaiseReturn "),
     }

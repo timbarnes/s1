@@ -33,6 +33,8 @@ pub fn register_sys_builtins(runtime: &mut RunTime, env: EnvRef) {
         "call-with-current-continuation" => call_cc_sp,
         "escape" => escape_sp,
         "dynamic-wind" => dynamic_wind_sp,
+        "exit" => exit_sp,
+        "emergency-exit" => emergency_exit_sp,
         "values" => values_sp,
         "call-with-values" => call_with_values_sp,
         "trace" => trace_sp,
@@ -424,6 +426,74 @@ fn escape_to(
         }
         _ => Err("escape: first argument must be a continuation".to_string()),
     }
+}
+
+/// The process exit status for `exit`'s optional argument: none or #t is
+/// success (0), #f is failure (1), and an exact integer is used as it is.
+fn exit_status(args: &[GcRef], who: &str) -> Result<i32, String> {
+    use num_traits::ToPrimitive;
+    match args {
+        [] => Ok(0),
+        [obj] => match gc_value!(*obj) {
+            SchemeValue::Bool(true) => Ok(0),
+            SchemeValue::Bool(false) => Ok(1),
+            SchemeValue::Int(n) => n
+                .to_i32()
+                .ok_or_else(|| format!("{}: exit status {} is out of range", who, n)),
+            _ => Err(format!("{}: expected a boolean or an exact integer", who)),
+        },
+        _ => Err(format!("{}: expected at most 1 argument", who)),
+    }
+}
+
+/// End the process now, with standard output flushed.
+pub fn exit_now(code: i32) -> ! {
+    std::io::Write::flush(&mut std::io::stdout()).ok();
+    std::process::exit(code)
+}
+
+/// (exit [obj])
+///
+/// Runs the `after` thunks of every dynamic-wind extent the call is inside,
+/// innermost first, then ends the process (R7RS 6.14). The unwinding is the
+/// same as an uncaught error's (`uncaught` in eval/exceptions.rs), except
+/// that it ends in `Kont::Exit` rather than back at the top level. If an
+/// `after` thunk raises, that error is reported as usual and the process
+/// carries on.
+fn exit_sp(
+    ec: &mut RunTime,
+    args: &[GcRef],
+    state: &mut CEKState,
+    _next: KontRef,
+) -> Result<(), String> {
+    let code = exit_status(args, "exit")?;
+    let thunks = schedule_dynamic_wind_transitions(ec.dynamic_wind, &[]);
+    let void = ec.heap.void();
+    let nil = ec.heap.nil_s();
+    state.control = Control::Value(void);
+    crate::eval::kont::insert_escape(
+        state,
+        void,
+        thunks,
+        Rc::new(Kont::Exit { code }),
+        Vec::new(),
+        Vec::new(),
+        nil,
+    );
+    Ok(())
+}
+
+/// (emergency-exit [obj])
+///
+/// Ends the process at once, without running any dynamic-wind `after`
+/// thunks.
+fn emergency_exit_sp(
+    _ec: &mut RunTime,
+    args: &[GcRef],
+    _state: &mut CEKState,
+    _next: KontRef,
+) -> Result<(), String> {
+    exit_now(exit_status(args, "emergency-exit")?)
 }
 
 fn dynamic_wind_sp(

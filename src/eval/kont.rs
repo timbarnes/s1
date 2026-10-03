@@ -10,6 +10,11 @@ pub type KontRef = Rc<Kont>;
 #[derive(Clone, PartialEq)]
 pub enum Kont {
     Halt,
+    /// `exit` was called: once the `after` thunks of the dynamic-wind
+    /// extents being left have run, end the process with status `code`.
+    Exit {
+        code: i32,
+    },
     AndOr {
         kind: AndOrKind,
         rest: Vec<GcRef>, // remaining expressions in the sequence (head first)
@@ -168,6 +173,7 @@ impl Kont {
             Kont::Escape { new_kont, .. } => Some(new_kont),
             Kont::EvalArg { next, .. } => Some(next),
             Kont::Halt => None,
+            Kont::Exit { .. } => None,
             Kont::If { next, .. } => Some(next),
             Kont::MacroExpand { next, .. } => Some(next),
             Kont::ExpandArg { next, .. } => Some(next),
@@ -363,6 +369,7 @@ impl std::fmt::Debug for Kont {
             Kont::Timer { next, .. } => {
                 write!(f, "Timer {{ next: {:?} }}", next)
             }
+            Kont::Exit { code } => write!(f, "Exit {{ code: {} }}", code),
             Kont::RestoreHandlers { next, .. } => {
                 write!(f, "RestoreHandlers {{ next: {:?} }}", next)
             }
@@ -629,6 +636,7 @@ impl crate::gc::Mark for KontRef {
                 Kont::Timer { next, .. } => {
                     worklist.push(Rc::clone(next));
                 }
+                Kont::Exit { .. } => {}
                 Kont::RestoreHandlers { handlers, next } => {
                     visit(*handlers);
                     worklist.push(Rc::clone(next));

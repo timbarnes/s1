@@ -79,7 +79,7 @@
 (test-equal '(((scheme base) ("..." "=>" "_" "else" "syntax-error"))
               ((scheme complex) ("angle" "imag-part" "magnitude" "make-polar" "make-rectangular" "real-part"))
               ((scheme cxr) ("caaaar" "caadar" "cadaar" "caddar" "cdaaar" "cdadar" "cddaar" "cdddar"))
-              ((scheme process-context) ("command-line" "emergency-exit"))
+              ((scheme process-context) ("command-line"))
               ((scheme r5rs) ("angle" "caaaar" "caadar" "cadaar" "caddar" "cdaaar" "cdadar" "cddaar" "cdddar" "imag-part" "magnitude" "make-polar" "make-rectangular" "real-part")))
     (let loop ((names (library-names)) (acc '()))
       (cond ((null? names) (reverse acc))
