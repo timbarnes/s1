@@ -8,6 +8,22 @@ F3 (skipped by decision) and F10(3) (deferred by decision, full design in
 `Docs/kont-flat-stack-design.md`) — see "Suggested order" at the end for the
 final per-item status table.
 
+## Single-list `map` (2026-10-03, linux/x86-64)
+
+`map` (`scheme/s1-core.scm`) was the general multi-list loop for every call.
+Each element cost three helper calls (`any-null?`, `cars`, `cdrs`), `apply`
+and two extra lists, about 6 µs per element against about 0.8 µs per `fib`
+call. With one list it now walks the list directly:
+
+| Workload | Before | After |
+|---|---|---|
+| `list/map` (bench.sh) | 0.34 s | **0.07 s** |
+| 20,000 `map`s of a lambda over 10 elements | 1.21 s | **0.24 s** |
+
+The typical program (whose `map`s run over three-element lists) and the
+regression suite were unchanged. A version that accumulated and reversed was
+about as fast, and was rejected because it depends on the global `reverse`.
+
 ## Collections in proportion to the live heap (2026-10-03, linux/x86-64)
 
 A collection ran every 20,000 allocations however much data was live, and

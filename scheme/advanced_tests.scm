@@ -589,6 +589,8 @@
 (test-equal '(11 22 31)
     (let ((ls (list 1 2))) (set-cdr! (cdr ls) ls) (map + ls '(10 20 30)))
     "map over a circular first list stops at the finite one")
+(test-equal '() (apply map list '()) "map with no lists returns the empty list")
+(test-equal '((1 3) (2 4)) (apply map list '((1 2) (3 4))) "map over several lists")
 
 ;; Expressions that need no machine step (constants, bound variables, and
 ;; built-in calls on those) are evaluated directly as arguments, if tests and
