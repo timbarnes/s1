@@ -114,6 +114,8 @@ fn script_gets_its_arguments() {
     let (code, out, _, path) =
         run_script("cl-args", "(write (command-line))", &["a", "-q", "--x", "two words"]);
     assert_eq!(code, 0);
+    // write escapes the backslashes in a Windows path.
+    let path = path.replace('\\', "\\\\");
     assert_eq!(out, format!("(\"{}\" \"a\" \"-q\" \"--x\" \"two words\")", path));
 }
 
